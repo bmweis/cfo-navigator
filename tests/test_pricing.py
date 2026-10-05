@@ -155,3 +155,18 @@ def test_exa_pricing_review_is_stale_thresholds():
     assert exa_pricing_review_is_stale(boundary, now=now) is True
     assert exa_pricing_review_is_stale("", now=now) is True
     assert exa_pricing_review_is_stale("not-a-date", now=now) is True
+
+
+def test_opus_5_5_has_registry_and_pricing_rows_with_its_own_cache_read_rate():
+    """Opus 5.5 (claude-opus-5-5) is in the curated registry and priced at
+    $4/$20, 5-minute cache write $5, and a cache read of $0.20: 0.05x input,
+    not the 0.1x ($0.40) every other row uses. Anthropic's table says 0.20
+    for this model; a "tidy-up" to 0.40 would double-count cache reads."""
+    assert "claude-opus-5-5" in {m["id"] for m in _REGISTRY}
+    rates = MODEL_PRICING["claude-opus-5-5"]
+    assert rates["input"] == 4.00
+    assert rates["output"] == 20.00
+    assert rates["cache_write"] == 5.00
+    assert rates["cache_read"] == 0.20
+    # Real, hand-checked call: 1M each of input/output/cache-read/5m-write.
+    assert compute_cost("claude-opus-5-5", 1_000_000, 1_000_000, 1_000_000, 1_000_000) == 4.00 + 20.00 + 5.00 + 0.20

@@ -67,6 +67,7 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Uplo
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 from linklib import compare, gates, tool_labels
+from linklib.citations import citation_problem
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.voice_mechanics import norm_for_compare
 from webapp import buddy_example as _BUDDY_EXAMPLE
@@ -1351,6 +1352,45 @@ def _grounding_unavailable_error(e: Exception) -> str:
     ANTHROPIC_API_KEY, or the request failed" message, which couldn't
     distinguish this case from an unrelated SDK/key problem."""
     return f"Couldn't fetch usable content from {e.url} ({e.reason}). Write it by hand, or fix the URL and try again."
+
+
+_UNCITED_FIELD_LABELS = {
+    "agent_taxonomy": tool_labels.AGENT,
+    "description": tool_labels.DESCRIPTION,
+    "community_profile": "Community profile",
+}
+_UNCITED_REASON_TEXT = {
+    "no_citations": "no citations",
+    "orphan_markers": "citation numbers with no matching source",
+}
+_UNCITED_PREFIX = "uncited:"   # _run_tool_research's reason string for an UncitedDraft refusal
+
+
+def _uncited_draft_message(field: str, reason: str) -> str:
+    """The refusal shown when a grounded AI draft came back without valid
+    citations on both tries (issue #642): what happened, what was kept, what
+    to do. Used by the AJAX Generate routes and the Refresh banner."""
+    label = _UNCITED_FIELD_LABELS.get(field, field)
+    why = _UNCITED_REASON_TEXT.get(reason, "unusable citations")
+    return (f"Couldn't draft {label}. The AI's draft came back with {why} on both tries, so nothing "
+            f"was changed: the existing text and its Sources are kept. Try Generate again, or write it by hand.")
+
+
+def _uncited_draft_error(e: Exception) -> str:
+    return _uncited_draft_message(e.field, e.reason)
+
+
+def _record_uncited_draft_cost(e: Exception) -> None:
+    """The refused draft was still paid for: both model calls (and any Exa
+    fetch) go on the enrichment ledger before the refusal is shown."""
+    lib = _lib()
+    try:
+        if e.cost_usd or e.input_tokens or e.output_tokens:
+            lib.record_enrichment_cost(None, e.model, e.input_tokens, e.output_tokens, e.cost_usd)
+        if e.exa_cost_usd:
+            lib.record_enrichment_cost(None, "exa-fetch", 0, 0, e.exa_cost_usd)
+    finally:
+        lib.close()
 
 
 # Real Markdown/List Rendering for Narrative Fields (2026-09) — shared CSS
@@ -19436,7 +19476,7 @@ async def admin_communities_edit_submit(request: Request, slug: str):
                 list(texts.values()), fresh,
                 lib.get_entity_citations("community", community_id, "community_profile"))
             if action == "write":
-                lib.set_entity_citations("community", community_id, "community_profile", fresh,
+                lib.set_generated_entity_citations("community", community_id, "community_profile", fresh,
                                          model=(form.get("ai_drafted_citations_model") or "").strip())
             elif action == "clear":
                 lib.clear_entity_citations("community", community_id, "community_profile")
@@ -19901,6 +19941,9 @@ async def admin_communities_generate_profile(request: Request):
                                                         voice_core=voice_core, exa_enabled=exa_enabled)
     except enrich_mod.GroundingUnavailable as e:
         return JSONResponse({"ok": False, "error": _grounding_unavailable_error(e)}, status_code=503)
+    except enrich_mod.UncitedDraft as e:
+        _record_uncited_draft_cost(e)
+        return JSONResponse({"ok": False, "error": _uncited_draft_error(e)}, status_code=503)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Profile generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -20168,8 +20211,20 @@ def _run_tool_research(tool_id: int) -> tuple[bool, str, str]:
         except enrich_mod.GroundingUnavailable as e:
             print(f"[_run_tool_research:{tool_id}] aborted: {e}")
             return False, e.reason, e.url
+        except enrich_mod.UncitedDraft as e:
+            print(f"[_run_tool_research:{tool_id}] refused, nothing saved: {e}")
+            _record_uncited_draft_cost(e)
+            return False, _UNCITED_PREFIX + e.reason, e.url
         if result is None:
             return False, "", ""
+        # Defense in depth (issue #642): the generator already refuses an
+        # uncited draft, but nothing uncited is ever persisted from here.
+        problem = citation_problem([result.agent_taxonomy_note], result.citations)
+        if problem and result.agent_taxonomy_note.strip():
+            print(f"[_run_tool_research:{tool_id}] refused, nothing saved: citations {problem}")
+            lib.record_enrichment_cost(None, result.model, result.input_tokens,
+                                       result.output_tokens, result.cost_usd)
+            return False, _UNCITED_PREFIX + problem, tool["url"]
         wrote_anything = False
         if result.agent_taxonomy_note.strip():
             lib.set_tool_agent_taxonomy_draft(
@@ -20179,8 +20234,8 @@ def _run_tool_research(tool_id: int) -> tuple[bool, str, str]:
                 low_confidence=int(result.low_confidence),
                 source="admin-edit",
             )
-            lib.set_entity_citations("tool", tool_id, "agent_taxonomy",
-                                     result.citations, model=result.model)
+            lib.set_generated_entity_citations("tool", tool_id, "agent_taxonomy",
+                                               result.citations, model=result.model)
             # Whole-record profile signoff (2026-08 amendment) — this fresh
             # draft's own trigger for the auto-link: force needs_review to 1
             # when this draft itself landed agent_taxonomy_needs_verification
@@ -20262,7 +20317,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
                                 description_low_confidence=description_low_confidence,
                                 source="admin-edit")
         if description_citations:
-            lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
+            lib.set_generated_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
     except DuplicateURLError as e:
         raise HTTPException(status_code=400, detail=_duplicate_url_message(e, f"/tools/software/{e.slug}/edit"))
     except ValueError as e:
@@ -20590,6 +20645,12 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
             f'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t fetch usable content from '
             f'{_esc(research_url)} ({_esc(research_reason)}). Write the agent taxonomy by hand, or fix '
             f'the URL and try again.</p>'
+        )
+    elif research_refreshed == "uncited":
+        _research_banner_html = (
+            f'<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+            f'padding:10px 16px;font-size:14px;margin:0 0 16px;">'
+            f'{_esc(_uncited_draft_message("agent_taxonomy", research_reason))}</p>'
         )
     elif research_refreshed == "0":
         _research_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
@@ -21198,7 +21259,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
         # unrelated save used to wipe them. Description only: summary has
         # no citations of its own.
         if "description" in ai_drafted and description_citations:
-            lib.set_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
+            lib.set_generated_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
         elif norm_for_compare(tool.get("description")) != norm_for_compare(description):
             lib.clear_entity_citations("tool", tool_id, "description")
         lib.update_tool_differentiation(tool_id, competitive_differentiation,
@@ -21509,6 +21570,10 @@ def admin_tools_research_refresh(request: Request, tool_id: int):
     ok, reason, url = _run_tool_research(tool_id)
     if ok:
         msg = "research_refreshed=1"
+    elif reason.startswith(_UNCITED_PREFIX):
+        # UncitedDraft (issue #642): nothing was saved, the old note and its
+        # Sources are kept.
+        msg = f"research_refreshed=uncited&research_reason={reason[len(_UNCITED_PREFIX):]}"
     elif reason:
         # GroundingUnavailable (2026-09 JS-render grounding fix) — an honest,
         # specific reason+URL instead of the generic "couldn't complete the
@@ -21833,6 +21898,9 @@ async def admin_tools_generate_description(request: Request):
                                                       exa_enabled=exa_enabled)
     except enrich_mod.GroundingUnavailable as e:
         return JSONResponse({"ok": False, "error": _grounding_unavailable_error(e)}, status_code=503)
+    except enrich_mod.UncitedDraft as e:
+        _record_uncited_draft_cost(e)
+        return JSONResponse({"ok": False, "error": _uncited_draft_error(e)}, status_code=503)
     if draft is None:
         return JSONResponse({"ok": False, "error": "Description generation is unavailable right now "
                                                      "(missing ANTHROPIC_API_KEY, or the request failed). "
@@ -28173,15 +28241,11 @@ def _models_freshness_message(last_reviewed: str) -> tuple[bool, str]:
     above (both share _reviewed_freshness_banner's rendering). Answers a
     genuinely different question than pricing freshness does: not "has an
     existing model's price gone stale" but "does Anthropic have current
-    models this app doesn't know about at all." There's no API to check
-    that automatically either — `models.list()` (linklib.models._live_models)
-    only ever returns models already deployed/visible to this account,
-    which is a consequence of a model having been added somewhere already,
-    not a way to discover a brand-new release — so this stays a human
-    attestation, same as pricing, just on its own shorter clock (Anthropic
-    ships new models roughly every 30-60 days, so
-    linklib.models.MODELS_REVIEW_STALE_DAYS is 30, tighter than pricing's
-    90)."""
+    models this app doesn't know about at all." New models are now found
+    by the lineup diff (linklib.lineup, shown above this message on
+    /admin/checks). This dated reminder is only the backstop for what the
+    live list cannot show: a silent repricing or retirement date of a model
+    that is already listed. linklib.models.MODELS_REVIEW_STALE_DAYS is 180."""
     from linklib.models import MODELS_REVIEW_STALE_DAYS, models_review_is_stale
     stale = models_review_is_stale(last_reviewed)
     doc_link = ('<a href="https://github.com/bmweis/cfo-navigator/blob/main/CLAUDE.md'
@@ -28207,6 +28271,39 @@ def _models_freshness_message(last_reviewed: str) -> tuple[bool, str]:
         html = (f'Anthropic&rsquo;s model lineup was manually checked <strong>{_esc(when) or "recently"}</strong> '
                 f'against <code>linklib/models.py</code>&rsquo;s registry.')
     return stale, html
+
+
+def _models_diff_html(result: dict, not_using: list[dict]) -> str:
+    """The lineup diff on /admin/checks: live Anthropic models against the
+    registry, pricing and the Buddy tiers, plus the durable "not using" list.
+    A finding only leaves when its cause is fixed or a person records a
+    reason; the list below is how a decision stays visible."""
+    parts: list[str] = []
+    if not result["compared"]:
+        parts.append(f'<p style="margin:0 0 6px;"><strong>Could not compare.</strong> {_esc(result["reason"])}</p>')
+    elif not result["findings"]:
+        parts.append('<p style="margin:0 0 6px;">Every live Anthropic model is known to the app or on the '
+                     '"not using" list below.</p>')
+    for f in result["findings"]:
+        note = ""
+        if f["ignorable"]:
+            note = ('<form method="post" action="/admin/checks/models-not-using/add" '
+                    'style="display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px;">'
+                    f'<input type="hidden" name="model_id" value="{_esc(f["id"])}">'
+                    '<input type="text" name="reason" required maxlength="300" placeholder="Why not using it" '
+                    'style="flex:1 1 220px;min-width:0;font-size:13px;padding:5px 8px;">'
+                    '<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 14px;'
+                    'white-space:nowrap;">Not using</button></form>')
+        parts.append(f'<p style="margin:0 0 4px;">{_esc(f["message"])}</p>{note}')
+    if not_using:
+        rows = "".join(
+            f'<li style="margin:2px 0;"><code>{_esc(e["id"])}</code>: {_esc(e.get("reason", ""))} '
+            f'<form method="post" action="/admin/checks/models-not-using/remove" style="display:inline;">'
+            f'<input type="hidden" name="model_id" value="{_esc(e["id"])}">'
+            f'<button type="submit" class="btn btn-ghost" style="font-size:11px;padding:1px 8px;">Remove</button>'
+            f'</form></li>' for e in not_using)
+        parts.append(f'<p style="margin:10px 0 2px;"><strong>Not using</strong></p><ul style="margin:0;padding-left:18px;">{rows}</ul>')
+    return "".join(parts)
 
 
 def _models_freshness_banner(last_reviewed: str) -> str:
@@ -28831,6 +28928,9 @@ def admin_checks(request: Request):
         pricing_last_verified = lib.get_setting("pricing_last_verified")
         models_last_reviewed = lib.get_setting("models_last_reviewed")
         exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
+        from linklib.lineup import check_lineup
+        lineup = check_lineup(lib)
+        models_not_using = lib.list_models_not_using()
         db_copy_report = scan_db_copy_report(lib)
         over_limit_items = _profile_fields_over_limit(lib)
         ci_quota_exhausted = lib.get_setting("ci_quota_exhausted") == "1"
@@ -28973,6 +29073,15 @@ def admin_checks(request: Request):
 
     pricing_row = {"check": "Anthropic pricing", "href": "#pricing-freshness",
                    "status": pricing_ai["status"], "details": pricing_ai["details"]}
+    if not lineup["compared"]:
+        models_ai = {"status": "warning", "details": "Could not compare"}
+    elif lineup["findings"]:
+        n = len(lineup["findings"])
+        models_ai = {"status": "warning", "details": f"{n} model {'finding' if n == 1 else 'findings'}"}
+    elif models_ai["status"] == "warning":
+        models_ai = {"status": "warning", "details": "Backstop review due"}
+    else:
+        models_ai = {"status": "ok", "details": "Lineup matches the live list"}
     models_row = {"check": "Anthropic models", "href": "#new-model-awareness",
                   "status": models_ai["status"], "details": models_ai["details"]}
     exa_row = {"check": "Exa pricing", "href": "#exa-pricing-freshness",
@@ -29182,7 +29291,8 @@ def admin_checks(request: Request):
             pricing_row, _mark_form("/admin/checks/mark-pricing-reviewed")),
         _checks_detail_row(
             "new-model-awareness", "Anthropic models",
-            _p(models_message)
+            _models_diff_html(lineup, models_not_using)
+            + _p(f'<strong>Backstop:</strong> {models_message}')
             + _p(f'<a href="{_models_gh}" {_link}>linklib/models.py &#8599;</a> &middot; '
                  f'<a href="{_anthropic_models_url}" {_link}>Anthropic&rsquo;s model docs &#8599;</a>'),
             models_row, _mark_form("/admin/checks/mark-models-reviewed")),
@@ -29199,7 +29309,8 @@ def admin_checks(request: Request):
         f'<div class="chk-rows">{site_rows}</div>'
         '<h2 id="ai-providers" style="margin:32px 0 4px;">AI providers</h2>'
         '<p style="color:var(--ink-soft);margin:0 0 10px;font-size:14px;line-height:1.6;">No API reports '
-        'pricing or new models, so these are dated reminders to re-check by hand.</p>'
+        'pricing, so pricing and Exa pricing are dated reminders to re-check by hand. New Anthropic models '
+        'are found by comparing the live model list with what the app knows.</p>'
         f'<div class="chk-rows">{ai_rows}</div>'
     )
 
@@ -29250,6 +29361,36 @@ def admin_checks_mark_models_reviewed(request: Request):
     finally:
         lib.close()
     return RedirectResponse("/admin/checks", status_code=303)
+
+
+@app.post("/admin/checks/models-not-using/add")
+async def admin_checks_models_not_using_add(request: Request):
+    """Record a live Anthropic model as deliberately unused, with a reason, so
+    the lineup diff stops flagging it. Refuses a blank reason."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    lib = _lib()
+    try:
+        ok = lib.add_model_not_using(str(form.get("model_id", "")), str(form.get("reason", "")))
+    finally:
+        lib.close()
+    if not ok:
+        raise HTTPException(400, "A model id and a reason are both required.")
+    return RedirectResponse("/admin/checks#new-model-awareness", status_code=303)
+
+
+@app.post("/admin/checks/models-not-using/remove")
+async def admin_checks_models_not_using_remove(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    lib = _lib()
+    try:
+        lib.remove_model_not_using(str(form.get("model_id", "")))
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/checks#new-model-awareness", status_code=303)
 
 
 @app.post("/admin/checks/mark-exa-pricing-reviewed")

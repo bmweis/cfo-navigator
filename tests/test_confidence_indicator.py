@@ -21,6 +21,15 @@ from linklib import enrich
 from linklib.db import Library
 
 
+@pytest.fixture(autouse=True)
+def _no_citation_policy(monkeypatch):
+    """This file tests parsing, not citation policy (the retry and refusal
+    rules are covered in tests/test_uncited_drafts.py), so a draft is
+    accepted here whether or not it carries citations."""
+    from linklib import enrich as _enrich
+    monkeypatch.setattr(_enrich, "_run_cited_draft", lambda attempt, *a, **k: attempt())
+
+
 def _mock_anthropic(monkeypatch, payload_json):
     def _create(**kw):
         class _Block:

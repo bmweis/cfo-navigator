@@ -24,6 +24,15 @@ from linklib.community_profile import PROFILE_LIMITS
 from linklib.db import Library
 
 
+@pytest.fixture(autouse=True)
+def _no_citation_policy(monkeypatch):
+    """This file tests parsing, not citation policy (the retry and refusal
+    rules are covered in tests/test_uncited_drafts.py), so a draft is
+    accepted here whether or not it carries citations."""
+    from linklib import enrich as _enrich
+    monkeypatch.setattr(_enrich, "_run_cited_draft", lambda attempt, *a, **k: attempt())
+
+
 @pytest.fixture
 def app_module(monkeypatch):
     db = tempfile.mktemp(suffix=".db")
