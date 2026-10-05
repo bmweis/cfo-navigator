@@ -35,8 +35,8 @@ the same process.
   vendor or a community, and Brian reviews and approves them. More sections get
   added as they earn their place.
 - **FP&A Buddy** (`/tools/fpa-buddy`): retrieval-augmented Q&A. It answers
-  from Brian's saved article archive plus web search restricted to a curated
-  list of trusted finance sites, cites every claim, and remembers the thread
+  from Brian's saved article archive and current feed (RSS items plus a search
+  of a curated list of trusted finance sites), optionally the open web, cites every claim, and remembers the thread
   so you can follow up. Member-gated; every answer carries a per-user
   monthly dollar cap.
 - **The Reader** (`/read`, admin-only): a personal reader and archive for online
@@ -137,9 +137,10 @@ python -m scripts.enrich_compare --url https://example.com/some-article
 ## FP&A Buddy (Q&A)
 
 Web UI at `/tools/fpa-buddy`, CLI at `python -m scripts.ask "your question"`.
-Answers are grounded in the saved article archive plus fresh web results
-restricted to the domains in `preferred_sites.opml`, with every citation
-linked. FP&A Buddy takes a Quick, Standard or Deep effort choice, which maps
+Answers are grounded in the saved article archive and the current feed (RSS
+items plus fresh web results restricted to the domains in
+`preferred_sites.opml`), and, when Open web is turned on, an unrestricted web
+search, with every citation linked. FP&A Buddy takes a Quick, Standard or Deep effort choice, which maps
 to a model and token budget internally. Model pickers used elsewhere
 (re-enrich, backfill) are dynamic (`linklib/models.py`), reconciled against
 the live Anthropic Models API so a new Claude model surfaces on its own; the

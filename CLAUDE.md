@@ -8,7 +8,7 @@ Two capabilities, both backed by a single SQLite database (`library.db`):
 1. **CFO Library** — searchable archive of saved articles (imported from Feedly or
    captured going forward). SQLite + FTS5 full-text search is the spine.
 2. **CFO Navigator** — FP&A Q&A chatbot. Retrieval-augmented: pulls the most relevant
-   saved articles + fresh web results from trusted sites, then synthesizes a cited answer
+   saved articles + fresh web results (trusted sites for Current feed, the open web when asked), then synthesizes a cited answer
    via Claude.
 
 (A third capability, LinkedIn post drafting, had a web UI at `/admin/social` and `/draft`
@@ -109,17 +109,17 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   cascade automatically; no manual reindex needed.
 - **Enrichment is additive.** `enriched=0` rows get a Claude summary + tags later via
   `enrich_backfill`. The import does not require an API key.
-- **Web search is domain-restricted, whichever mechanism handles it.** Exa
+- **Web search is domain-restricted for Current feed and unrestricted only for Open web (2026-10), whichever mechanism handles it.** Exa
   is preferred — `agent.py`'s `retrieve_exa()` passes `preferred_sites.opml`
-  domains as Exa's `includeDomains`, riding as Citations-API document blocks
+  domains as Exa's `includeDomains` (omitted for Open web, one call either way), riding as Citations-API document blocks
   like library/feed retrieval, not a model-invoked tool. But it's a kill
   switch, not the only mechanism (Phase 7): when `exa_enabled` is off
   (`/admin/exa-settings`) or `EXA_API_KEY` is missing, Claude's native
   `web_search_20250305` tool steps in instead, restricted by the same OPML
-  list via `allowed_domains` — restored to exactly its pre-Phase-2 shape,
+  list via `allowed_domains` (omitted for Open web) — restored to exactly its pre-Phase-2 shape,
   not rebuilt from scratch. Exactly one mechanism runs per turn
-  (`agent._web_provider`); either way the chatbot only cites sources Brian
-  already trusts.
+  (`agent._web_provider`); either way, unless Open web is on, the chatbot only
+  cites sources Brian already trusts.
 - **Library retrieval is hybrid: FTS5 + vector search, merged by reciprocal rank
   fusion.** `sqlite-vec` adds a vec0 virtual table (`articles_vec`) inside `library.db`
   — no separate vector database. Embeddings (OpenAI `text-embedding-3-small`) can't be
@@ -13578,4 +13578,4 @@ subscription.
   "Members" on `/admin/users`) and community-member wording (profile fields, "Member experience") are
   unchanged on purpose.
 
-- **Open web (2026-10, behavior PR).** Corrects #687's chip mapping: Current feed is the RSS items plus a trusted-domain Exa search, Open web is the same single call with `includeDomains` omitted (both on is one unrestricted call; the native fallback follows the same rule). `ask_questions.web_scope` (`'open'`, `'trusted'`, `''`) records it; a legacy `''` row is read as RSS only for `use_feed` and trusted-only for `use_web` (`_ask_source_labels`), never as unrestricted. Chip keys are `library`, `feed`, `open_web`; the old `web` key still means trusted (stale tabs, MCP `sources`). Defaults: archive on, Current feed on, Open web off. MCP gets an explicit `open_web` parameter, default false. Citations from outside the trusted list carry `trusted: false` and show an "Open web" tag. No blocklist, no new caps. The copy sweep (docstrings, how-it-works, admin copy, `htib_*` defaults) is the next PR; until it merges some prose still says "restricted to trusted sites". See ARCHITECTURE.md's matching paragraph.
+- **Open web (2026-10, behavior PR).** Corrects #687's chip mapping: Current feed is the RSS items plus a trusted-domain Exa search, Open web is the same single call with `includeDomains` omitted (both on is one unrestricted call; the native fallback follows the same rule). `ask_questions.web_scope` (`'open'`, `'trusted'`, `''`) records it; a legacy `''` row is read as RSS only for `use_feed` and trusted-only for `use_web` (`_ask_source_labels`), never as unrestricted. Chip keys are `library`, `feed`, `open_web`; the old `web` key still means trusted (stale tabs, MCP `sources`). Defaults: archive on, Current feed on, Open web off. MCP gets an explicit `open_web` parameter, default false. Citations from outside the trusted list carry `trusted: false` and show an "Open web" tag. No blocklist, no new caps. The copy sweep (docstrings, how-it-works, admin copy, `htib_after_copy` default, README, RUNBOOK) shipped as part 2. See ARCHITECTURE.md's matching paragraph.

@@ -32,8 +32,8 @@ flowchart LR
     end
 
     R -->|"Q&A, enrichment, rewrite,<br/>dedupe verification"| A["Anthropic API"]
-    R -->|"web retrieval<br/>(domain-restricted, preferred)"| X["Exa API"]
-    X --> W["Trusted sites from<br/>preferred_sites.opml"]
+    R -->|"web retrieval<br/>(trusted domains for Current feed,<br/>unrestricted for Open web)"| X["Exa API"]
+    X --> W["Trusted sites from<br/>preferred_sites.opml,<br/>or the open web"]
     A -.->|"native web_search tool<br/>(fallback: Exa off or no key)"| W
     R -->|"RSS/Atom + article<br/>full-text fetches"| F["Publisher sites"]
     R -->|"outbound email"| G["Gmail REST API"]
@@ -4262,12 +4262,12 @@ sequenceDiagram
     AG->>AG: optional feed matching (keyword overlap, 30-min cached feed)
     AG->>DB: _web_provider - exa_enabled setting AND EXA_API_KEY set?
     alt Exa is the provider (preferred)
-        AG->>X: retrieve_exa: /search, includeDomains from OPML, max_web results
+        AG->>X: retrieve_exa: /search, includeDomains from OPML (Current feed alone; omitted for Open web, one call either way), max_web results
         X-->>AG: results (+ real result count)
         Note over AG: best-effort - the call fails<br/>-> falls back to library/feed-only silently, does NOT re-arm the native tool this turn
         AG->>C: messages.create: library + feed + Exa sources,<br/>all as document blocks with citations enabled (no web tool armed)
     else native tool is the provider (Exa off, or no key)
-        AG->>C: messages.create: library + feed as document blocks,<br/>web_search_20250305 tool armed (allowed_domains from OPML)
+        AG->>C: messages.create: library + feed as document blocks,<br/>web_search_20250305 tool armed (allowed_domains from OPML unless Open web is on)
         Note over C: the model decides whether/how many times<br/>to call the tool (max_uses = max_web), same as pre-Exa
     end
     C-->>AG: text blocks with citation spans<br/>(+ automatic web citations when the native tool fired) + usage
