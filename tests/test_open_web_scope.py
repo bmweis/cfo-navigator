@@ -322,3 +322,14 @@ def test_chips_default_state_and_labels(env):
         ("feed", "Current feed", True),
         ("open_web", "Open web", False),
     ]
+
+
+# --- defaults at the Python layer --------------------------------------------
+
+def test_python_callers_default_to_trusted_never_open():
+    import inspect
+    from webapp import ask_orchestrator as o
+    for fn in (agent.answer_question, o.run_ask):
+        sig = inspect.signature(fn).parameters
+        assert sig["use_feed"].default is True
+        assert sig["use_web"].default is False

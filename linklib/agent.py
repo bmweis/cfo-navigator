@@ -811,8 +811,8 @@ def answer_question(
     model: str = "",
     effort: str = "standard",
     use_library: bool = True,
-    use_feed: bool = False,
-    use_web: bool = True,
+    use_feed: bool = True,
+    use_web: bool = False,
     opml_path: str | None = None,
     history: list[dict] | None = None,
 ) -> Answer:

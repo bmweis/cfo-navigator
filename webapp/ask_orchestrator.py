@@ -172,7 +172,7 @@ def run_ask(
             citations=ans.citations,
             stop_reason=stop_reason_of(ans),
             is_private=is_private,
-            web_scope=ans.web_scope,
+            web_scope=getattr(ans, "web_scope", ""),
         )
         new_conversation_id = conversation_id or str(row_id)
         turn_id = row_id
