@@ -95,15 +95,21 @@ ROLE_LABELS = {"enrichment": "Enrichment", "matchmaker": "Matchmaker", "buddy_qu
                "buddy_standard": "Buddy Standard", "buddy_deep": "Buddy Deep"}
 BUDDY_ROLES = ("buddy_quick", "buddy_standard", "buddy_deep")
 BUDDY_BLOCK_REASON = "Buddy not yet checked for always-on thinking"
+MATCHMAKER_BLOCK_REASON = "Matchmaker not yet checked for always-on thinking (its answer budget is 900 tokens)"
+# Shown beside the Matchmaker model: matchmaker.py writes /tools/software/<slug>
+# links into the system prompt, and a different model may format them differently.
+MATCHMAKER_LINK_NOTE = ("After any model change, test a Matchmaker answer: linklib/matchmaker.py writes "
+                        "/tools/software/&lt;slug&gt; links into the prompt and the link format must still come out right.")
 # Models that think on every call (thinking shares max_tokens with the answer,
 # and ask() does not handle the refusal stop reason). Not allowed for Buddy
-# until that is fixed in its own PR.
+# until that is fixed in its own PR. The Matchmaker has the same shape: its
+# messages.create sets no thinking parameter and max_tokens is 900.
 _ALWAYS_ON_THINKING = ("claude-opus-5-5", "claude-fable-5", "claude-fable-5-1", "claude-sonnet-5-5")
 _DEFAULT_ROLES_OVERRIDE = {
     "claude-fable-5": ("enrichment",),
     "claude-fable-5-1": ("enrichment",),
-    "claude-sonnet-5-5": ("enrichment", "matchmaker"),
-    "claude-opus-5-5": ("enrichment", "matchmaker"),
+    "claude-sonnet-5-5": ("enrichment",),
+    "claude-opus-5-5": ("enrichment",),
 }
 # Per-model notes seeded once where the note is empty. Source: the cached API
 # reference of 2026-09-25, not confirmed against the live page.
@@ -122,8 +128,11 @@ def default_allowed_roles(model_id: str) -> tuple[str, ...]:
 
 def role_block_reason(model_id: str, role: str) -> str:
     """Visible reason a model is not allowed for a role ('' when allowed by default)."""
-    if role in BUDDY_ROLES and model_id in _ALWAYS_ON_THINKING:
-        return BUDDY_BLOCK_REASON
+    if model_id in _ALWAYS_ON_THINKING:
+        if role in BUDDY_ROLES:
+            return BUDDY_BLOCK_REASON
+        if role == "matchmaker":
+            return MATCHMAKER_BLOCK_REASON
     return ""
 
 

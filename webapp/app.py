@@ -24150,7 +24150,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     exa_js = _json.dumps(exa_unit) if authed else "0"
     # Admin-only, one muted line at the bottom of the Depth dropdown, next to the
     # dollar amounts it explains (same look as the Sources note).
-    cost_note = ('<p class="ask-dd-note ask-cost-note" style="color:var(--muted);">Dollar amounts are estimates.</p>'
+    cost_note = ('<p class="ask-dd-note ask-cost-note" style="color:var(--muted);">Dollar amounts are estimates. They cover the model only, not web search (about $0.007 a question) or thinking tokens.</p>'
                  if authed else "")
 
     usage_html = ""
@@ -28053,7 +28053,8 @@ def admin_system_ai(request: Request):
                f'<a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works &rarr;</a>')
         + _row("Matchmaker", _esc(_enrich_model_label(matchmaker_model)),
                f'Software and Community matchmaker chat, one shared model. {live_badge}&mdash;'
-               f'set in Configuration above. <code>LINKLIB_CHAT_MODEL</code> seeded it once and is ignored now.')
+               f'set in Configuration above. <code>LINKLIB_CHAT_MODEL</code> seeded it once and is ignored now. '
+               f'After any model change, test a Matchmaker answer: its <code>/tools/software/&lt;slug&gt;</code> link format must still come out right.')
     )
     claude_freshness = (
         _ai_usage_freshness_dot("Pricing", pricing_freshness["oldest"],
@@ -28158,7 +28159,7 @@ def _matchmaker_model_html(current: str, blocks: dict) -> str:
     """Matchmaker model picker (PR 3b). Options a model is not allowed for are
     disabled with the reason; the server refuses them too. LINKLIB_CHAT_MODEL
     seeded this once on first boot and is ignored now."""
-    from linklib.models import _REGISTRY
+    from linklib.models import _REGISTRY, MATCHMAKER_LINK_NOTE
     opts = "".join(
         f'<option value="{_esc(m["id"])}"{" selected" if m["id"] == current else ""}'
         f'{" disabled" if blocks.get(m["id"]) and m["id"] != current else ""}>{_esc(m["label"])}'
@@ -28171,6 +28172,7 @@ def _matchmaker_model_html(current: str, blocks: dict) -> str:
             f'<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;">Used by the Software and Community matchmaker chats. '
             f'The <code>LINKLIB_CHAT_MODEL</code> variable seeded this once on first boot and is ignored now; '
             f'change it here, no redeploy.</p>'
+            f'<p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;">{MATCHMAKER_LINK_NOTE}</p>'
             f'<script>async function saveMatchmaker(){{var s=document.getElementById("mm-select"),t=document.getElementById("mm-status");'
             f's.disabled=true;t.textContent="Saving…";try{{var r=await fetch("/admin/system/ai/model/save",{{method:"POST",'
             f'headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{role:"matchmaker",model:s.value}})}});'
@@ -28202,7 +28204,7 @@ def _buddy_tiers_html(models: dict, blocks: dict) -> str:
             + '<div id="tier-confirm" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--line);'
               'border-radius:10px;font-size:14px;"></div>'
             + '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;">Estimates are per question, from the pricing table '
-              'and typical token counts. They are not charges.</p>'
+              'and typical token counts. They exclude web search (about $0.007) and thinking tokens, and are not charges.</p>'
             + """<script>
 async function previewTier(sel){var box=document.getElementById('tier-confirm');
 var r=await fetch('/admin/system/ai/buddy-tier/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:sel.dataset.tier,model:sel.value})});

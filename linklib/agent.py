@@ -76,12 +76,15 @@ def count_prior_questions(history) -> int:
                if isinstance(m, dict) and m.get("role") == "user")
 
 # Typical token counts per effort tier, the fallback profile behind the
-# pre-call cost estimate. Chosen to reproduce the old Sonnet 4.6 estimates
-# (0.014 / 0.028 / 0.048); output is about half of each tier's max_tokens.
-# Real averages from ask_questions replace these once there is enough
+# pre-call cost estimate. Set from production ask_questions rows read
+# 2026-10-05: Deep (4 Opus 4.8 turns) averaged about 21,000 input and 2,100
+# output tokens, Quick (2 first turns) about 2,600 and 260, Standard (4 first
+# turns) about 5,300 and 750. The estimate is model cost only: it excludes web
+# search (about $0.007 a question when Exa runs) and any thinking tokens.
+# Real averages from ask_questions replace these once a tier has enough
 # history (Library.typical_tier_tokens).
 TIER_TOKEN_PROFILE: dict[str, tuple[int, int]] = {
-    "quick": (2900, 350), "standard": (5600, 750), "deep": (9800, 1250),
+    "quick": (2600, 260), "standard": (5600, 750), "deep": (21000, 2100),
 }
 
 

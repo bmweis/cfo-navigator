@@ -46,7 +46,8 @@ def test_allowed_roles_defaults_per_brief(lib):
     lib.seed_model_catalog(); lib.seed_model_roles()
     assert lib.model_allowed_roles("claude-fable-5-1") == ["enrichment"]
     assert lib.model_allowed_roles("claude-fable-5") == ["enrichment"]
-    assert lib.model_allowed_roles("claude-sonnet-5-5") == ["enrichment", "matchmaker"]
+    assert lib.model_allowed_roles("claude-sonnet-5-5") == ["enrichment"]
+    assert lib.model_allowed_roles("claude-opus-5-5") == ["enrichment"]
     assert "buddy_quick" not in lib.model_allowed_roles("claude-opus-5-5")
     assert "buddy_deep" in lib.model_allowed_roles("claude-sonnet-4-6")
 
@@ -68,12 +69,20 @@ def test_buddy_tiers_refuse_opus_5_5_with_the_visible_reason(lib):
     assert lib.get_role_model("buddy_deep") == "claude-opus-4-8"       # tiers unchanged
 
 
-def test_sonnet_5_5_unverified_refused_for_matchmaker_until_verified(lib):
+def test_matchmaker_refuses_always_on_thinking_models_with_a_visible_reason(lib):
+    from linklib.models import MATCHMAKER_BLOCK_REASON
     lib.seed_model_catalog(); lib.seed_model_roles()
-    assert any("verified date" in p for p in lib.set_role_model("matchmaker", "claude-sonnet-5-5"))
-    _verify(lib, "claude-sonnet-5-5")
-    assert lib.set_role_model("matchmaker", "claude-sonnet-5-5") == []
-    assert lib.roles_using("claude-sonnet-5-5") == ["matchmaker"]
+    for mid in ("claude-opus-5-5", "claude-sonnet-5-5"):
+        _verify(lib, mid)
+        problems = lib.set_role_model("matchmaker", mid)
+        assert any(MATCHMAKER_BLOCK_REASON in p for p in problems), mid
+    assert lib.get_role_model("matchmaker") == DEFAULT_CHAT_MODEL
+    assert lib.set_role_model("enrichment", "claude-sonnet-5-5") == []   # still fine for enrichment
+
+
+def test_unverified_pricing_still_refuses_an_allowed_model(lib):
+    lib.seed_model_catalog(); lib.seed_model_roles()
+    assert any("verified date" in p for p in lib.set_role_model("enrichment", "claude-sonnet-5-5"))
 
 
 def test_not_using_and_deactivated_models_cannot_take_a_role(lib):

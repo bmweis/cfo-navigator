@@ -536,3 +536,4 @@ def test_matchmaker_role_save_route_enforces_allowed_roles(env):
     assert 'id="mm-select"' in html and "seeded this once" in html
     assert "Buddy not yet checked for always-on thinking" in html
     assert "Requires 30-day data retention" in html
+    assert "/tools/software/&lt;slug&gt;" in html and "Matchmaker not yet checked for always-on thinking" in html
