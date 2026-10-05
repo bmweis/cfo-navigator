@@ -1,19 +1,15 @@
-"""issue #98, Piece 2 — the /admin/checks pricing-freshness reminder.
+"""Per-row pricing freshness (PR 3a) on /admin/checks.
 
-There's no pricing API to reconcile MODEL_PRICING against automatically
-(see linklib/pricing.py's module docstring), so this is a dated
-manual-attestation signal, not a pass/fail check: a `pricing_last_verified`
-settings value, a banner that turns amber once it's stale (or was never
-recorded), and a "Mark reviewed" action that resets it — the same
-reviewed-toggle pattern already used for Community gaps
-(toggle_community_gap_reviewed) and FP&A Buddy feedback
-(toggle_ask_feedback_reviewed), applied here as a plain dated setting since
-there's no per-row entity to flip.
+Each model_pricing row carries its own verified_on date and goes stale on its
+own after 90 days. The old single pricing_last_verified timestamp and its
+"Mark reviewed" button are gone; a row is verified by editing it on
+/admin/system/ai. Unverified rows are named but do not make the row stale.
 """
 import os
 import pathlib
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -75,67 +71,83 @@ def test_banner_defaults_to_stale_when_never_reviewed(admin_client):
     assert "Mark reviewed" in r.text
 
 
-def test_mark_reviewed_clears_the_stale_banner(admin_client):
+def _seed(db, *, age_days=None):
+    from linklib.db import Library
+    lib = Library(db)
+    try:
+        lib.seed_model_catalog()
+        if age_days is not None:
+            old = (datetime.now(timezone.utc) - timedelta(days=age_days)).date().isoformat()
+            lib.conn.execute("UPDATE model_pricing SET verified_on=? WHERE verified_on<>''", (old,))
+            lib.conn.commit()
+    finally:
+        lib.close()
+
+
+def test_freshly_seeded_rows_are_fresh_and_new_models_unverified(admin_client):
+    client, appmod, db = admin_client
+    from linklib.db import Library
+    lib = Library(db)
+    try:
+        lib.seed_model_catalog()
+        lib.conn.execute("UPDATE model_pricing SET verified_on=? WHERE verified_on<>''",
+                         (datetime.now(timezone.utc).date().isoformat(),))
+        lib.conn.commit()
+        pf = lib.pricing_freshness()
+    finally:
+        lib.close()
+    assert pf["stale_ids"] == []
+    assert set(pf["unverified_ids"]) == {"claude-fable-5", "claude-fable-5-1", "claude-sonnet-5-5"}
+    text = _pricing_section(client.get("/admin/checks").text)
+    assert "past the 90-day" not in text.lower()
+    assert "cannot be switched on" in text
+
+
+def test_one_old_row_makes_the_row_stale_and_is_named(admin_client):
+    client, appmod, db = admin_client
+    _seed(db)
+    from linklib.db import Library
+    lib = Library(db)
+    try:
+        old = (datetime.now(timezone.utc) - timedelta(days=95)).date().isoformat()
+        new = datetime.now(timezone.utc).date().isoformat()
+        lib.conn.execute("UPDATE model_pricing SET verified_on=? WHERE verified_on<>''", (new,))
+        lib.conn.execute("UPDATE model_pricing SET verified_on=? WHERE model_id='claude-opus-5'", (old,))
+        lib.conn.commit()
+        assert lib.pricing_freshness()["stale_ids"] == ["claude-opus-5"]
+    finally:
+        lib.close()
+    text = _pricing_section(client.get("/admin/checks").text)
+    assert "Past the 90-day window" in text and "Opus 5" in text
+
+
+def test_not_using_model_does_not_make_pricing_stale(admin_client):
+    client, appmod, db = admin_client
+    _seed(db, age_days=200)
+    from linklib.db import Library
+    lib = Library(db)
+    try:
+        for r in lib.list_model_pricing():
+            lib.set_model_status(r["model_id"], "not_using", "test")
+        assert lib.pricing_freshness()["stale_ids"] == []
+    finally:
+        lib.close()
+
+
+def test_the_global_mark_reviewed_route_is_gone(admin_client):
     client, appmod, db = admin_client
     r = client.post("/admin/checks/mark-pricing-reviewed", follow_redirects=False)
-    assert r.status_code == 303
-    assert r.headers["location"] == "/admin/checks"
-
-    from linklib.db import Library
-    lib = Library(db)
-    try:
-        stored = lib.get_setting("pricing_last_verified")
-    finally:
-        lib.close()
-    assert stored  # a real ISO timestamp was recorded
-
-    r2 = _pricing_section(client.get("/admin/checks").text)
-    assert "never been marked reviewed" not in r2
-    assert "past the 90-day review window" not in r2
-    assert "manually verified" in r2
+    assert r.status_code in (404, 405)
 
 
-def test_banner_goes_stale_again_past_the_threshold(admin_client):
+def test_pricing_row_links_to_the_pricing_table_not_the_old_button(admin_client):
     client, appmod, db = admin_client
-    from datetime import datetime, timedelta, timezone
-    from linklib.db import Library
-    old = (datetime.now(timezone.utc) - timedelta(days=91)).isoformat()
-    lib = Library(db)
-    try:
-        lib.set_setting("pricing_last_verified", old)
-    finally:
-        lib.close()
-
-    r = client.get("/admin/checks")
-    assert "past the 90-day review window" in r.text
-    assert "Mark reviewed" in r.text
+    text = _pricing_section(client.get("/admin/checks").text)
+    assert "/admin/system/ai#model-pricing" in text
+    assert "mark-pricing-reviewed" not in text
 
 
-def test_banner_stays_fresh_within_the_threshold(admin_client):
+def test_pricing_message_never_claims_openai_coverage(admin_client):
     client, appmod, db = admin_client
-    from datetime import datetime, timedelta, timezone
-    from linklib.db import Library
-    recent = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
-    lib = Library(db)
-    try:
-        lib.set_setting("pricing_last_verified", recent)
-    finally:
-        lib.close()
-
-    r = _pricing_section(client.get("/admin/checks").text)
-    assert "past the 90-day review window" not in r
-    assert "never been marked reviewed" not in r
-    assert "manually verified" in r
-
-
-def test_mark_reviewed_requires_auth(monkeypatch):
-    monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
-    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
-    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
-    import importlib, webapp.app as appmod
-    importlib.reload(appmod)
-    from fastapi.testclient import TestClient
-    client = TestClient(appmod.app, raise_server_exceptions=True)
-    r = client.post("/admin/checks/mark-pricing-reviewed", follow_redirects=False)
-    assert r.status_code in (302, 303)
-    assert "/login" in r.headers.get("location", "")
+    pf = {"stale_ids": ["claude-opus-5"], "unverified_ids": [], "oldest": "2026-01-01"}
+    assert "OpenAI" not in appmod._pricing_freshness_message(pf)[1]

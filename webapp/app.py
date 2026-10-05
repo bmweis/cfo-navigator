@@ -881,6 +881,20 @@ def _seed_and_publish_feeds():
 
 
 @app.on_event("startup")
+def _seed_model_catalog():
+    """Seed model_catalog and model_pricing once (PR 3a), carrying the old
+    models_not_using list across. Flag-guarded and never blocks boot; seeding
+    never overwrites an existing row or changes a status."""
+    lib = _lib()
+    try:
+        lib.seed_model_catalog()
+    except Exception:
+        pass
+    finally:
+        lib.close()
+
+
+@app.on_event("startup")
 def _seed_voice_prompts():
     """Populate voice_core/voice_fpa_buddy/voice_matchmaker from their code
     defaults on first boot (2026-08 visibility follow-up) — see
@@ -27800,7 +27814,7 @@ def _ai_model_config_html(current: str) -> str:
 
     return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Enrichment model</div>
-<select id="model-select" onchange="saveModel()" style="width:100%;max-width:520px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
+<select id="model-select" data-current="{_esc(current)}" onchange="saveModel()" style="width:100%;max-width:520px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
 {option_html}
 </select>
 <p id="model-select-desc" style="font-size:13px;color:var(--muted);margin:8px 0 0;">{_esc(current_desc)}</p>
@@ -27828,11 +27842,13 @@ async function saveModel() {{
   status.textContent = 'Saving…';
   try {{
     var r = await fetch('/admin/system/ai/model/save', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{model: model}})}});
-    if (!r.ok) throw new Error();
+    if (!r.ok) {{ var d = await r.json().catch(function() {{ return {{}}; }}); throw new Error(d.error || ''); }}
+    sel.dataset.current = model;
     status.textContent = 'Saved.';
     status.style.color = '#065f46';
   }} catch(e) {{
-    status.textContent = 'Save failed—try again.';
+    if (sel.dataset.current) {{ sel.value = sel.dataset.current; }}
+    status.textContent = e.message || 'Save failed—try again.';
     status.style.color = '#b91c1c';
   }} finally {{
     sel.disabled = false;
@@ -27980,15 +27996,18 @@ def admin_system_ai(request: Request):
 
     from linklib.models import DEFAULT_CHAT_MODEL, models_review_is_stale
     from linklib.agent import EFFORT_SETTINGS
-    from linklib.pricing import pricing_review_is_stale, exa_pricing_review_is_stale
+    from linklib.pricing import exa_pricing_review_is_stale
 
     lib = _lib()
     try:
         enrich_model = lib.get_enrich_model()
         exa_enabled = lib.get_exa_enabled()
-        pricing_last_verified = lib.get_setting("pricing_last_verified")
+        pricing_freshness = lib.pricing_freshness()
         models_last_reviewed = lib.get_setting("models_last_reviewed")
         exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
+        pricing_rows = lib.list_model_pricing()
+        model_status = {r["model_id"]: r for r in lib.list_model_catalog()}
+        enable_blocks = {m["id"]: lib.model_enable_problems(m["id"]) for m in __import__("linklib.models", fromlist=["_REGISTRY"])._REGISTRY}
     finally:
         lib.close()
     has_exa_key = bool(os.environ.get("EXA_API_KEY"))
@@ -28027,8 +28046,8 @@ def admin_system_ai(request: Request):
                f'set via the <code>LINKLIB_CHAT_MODEL</code> environment variable, independent of the enrichment setting above.')
     )
     claude_freshness = (
-        _ai_usage_freshness_dot("Pricing", pricing_last_verified,
-                                 pricing_review_is_stale(pricing_last_verified), "pricing-freshness")
+        _ai_usage_freshness_dot("Pricing", pricing_freshness["oldest"],
+                                 bool(pricing_freshness["stale_ids"]), "pricing-freshness")
         + _ai_usage_freshness_dot("New-model awareness", models_last_reviewed,
                                    models_review_is_stale(models_last_reviewed), "new-model-awareness")
     )
@@ -28075,6 +28094,7 @@ def admin_system_ai(request: Request):
 <h2 style="margin:0 0 4px;">Configuration</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Changes take effect immediately. No redeploy.</p>
 {_card("Enrichment model", _ai_model_config_html(enrich_model))}
+{_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, enable_blocks))}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
 
 <h2 style="margin:28px 0 4px;">Usage index</h2>
@@ -28105,10 +28125,103 @@ async def admin_system_ai_model_save(request: Request):
         return JSONResponse({"ok": False, "error": "No model given."}, status_code=400)
     lib = _lib()
     try:
+        problems = lib.model_enable_problems(model)
+        if problems:
+            return JSONResponse({"ok": False, "error": (
+                f"Can't switch to {_enrich_model_label(model)}: {', '.join(problems)}. "
+                "Fix it in the model pricing table below.")}, status_code=400)
         lib.set_enrich_model(model)
     finally:
         lib.close()
     return JSONResponse({"ok": True, "model": model})
+
+
+_PRICE_COLS = (("input", "Input"), ("output", "Output"), ("cache_write", "Cache write"),
+               ("cache_write_1h", "Cache write 1h"), ("cache_read", "Cache read"))
+_ANTHROPIC_PRICING_URL = "https://www.anthropic.com/pricing"
+
+
+def _model_pricing_card_html(rows: list[dict], status: dict, enable_blocks: dict) -> str:
+    """The Model pricing table on /admin/system/ai (PR 3a): one row per model,
+    rates in USD per million tokens, a per-row freshness chip, a link to
+    Anthropic's pricing page, and an Edit form. Saving with the verify box
+    ticked stamps today; saving without it clears the date, because changed
+    rates have not been checked against the page."""
+    from linklib.pricing import row_pricing_state, PRICING_REVIEW_STALE_DAYS
+    chips = {"fresh": ("var(--seafoam)", "Verified"), "stale": ("var(--coral-wash)", "Stale"),
+             "unverified": ("var(--coral-wash)", "Unverified")}
+    body = []
+    for r in rows:
+        mid = r["model_id"]
+        st = row_pricing_state(r["verified_on"])
+        bg, word = chips[st]
+        when = f' {_esc(r["verified_on"])}' if r["verified_on"] else ""
+        chip = (f'<span style="display:inline-block;background:{bg};color:var(--navy);border-radius:6px;'
+                f'padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap;">{word}{when}</span>')
+        cat = status.get(mid, {})
+        stat = cat.get("status", "available").replace("_", " ")
+        def _rate_cell(v):
+            return ('<td><em style="color:var(--muted);">empty</em></td>' if v is None
+                    else f'<td style="white-space:nowrap;">{v:g}</td>')
+        cells = "".join(_rate_cell(r[k]) for k, _ in _PRICE_COLS)
+        inputs = "".join(
+            f'<label style="font-size:12px;display:block;">{lbl}<input name="{k}" value="{"" if r[k] is None else f"{r[k]:g}"}" '
+            f'inputmode="decimal" style="width:100%;min-width:0;padding:4px 6px;border:1px solid var(--line);'
+            f'border-radius:6px;font:inherit;"></label>' for k, lbl in _PRICE_COLS)
+        edit = (f'<details><summary style="cursor:pointer;color:var(--accent);font-size:13px;">Edit</summary>'
+                f'<form method="post" action="/admin/system/ai/pricing/save" style="margin-top:8px;display:grid;'
+                f'gap:6px;min-width:200px;"><input type="hidden" name="model_id" value="{_esc(mid)}">{inputs}'
+                f'<label style="font-size:12px;display:block;">Source note<input name="source_note" '
+                f'value="{_esc(r["source_note"])}" style="width:100%;min-width:0;padding:4px 6px;'
+                f'border:1px solid var(--line);border-radius:6px;font:inherit;"></label>'
+                f'<label style="font-size:12px;"><input type="checkbox" name="verified" value="1"> '
+                f'I checked these rates against Anthropic&rsquo;s page today</label>'
+                f'<button class="btn" type="submit" style="font-size:12px;padding:5px 12px;">Save</button>'
+                f'</form></details>')
+        block = enable_blocks.get(mid) or []
+        note = f'<div style="font-size:12px;color:var(--muted);">Can&rsquo;t be enabled: {_esc(", ".join(block))}</div>' if block else ""
+        src = f'<div style="font-size:12px;color:var(--muted);">{_esc(r["source_note"])}</div>' if r["source_note"] else ""
+        body.append(
+            f'<tr><td style="font-weight:600;">{_esc(_enrich_model_label(mid))}'
+            f'<div style="font-size:11.5px;color:var(--muted);font-weight:400;">{_esc(mid)} &middot; {_esc(stat)}</div></td>'
+            f'{cells}<td>{chip}{src}{note}</td>'
+            f'<td><a href="{_ANTHROPIC_PRICING_URL}" target="_blank" rel="noopener" '
+            f'style="color:var(--accent);font-size:13px;white-space:nowrap;">Open Anthropic&rsquo;s pricing &#8599;</a></td>'
+            f'<td>{edit}</td></tr>')
+    head = "".join(f"<th>{t}</th>" for t in ["Model", *[lbl for _, lbl in _PRICE_COLS], "Verified", "Source", "Edit"])
+    return (f'<div id="model-pricing" style="scroll-margin-top:16px;"><p style="font-size:13px;color:var(--muted);margin:0 0 10px;">'
+            f'USD per million tokens. Each row ages on its own and goes stale after {PRICING_REVIEW_STALE_DAYS} days. '
+            f'A model with an empty rate or no verified date can&rsquo;t be switched on for any role.</p>'
+            f'<div class="table-frame" style="overflow-x:auto;"><table style="min-width:{_TABLE_FLOOR_XWIDE}px;"><thead><tr>{head}</tr></thead>'
+            f'<tbody>{"".join(body)}</tbody></table></div></div>')
+
+
+@app.post("/admin/system/ai/pricing/save")
+async def admin_system_ai_pricing_save(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    model_id = (form.get("model_id") or "").strip()
+    rates: dict = {}
+    for k, _ in _PRICE_COLS:
+        raw = (form.get(k) or "").strip()
+        if raw:
+            try:
+                v = float(raw)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"{k} must be a number")
+            if v < 0:
+                raise HTTPException(status_code=400, detail=f"{k} can't be negative")
+            rates[k] = v
+    lib = _lib()
+    try:
+        if lib.get_model_pricing(model_id) is None:
+            raise HTTPException(status_code=404, detail="unknown model")
+        lib.set_model_pricing(model_id, rates, verified=form.get("verified") == "1",
+                              source_note=(form.get("source_note") or ""))
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/system/ai#model-pricing", status_code=303)
 
 
 @app.post("/admin/system/ai/model/test-connection")
@@ -28191,86 +28304,61 @@ def _reviewed_freshness_banner(is_stale: bool, message_html: str, mark_url: str)
             f'</form></div>')
 
 
-def _pricing_freshness_message(last_verified: str) -> tuple[bool, str]:
-    """Issue #98, Piece 2 — a dated manual-attestation reminder, not a
-    pass/fail check: there's no pricing API to reconcile MODEL_PRICING
-    against automatically (see linklib/pricing.py's module docstring), so
-    this is the same reviewed-toggle pattern already used for Community
-    gaps and FP&A Buddy feedback (a plain dated setting, flipped by a
-    "Mark reviewed" button, no auto-clear-on-view) applied to a third
-    thing: has a human actually re-checked Anthropic's published rates
-    recently. Deliberately its own banner, not a row in run_all()'s
-    pass/fail list — this isn't automatable, so it isn't a check in that
-    sense.
-
-    MODEL_PRICING is Claude-only — OpenAI's embedding rate lives in a
-    separate EMBEDDING_PRICING table with no freshness reminder of its own
-    yet, so this banner's copy names only Anthropic, not "Anthropic's (and
-    OpenAI's)" as an earlier draft claimed (corrected 2026-09, admin-sprawl
-    follow-up — that phrasing asserted coverage this banner doesn't
-    actually have)."""
-    from linklib.pricing import PRICING_REVIEW_STALE_DAYS, pricing_review_is_stale
-    stale = pricing_review_is_stale(last_verified)
-    if stale:
-        if last_verified:
-            when = _relative_age(last_verified)
-            html = (f'Pricing was last manually verified <strong>{_esc(when) or "a while ago"}</strong> '
-                    f'against Anthropic&rsquo;s published rates, past the '
-                    f'{PRICING_REVIEW_STALE_DAYS}-day review window. Re-check '
-                    f'<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
-                    f'Anthropic&rsquo;s current published rates, then mark it reviewed.')
-        else:
-            html = ('Pricing has <strong>never been marked reviewed</strong>. Check '
-                    '<code>linklib/pricing.py</code>&rsquo;s <code>MODEL_PRICING</code> table against '
-                    'Anthropic&rsquo;s current published rates, then mark it reviewed.')
+def _pricing_freshness_message(pf: dict) -> tuple[bool, str]:
+    """Per-row pricing freshness (PR 3a). Each model_pricing row carries its
+    own verified_on date and ages on its own against the 90-day window; the
+    old single global timestamp and its Mark reviewed button are gone. A row
+    is verified by editing it on /admin/system/ai. Unverified rows are named
+    but do not make the row stale: such a model cannot be enabled, so no
+    spend rides on its rate. MODEL_PRICING is Claude-only (OpenAI embeddings
+    have their own table with no reminder)."""
+    from linklib.pricing import PRICING_REVIEW_STALE_DAYS
+    stale_ids, unverified = pf["stale_ids"], pf["unverified_ids"]
+    link = ('<a href="/admin/system/ai#model-pricing" style="color:inherit;text-decoration:underline;">'
+            'model pricing table</a>')
+    parts = []
+    if stale_ids:
+        names = ", ".join(_esc(_enrich_model_label(m)) for m in stale_ids)
+        parts.append(f'Past the {PRICING_REVIEW_STALE_DAYS}-day window: <strong>{names}</strong>. '
+                     f'Check each against Anthropic&rsquo;s pricing page, then verify it in the {link}.')
+    elif pf["oldest"]:
+        when = _relative_age(pf["oldest"])
+        parts.append(f'Every verified rate was checked within {PRICING_REVIEW_STALE_DAYS} days '
+                     f'(oldest <strong>{_esc(when) or "recently"}</strong>).')
     else:
-        when = _relative_age(last_verified)
-        html = (f'Pricing was manually verified <strong>{_esc(when) or "recently"}</strong> against '
-                f'Anthropic&rsquo;s published rates.')
-    return stale, html
+        parts.append(f'No pricing row has been verified. Check the rates in the {link}.')
+    if unverified:
+        names = ", ".join(_esc(_enrich_model_label(m)) for m in unverified)
+        parts.append(f'Not yet verified, so they cannot be switched on: {names}.')
+    return bool(stale_ids), " ".join(parts)
 
 
-def _pricing_freshness_banner(last_verified: str) -> str:
-    stale, html = _pricing_freshness_message(last_verified)
-    return _reviewed_freshness_banner(stale, html, "/admin/checks/mark-pricing-reviewed")
+_MODELS_BACKSTOP_TEXT = (
+    "Backstop: the list above only catches models that are new or missing. It can&rsquo;t see a "
+    "retirement date for a model that&rsquo;s already listed. Every 180 days this reminds you to skim "
+    "Anthropic&rsquo;s model docs for deprecations, and &lsquo;Mark reviewed&rsquo; records that you did "
+    "and restarts the clock.")
 
 
 def _models_freshness_message(last_reviewed: str) -> tuple[bool, str]:
-    """Issue #98, Piece 2 follow-up — a second, parallel dated
-    manual-attestation reminder, sibling to _pricing_freshness_banner
-    above (both share _reviewed_freshness_banner's rendering). Answers a
-    genuinely different question than pricing freshness does: not "has an
-    existing model's price gone stale" but "does Anthropic have current
-    models this app doesn't know about at all." New models are now found
-    by the lineup diff (linklib.lineup, shown above this message on
-    /admin/checks). This dated reminder is only the backstop for what the
-    live list cannot show: a silent repricing or retirement date of a model
-    that is already listed. linklib.models.MODELS_REVIEW_STALE_DAYS is 180."""
+    """The backstop's status line only (PR 3a). New models are found by the
+    lineup diff; this dated reminder covers what the live list cannot show,
+    a retirement date for a model already listed. The fixed explanation is
+    _MODELS_BACKSTOP_TEXT. linklib.models.MODELS_REVIEW_STALE_DAYS is 180."""
     from linklib.models import MODELS_REVIEW_STALE_DAYS, models_review_is_stale
     stale = models_review_is_stale(last_reviewed)
-    doc_link = ('<a href="https://github.com/bmweis/cfo-navigator/blob/main/CLAUDE.md'
-                '#adding-a-new-claude-model--every-touchpoint" target="_blank" rel="noopener" '
-                'style="color:inherit;text-decoration:underline;">every touchpoint a new model needs</a>')
-    if stale:
-        if last_reviewed:
-            when = _relative_age(last_reviewed)
-            html = (f'Anthropic&rsquo;s model lineup was last manually checked <strong>{_esc(when) or "a while ago"}</strong>'
-                    f', past the {MODELS_REVIEW_STALE_DAYS}-day review window. Check '
-                    f'<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
-                    f'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s current model docs</a> '
-                    f'for anything new and add it to <code>linklib/models.py</code> if it belongs in the pickers. '
-                    f'Then mark it reviewed. Adding one to FP&amp;A Buddy? See {doc_link}.')
-        else:
-            html = (f'Anthropic&rsquo;s model lineup has <strong>never been marked reviewed</strong>. Check '
-                    f'<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
-                    f'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s current model docs</a> '
-                    f'against <code>linklib/models.py</code>, then mark it reviewed. Adding one to FP&amp;A Buddy? '
-                    f'See {doc_link}.')
-    else:
+    docs = ('<a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank" '
+            'rel="noopener" style="color:inherit;text-decoration:underline;">Anthropic&rsquo;s model docs</a>')
+    if not stale:
         when = _relative_age(last_reviewed)
-        html = (f'Anthropic&rsquo;s model lineup was manually checked <strong>{_esc(when) or "recently"}</strong> '
-                f'against <code>linklib/models.py</code>&rsquo;s registry.')
-    return stale, html
+        return stale, (f'Last skimmed <strong>{_esc(when) or "recently"}</strong>. '
+                       f'Next reminder in {MODELS_REVIEW_STALE_DAYS} days.')
+    if last_reviewed:
+        when = _relative_age(last_reviewed)
+        return stale, (f'It has been <strong>{_esc(when) or "a while"}</strong> since you last skimmed '
+                       f'{docs} for retirement dates. Skim them, fix anything in the registry, then Mark reviewed.')
+    return stale, (f'You have not yet skimmed {docs} for retirement dates. '
+                   f'Skim them, fix anything in the registry, then Mark reviewed.')
 
 
 def _models_diff_html(result: dict, not_using: list[dict]) -> str:
@@ -28920,12 +29008,12 @@ def admin_checks(request: Request):
     from webapp import checks as _checks
     from webapp import tasks as _tasks
     from linklib.voice_db_scan import scan_db_copy_report
-    from linklib.pricing import pricing_review_is_stale, exa_pricing_review_is_stale
+    from linklib.pricing import exa_pricing_review_is_stale
     from linklib.models import models_review_is_stale
     results = _checks.run_all()
     lib = _lib()
     try:
-        pricing_last_verified = lib.get_setting("pricing_last_verified")
+        pricing_freshness = lib.pricing_freshness()
         models_last_reviewed = lib.get_setting("models_last_reviewed")
         exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
         from linklib.lineup import check_lineup
@@ -28939,7 +29027,7 @@ def admin_checks(request: Request):
         lib.close()
     refresher_status = _tasks.refresher_status()
     refresher_detail = _checks_refresher_detail(refresher_status)
-    _, pricing_message = _pricing_freshness_message(pricing_last_verified)
+    _, pricing_message = _pricing_freshness_message(pricing_freshness)
     _, models_message = _models_freshness_message(models_last_reviewed)
     _, exa_pricing_message = _exa_pricing_freshness_message(exa_pricing_last_verified)
     db_copy_detail = _db_copy_scan_detail(db_copy_report)
@@ -29067,7 +29155,10 @@ def admin_checks(request: Request):
             return {"status": "warning", "details": f"Stale—{when or 'a while ago'}"}
         return {"status": "ok", "details": f"Reviewed {when or 'recently'}"}
 
-    pricing_ai = _ai_row_status(pricing_last_verified, pricing_review_is_stale(pricing_last_verified))
+    pricing_ai = _ai_row_status(pricing_freshness["oldest"], bool(pricing_freshness["stale_ids"]))
+    if pricing_freshness["stale_ids"]:
+        n = len(pricing_freshness["stale_ids"])
+        pricing_ai = {"status": "warning", "details": f"{n} {'row' if n == 1 else 'rows'} past 90 days"}
     models_ai = _ai_row_status(models_last_reviewed, models_review_is_stale(models_last_reviewed))
     exa_ai = _ai_row_status(exa_pricing_last_verified, exa_pricing_review_is_stale(exa_pricing_last_verified))
 
@@ -29286,13 +29377,14 @@ def admin_checks(request: Request):
         _checks_detail_row(
             "pricing-freshness", "Anthropic pricing",
             _p(pricing_message)
-            + _p(f'<a href="{_pricing_gh}" {_link}>linklib/pricing.py &#8599;</a> &middot; '
-                 f'<a href="{_anthropic_pricing_url}" {_link}>Anthropic&rsquo;s pricing &#8599;</a>'),
-            pricing_row, _mark_form("/admin/checks/mark-pricing-reviewed")),
+            + _p(f'<a href="{_anthropic_pricing_url}" {_link}>Anthropic&rsquo;s pricing &#8599;</a>'),
+            pricing_row,
+            '<p style="margin:10px 0 0;font-size:13px;"><a href="/admin/system/ai#model-pricing" '
+            'style="color:var(--accent);">Open the pricing table &rarr;</a></p>'),
         _checks_detail_row(
             "new-model-awareness", "Anthropic models",
             _models_diff_html(lineup, models_not_using)
-            + _p(f'<strong>Backstop:</strong> {models_message}')
+            + _p(_MODELS_BACKSTOP_TEXT) + _p(models_message)
             + _p(f'<a href="{_models_gh}" {_link}>linklib/models.py &#8599;</a> &middot; '
                  f'<a href="{_anthropic_models_url}" {_link}>Anthropic&rsquo;s model docs &#8599;</a>'),
             models_row, _mark_form("/admin/checks/mark-models-reviewed")),
@@ -29324,25 +29416,6 @@ def admin_checks(request: Request):
 {details_html}
 </div>"""
     return HTMLResponse(_page("Checks—Admin", "Admin", body, authed=True))
-
-
-@app.post("/admin/checks/mark-pricing-reviewed")
-def admin_checks_mark_pricing_reviewed(request: Request):
-    """Issue #98, Piece 2 — the manual "Mark reviewed" action: Brian has
-    actually re-checked MODEL_PRICING against Anthropic's current
-    published rates and confirmed/updated it (MODEL_PRICING is Claude-only
-    — see _pricing_freshness_banner's docstring). Same plain
-    set-a-dated-setting shape as every other reviewed-toggle in this
-    codebase, just a timestamp rather than a boolean since there's no
-    per-row entity here to flip — one global "last verified" date."""
-    if not _is_authed(request):
-        return _login_redirect(request)
-    lib = _lib()
-    try:
-        lib.set_setting("pricing_last_verified", datetime.now(timezone.utc).isoformat())
-    finally:
-        lib.close()
-    return RedirectResponse("/admin/checks", status_code=303)
 
 
 @app.post("/admin/checks/mark-models-reviewed")

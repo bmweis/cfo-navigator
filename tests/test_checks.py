@@ -945,8 +945,7 @@ def test_details_rows_put_text_left_and_result_right(env, monkeypatch):
         row = html[positions[i]:end]
         assert row.index('class="chk-text"') < row.index('class="chk-status"'), a
     status_of = lambda a: html[html.index('class="chk-status"', html.index(f'id="{a}"')):]
-    assert "Never reviewed" in status_of("pricing-freshness")[:600]
-    assert 'action="/admin/checks/mark-pricing-reviewed"' in status_of("pricing-freshness")[:900]
+    assert "/admin/system/ai#model-pricing" in status_of("pricing-freshness")[:900]
     assert "No /data volume (this environment)" in status_of("disk-space")[:600]
     # Text takes the rest, the result column is a fixed named width, collapsing
     # to one column on phones (the old two-thirds / one-third split left the
