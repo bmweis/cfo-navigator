@@ -73,11 +73,11 @@ def test_top_panel_is_full_row_width_and_in_flow(live):
 def test_sources_panel_stays_open_while_ticking_and_closes_outside_or_escape(live):
     pg = live
     pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
-    pg.click("#ask-dd-top .ask-tag[data-source='feed']")
+    pg.click("#ask-dd-top .ask-tag[data-source='open_web']")
     pg.click("#ask-dd-top .ask-tag[data-source='library']")
     assert pg.is_visible("#ask-dd-top .ask-dd-panel[data-dd='sources']")
     assert pg.inner_text("#ask-dd-top [data-dd='sources'] .ask-dd-v") == "2 of 3"
-    assert sorted(pg.evaluate("activeSources()")) == ["feed", "web"]
+    assert sorted(pg.evaluate("activeSources()")) == ["feed", "open_web"]
     pg.click("#ask-q")
     assert pg.is_hidden("#ask-dd-top .ask-dd-panel[data-dd='sources']")
     pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
@@ -125,13 +125,13 @@ def test_bubble_choices_and_top_buttons_share_one_state(live):
     assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v").startswith("Quick")
     assert pg.inner_text("#fu [data-dd='depth'] .ask-dd-v").startswith("Quick")
     pg.click("#fu .ask-dd-btn[data-dd='sources']")
-    pg.click("#fu .ask-tag[data-source='feed']")
+    pg.click("#fu .ask-tag[data-source='open_web']")
     assert pg.inner_text("#ask-dd-top [data-dd='sources'] .ask-dd-v") == "3 of 3"
     pg.fill("#fu-q", "Again")
     pg.click("#fu-btn")
     pg.wait_for_function("window.__calls.length === 2")
     second = pg.evaluate("window.__calls[1]")
-    assert second["effort"] == "quick" and sorted(second["sources"]) == ["feed", "library", "web"]
+    assert second["effort"] == "quick" and sorted(second["sources"]) == ["feed", "library", "open_web"]
 
 
 def test_no_horizontal_page_overflow(live):

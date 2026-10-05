@@ -356,3 +356,51 @@ def test_ask_matchmaker_unknown_conversation_id_is_a_tool_error(live_server):
     result = _call_tool(live_server.base_url, live_server.member, "ask_matchmaker",
                          {"kind": "tools", "question": "q", "conversation_id": "999999"})
     assert "unknown conversation_id" in _error_text(result).lower()
+
+
+# ---------------------------------------------------------------------------
+# Open web (2026-10): the old "web" source value stays a trusted-sites search;
+# only the explicit open_web parameter is unrestricted, and it defaults off.
+# ---------------------------------------------------------------------------
+
+def _last_scope(db_path):
+    lib = Library(db_path)
+    try:
+        r = lib.conn.execute(
+            "SELECT use_feed, use_web, web_scope FROM ask_questions ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        return tuple(r)
+    finally:
+        lib.close()
+
+
+def test_ask_fpa_buddy_default_sources_are_never_unrestricted(live_server):
+    _dict_result(_call_tool(live_server.base_url, live_server.member, "ask_fpa_buddy",
+                            {"question": "Burn multiple?"}))
+    assert _last_scope(live_server.db_path) == (1, 0, "trusted")
+
+
+def test_ask_fpa_buddy_old_web_source_value_is_trusted_not_open(live_server):
+    _dict_result(_call_tool(live_server.base_url, live_server.member, "ask_fpa_buddy",
+                            {"question": "Burn multiple?", "sources": ["library", "web"]}))
+    assert _last_scope(live_server.db_path) == (1, 0, "trusted")
+
+
+def test_ask_fpa_buddy_open_web_only_via_the_explicit_parameter(live_server):
+    _dict_result(_call_tool(live_server.base_url, live_server.member, "ask_fpa_buddy",
+                            {"question": "Burn multiple?", "open_web": True}))
+    assert _last_scope(live_server.db_path) == (1, 1, "open")
+
+
+def test_ask_fpa_buddy_feed_and_web_together_is_still_trusted_not_open(live_server):
+    _dict_result(_call_tool(live_server.base_url, live_server.member, "ask_fpa_buddy",
+                            {"question": "Burn multiple?", "sources": ["feed", "web"]}))
+    assert _last_scope(live_server.db_path) == (1, 0, "trusted")
+
+
+def test_ask_fpa_buddy_every_sources_combination_without_open_web_is_never_open(live_server):
+    for src in (["library"], ["library", "feed", "web"], ["web"], ["feed"]):
+        _dict_result(_call_tool(live_server.base_url, live_server.member, "ask_fpa_buddy",
+                                {"question": "Burn multiple?", "sources": src}))
+        use_feed, use_web, scope = _last_scope(live_server.db_path)
+        assert use_web == 0 and scope != "open", src

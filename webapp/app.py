@@ -24020,8 +24020,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # the site (BRAND.md §5), toggled on/off by tap instead of a checkbox list.
     source_defs = [
         ("library", "Curated archive", True),
-        ("feed", "Current feed", False),
-        ("web", "Open web", True),
+        ("feed", "Current feed", True),
+        ("open_web", "Open web", False),
     ]
     _CHECK_SVG = ('<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">'
                   '<path d="M1 5L4 8L9 2" stroke="#001B4F" stroke-width="1.6" fill="none" '
@@ -24462,6 +24462,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-src-list a, .ask-src-list span.ask-src-static{{display:inline-flex;align-items:flex-start;gap:5px;max-width:100%;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
 @media(hover:hover){{.ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}}}
 .ask-src-own{{margin-left:4px;font-size:11px;color:var(--muted);font-weight:500;}}
+.ask-src-open{{margin-left:4px;font-size:11px;font-weight:600;color:var(--ink-soft);background:var(--line);border-radius:999px;padding:1px 7px;white-space:nowrap;}}
 .ask-src-caption{{margin:6px 0 0;font-size:11px;color:var(--muted);}}
 
 .ask-loading{{display:flex;align-items:center;gap:10px;padding:2px 0;}}
@@ -24522,7 +24523,9 @@ function toggleSource(el) {{
 function tierCost(tier) {{
   var c = COST[tier];
   if (c == null) return null;
-  var webOn = !!document.querySelector('.fpa-intro-area-controls .ask-tag[data-source="web"].active');
+  // One Exa search per turn when either web-capable source is on (Current feed
+  // searches the trusted sites, Open web searches everything; both is still one).
+  var webOn = !!document.querySelector('.fpa-intro-area-controls .ask-tag[data-source="feed"].active, .fpa-intro-area-controls .ask-tag[data-source="open_web"].active');
   return c + (webOn ? EXA_UNIT : 0);
 }}
 function costText(tier) {{
@@ -24712,6 +24715,9 @@ function srcListHtml(d) {{
   var cites = d.citations || [];
   var items = cites.map(function(c) {{
     var ownTag = c.own_content ? ' <span class="ask-src-own">(own writing)</span>' : '';
+    // Open web (2026-10): only an explicit trusted === false is tagged; a legacy
+    // citation has no key and every legacy web source was a trusted one.
+    if (c.type === 'web' && c.trusted === false) ownTag += ' <span class="ask-src-open">Open web</span>';
     // The emoji rides inside the pill so a long title can never drop below it.
     return '<li><a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span>' : '') + '<span>[' + c.n + '] ' + escapeHtml(c.title) + '</span></a>' + ownTag + '</li>';
   }});
@@ -25312,12 +25318,15 @@ async def ask(request: Request):
     # include a `history` field in the payload; it's ignored (untrusted)
     # rather than rejected so those tabs keep working through the transition.
 
-    raw_sources = payload.get("sources") or ["library", "web"]
+    raw_sources = payload.get("sources") or ["library", "feed"]
     if isinstance(raw_sources, str):
         raw_sources = [s.strip() for s in raw_sources.split(",")]
     use_library = "library" in raw_sources
-    use_feed    = "feed"    in raw_sources
-    use_web     = "web"     in raw_sources
+    # "web" is the pre-2026-10 chip key, which meant the trusted-domain search.
+    # A stale tab that still sends it gets Current feed (trusted), never an
+    # unrestricted search; only the explicit "open_web" key turns that on.
+    use_feed    = "feed" in raw_sources or "web" in raw_sources
+    use_web     = "open_web" in raw_sources
 
     lib = _lib()
     try:
@@ -31891,10 +31900,35 @@ def _group_conversations(rows: list[dict]) -> list[list[dict]]:
     return convos
 
 
+def _ask_source_labels(row: dict) -> list[tuple[str, str, str]]:
+    """(key, icon, plain-words label) for each source a recorded turn used.
+
+    The one rendering rule for web scope. A row with `web_scope` of 'trusted'
+    or 'open' was recorded after the 2026-10 Open web change: use_feed means
+    Current feed (RSS items plus a search of the trusted sites) and use_web
+    means Open web. A row with `web_scope` '' predates it, and there use_feed
+    meant RSS items only and use_web meant a search limited to the trusted
+    sites. So a legacy feed row never claims web search, and a legacy web row
+    never reads as unrestricted. No backfill: the rule reads the old flags
+    for what they meant then."""
+    new_shape = (row.get("web_scope") or "") in ("trusted", "open")
+    out = []
+    if row.get("use_library"):
+        out.append(("library", _ASK_SOURCE_ICONS["library"], "Curated archive"))
+    if row.get("use_feed"):
+        out.append(("feed", _ASK_SOURCE_ICONS["feed"],
+                    "Current feed (RSS items and trusted sites)" if new_shape
+                    else "RSS feed items only"))
+    if row.get("use_web"):
+        out.append(("web", _ASK_SOURCE_ICONS["web"],
+                    "Open web" if new_shape else "Web search, trusted sites only"))
+    return out
+
+
 def _ask_settings_badge(row: dict) -> str:
-    srcs = "".join(_ASK_SOURCE_ICONS[k] for k, key in
-                   (("library", "use_library"), ("feed", "use_feed"), ("web", "use_web"))
-                   if row.get(key))
+    srcs = "".join(
+        f'<span title="{_esc(label)}" aria-label="{_esc(label)}" role="img">{icon}</span>'
+        for _key, icon, label in _ask_source_labels(row))
     model_short = (row.get("model") or "").replace("claude-", "")
     return f'{srcs} <span style="color:var(--muted);">{_esc(model_short)} &middot; {_esc(row.get("effort") or "")}</span>'
 
@@ -31952,6 +31986,14 @@ def _render_cited_answer(answer: str, citations_json: str) -> tuple[str, str]:
         # prose mention.
         own_tag = (' <span style="color:var(--muted);font-size:11px;">(own writing)</span>'
                    if c.get("own_content") else "")
+        # Open web (2026-10): a web citation from outside the trusted list
+        # carries trusted=False. Only an explicit False tags; a legacy
+        # citation has no key and every legacy web source was a trusted one.
+        if c.get("type") == "web" and c.get("trusted") is False:
+            own_tag += (' <span class="ask-src-open" style="margin-left:4px;font-size:11px;'
+                        'font-weight:600;color:var(--ink-soft);background:var(--line);'
+                        'border-radius:999px;padding:1px 7px;white-space:nowrap;">'
+                        'Open web</span>')
         items.append(
             f'<li><a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener" '
             f'style="display:inline-flex;gap:5px;align-items:flex-start;max-width:100%;">'
@@ -32186,7 +32228,7 @@ def admin_ask_report_export(request: Request, user: str = ""):
     writer.writerow(["date", "asker", "conversation_id", "turn", "question", "answer", "model", "effort",
                      "use_library", "use_feed", "use_web", "input_tokens", "output_tokens",
                      "cache_creation_tokens", "cache_read_tokens", "cost_usd", "rewrite_cost_usd",
-                     "citations"])
+                     "citations", "web_scope"])
     for r in rows:
         asker = r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
         writer.writerow([
@@ -32196,6 +32238,7 @@ def admin_ask_report_export(request: Request, user: str = ""):
             r["input_tokens"], r["output_tokens"], r["cache_creation_tokens"], r["cache_read_tokens"],
             f'{r["cost_usd"]:.6f}', f'{float(r.get("rewrite_cost_usd") or 0):.6f}',
             _csv_safe(_citations_text(r)),
+            r.get("web_scope") or "",
         ])
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return Response(

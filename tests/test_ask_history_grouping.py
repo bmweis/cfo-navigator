@@ -175,9 +175,9 @@ def test_csv_export_stays_flat(env):
     assert len(lines) == 1 + 7
     assert "conversation_id" in lines[0]
     # New columns ride LAST (appended, so positional parsers of the old
-    # columns keep working): rewrite_cost_usd, then citations (#94).
-    assert lines[0].endswith("rewrite_cost_usd,citations")
+    # columns keep working): rewrite_cost_usd, then citations (#94), then web_scope (Open web).
+    assert lines[0].endswith("rewrite_cost_usd,citations,web_scope")
     follow_up = next(ln for ln in lines if "And for Series A?" in ln)
-    assert follow_up.endswith("0.000400,")
+    assert follow_up.endswith("0.000400,,")
     turn_one = next(ln for ln in lines if "What is NRR?" in ln)
-    assert turn_one.endswith("0.000000,")
+    assert turn_one.endswith("0.000000,,")

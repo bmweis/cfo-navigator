@@ -133,7 +133,7 @@ def test_native_tool_is_armed_when_exa_disabled(monkeypatch, tmp_path):
     lib.seed_voice_prompts()
     try:
         agent.answer_question(lib, "a question", use_library=False,
-                              use_web=True, opml_path="preferred_sites.opml")
+                              use_feed=True, opml_path="preferred_sites.opml")
     finally:
         lib.close()
 
@@ -142,6 +142,7 @@ def test_native_tool_is_armed_when_exa_disabled(monkeypatch, tmp_path):
     assert tool["type"] == "web_search_20250305"
     assert tool["name"] == "web_search"
     assert tool["max_uses"] == agent.EFFORT_SETTINGS["standard"]["max_web"]
+    # Current feed alone: trusted sites only.
     assert "allowed_domains" in tool
 
 
@@ -151,7 +152,7 @@ def test_native_tool_not_armed_when_exa_enabled(monkeypatch, tmp_path):
     _fake_lib_retrieve(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("EXA_API_KEY", "fake-key")
-    monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4: ([], 0, 0.0))
+    monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4, restrict=True: ([], 0, 0.0))
 
     captured = {}
 

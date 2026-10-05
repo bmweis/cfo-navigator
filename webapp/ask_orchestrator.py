@@ -56,8 +56,8 @@ def run_ask(
     model: str = "",
     effort: str = "standard",
     use_library: bool = True,
-    use_feed: bool = False,
-    use_web: bool = True,
+    use_feed: bool = True,
+    use_web: bool = False,
     conversation_id: str = "",
     opml_path: str | None = None,
     is_private: bool = False,
@@ -172,6 +172,7 @@ def run_ask(
             citations=ans.citations,
             stop_reason=stop_reason_of(ans),
             is_private=is_private,
+            web_scope=getattr(ans, "web_scope", ""),
         )
         new_conversation_id = conversation_id or str(row_id)
         turn_id = row_id

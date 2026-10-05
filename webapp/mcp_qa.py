@@ -136,18 +136,25 @@ def register_qa_tools(mcp: FastMCP, lib_factory: Callable[[], Library], opml_pat
     @mcp.tool()
     async def ask_fpa_buddy(ctx: Context, question: str, conversation_id: str = "",
                              sources: list[str] | None = None,
-                             effort: str = "standard") -> dict:
+                             effort: str = "standard",
+                             open_web: bool = False) -> dict:
         """Ask FP&A Buddy a question — the same pipeline `/tools/fpa-buddy`
-        uses (hybrid library retrieval + feed + web search, a cited
-        answer), run in-process under the calling token's own identity so
+        uses (hybrid library retrieval + current feed + optional open web
+        search, a cited answer), run in-process under the calling token's own identity so
         the caller's real dollar cap, conversation history, and
         `ask_questions` audit row all apply exactly as they would on the
         web (see this module's own docstring for why this can't be a
         simple HTTP self-call to `/ask`).
 
         `sources` is a subset of `["library", "feed", "web"]` (default
-        `["library", "web"]`, matching /ask's own default) — which
-        retrieval tiers to use. `effort` is `"quick"`, `"standard"`
+        `["library", "web"]`) — which retrieval tiers to use. `"feed"` and
+        `"web"` both mean the site's Current feed, so passing `"web"` also pulls
+        RSS items (the Current feed is recent RSS items plus a web search
+        restricted to the sites Brian trusts), and neither value is ever an
+        unrestricted search. To search the whole web, set `open_web=true`
+        (default `false`); that is the only way to get an unrestricted
+        search, and it replaces the trusted-only search with one open call.
+        `effort` is `"quick"`, `"standard"`
         (default), or `"deep"` — the same three tiers `/tools/fpa-buddy`'s
         UI offers, trading answer depth for cost/latency.
 
@@ -191,8 +198,10 @@ def register_qa_tools(mcp: FastMCP, lib_factory: Callable[[], Library], opml_pat
                     lib, user_id, question,
                     effort=effort,
                     use_library="library" in src,
-                    use_feed="feed" in src,
-                    use_web="web" in src,
+                    # "feed" and "web" both mean Current feed (RSS plus the
+                    # trusted-domain search); only open_web=True is unrestricted.
+                    use_feed=("feed" in src) or ("web" in src),
+                    use_web=bool(open_web),
                     conversation_id=(conversation_id or "").strip(),
                     opml_path=opml_path,
                 )

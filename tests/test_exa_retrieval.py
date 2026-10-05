@@ -139,7 +139,7 @@ def test_answer_question_folds_exa_cost_when_anthropic_key_missing(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("EXA_API_KEY", "fake-key")  # Phase 7: Exa is the provider only when this is set
     exa_hits = [{"title": "Web Hit", "url": "https://w.com", "summary": "s"}]
-    monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4: (exa_hits, 3, 0.007))
+    monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4, restrict=True: (exa_hits, 3, 0.007))
 
     ans = agent.answer_question(None, "a question", use_library=False,
                                 use_web=True, opml_path="preferred_sites.opml")
@@ -187,7 +187,7 @@ def test_answer_question_folds_exa_cost_on_success(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("EXA_API_KEY", "fake-key")  # Phase 7: Exa is the provider only when this is set
     exa_hits = [{"title": "Web Hit", "url": "https://w.com", "summary": "s"}]
-    monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4: (exa_hits, 3, 0.007))
+    monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4, restrict=True: (exa_hits, 3, 0.007))
 
     class _FakeMessages:
         def create(self, **kwargs):
@@ -217,7 +217,7 @@ def test_answer_question_folds_exa_cost_on_answer_call_exception(monkeypatch, tm
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     monkeypatch.setenv("EXA_API_KEY", "fake-key")  # Phase 7: Exa is the provider only when this is set
     exa_hits = [{"title": "Web Hit", "url": "https://w.com", "summary": "s"}]
-    monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4: (exa_hits, 3, 0.007))
+    monkeypatch.setattr(agent, "retrieve_exa", lambda q, opml, max_results=4, restrict=True: (exa_hits, 3, 0.007))
 
     class _FakeMessages:
         def create(self, **kwargs):
