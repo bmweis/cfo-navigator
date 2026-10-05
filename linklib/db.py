@@ -9293,6 +9293,56 @@ class Library:
             self.conn.commit()
         return []
 
+    def typical_tier_tokens(self, tier: str, *, min_rows: int = 10) -> tuple[int, int] | None:
+        """Average (input, output) tokens of the last 50 first-turn answers at
+        this tier, or None when there are fewer than min_rows. Feeds the
+        pre-call cost estimate; the fixed profile is the fallback."""
+        rows = self.conn.execute(
+            "SELECT input_tokens + cache_creation_tokens + cache_read_tokens AS i, output_tokens AS o "
+            "FROM ask_questions WHERE effort=? AND turn_index=0 AND output_tokens>0 "
+            "ORDER BY id DESC LIMIT 50", (tier,)).fetchall()
+        if len(rows) < min_rows:
+            return None
+        return (round(sum(r["i"] for r in rows) / len(rows)), round(sum(r["o"] for r in rows) / len(rows)))
+
+    def deactivate_model(self, model_id: str, replacements: dict[str, str]) -> list[str]:
+        """Deactivate a model in one transaction. Every role using it needs a
+        replacement that passes role_problems; with any role missing or any
+        replacement refused, nothing is written and the problems are returned.
+        A flag, never a delete: pricing rows and cost history stay."""
+        if self.get_model_status(model_id) is None:
+            return ["unknown model"]
+        problems: list[str] = []
+        from .models import ROLE_LABELS
+        for role in self.roles_using(model_id):
+            rep = (replacements.get(role) or "").strip()
+            if not rep:
+                problems.append(f"{ROLE_LABELS[role]} needs a replacement")
+            elif rep == model_id:
+                problems.append(f"{ROLE_LABELS[role]} replacement can't be the model being deactivated")
+            else:
+                problems += [f"{ROLE_LABELS[role]}: {p}" for p in self.role_problems(role, rep)]
+        if problems:
+            return problems
+        try:
+            for role in self.roles_using(model_id):
+                rep = replacements[role].strip()
+                if role == "enrichment":
+                    self.conn.execute("INSERT INTO settings(key, value) VALUES ('enrich_model', ?) "
+                                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (rep,))
+                else:
+                    self.conn.execute(
+                        "INSERT INTO model_roles(role, model_id, updated_at) VALUES (?,?,?) "
+                        "ON CONFLICT(role) DO UPDATE SET model_id=excluded.model_id, updated_at=excluded.updated_at",
+                        (role, rep, _now()))
+            self.conn.execute("UPDATE model_catalog SET status='deactivated', reason='', status_changed_at=? "
+                              "WHERE model_id=?", (_now(), model_id))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return []
+
     def set_model_note(self, model_id: str, note: str) -> None:
         self.conn.execute("UPDATE model_catalog SET note=? WHERE model_id=?", ((note or "").strip(), model_id))
         self.conn.commit()

@@ -7,6 +7,8 @@ Sonnet 5 to the once-planned $3/$15) would go uncaught.
 """
 from __future__ import annotations
 
+import pytest
+
 from linklib.agent import EFFORT_SETTINGS
 from linklib.models import _REGISTRY
 from linklib.pricing import (
@@ -115,19 +117,20 @@ def test_every_effort_tier_model_has_a_pricing_row():
     assert not missing, f"EFFORT_SETTINGS model(s) with no MODEL_PRICING row: {sorted(missing)}"
 
 
-def test_every_effort_tier_model_has_a_cost_estimate_row():
-    """Same gap as above, for linklib.agent.COST_ESTIMATES — the rough
-    pre-call estimate shown on /tools/fpa-buddy before a question is asked.
-    COST_ESTIMATES.get(model, {}).get(tier) degrades silently to None (a
-    blank cost estimate in the UI) rather than raising, so nothing else
-    would ever catch a tier pointed at a model missing from this table."""
-    from linklib.agent import COST_ESTIMATES
-    for tier, settings in EFFORT_SETTINGS.items():
-        model = settings["model"]
-        assert model in COST_ESTIMATES, f"EFFORT_SETTINGS['{tier}'] model {model!r} has no COST_ESTIMATES row"
-        assert tier in COST_ESTIMATES[model], (
-            f"COST_ESTIMATES[{model!r}] has no '{tier}' entry"
-        )
+def test_tier_cost_estimate_is_derived_from_pricing_and_follows_the_model():
+    from linklib.agent import EFFORT_SETTINGS, tier_cost_estimate
+    # reproduces the old hand-typed Sonnet 4.6 numbers
+    assert tier_cost_estimate("claude-sonnet-4-6", "quick") == pytest.approx(0.014, abs=0.0005)
+    assert tier_cost_estimate("claude-sonnet-4-6", "standard") == pytest.approx(0.028, abs=0.0005)
+    assert tier_cost_estimate("claude-sonnet-4-6", "deep") == pytest.approx(0.048, abs=0.0005)
+    for tier, st in EFFORT_SETTINGS.items():
+        assert tier_cost_estimate(st["model"], tier) > 0
+    assert tier_cost_estimate("claude-opus-5-5", "deep") < tier_cost_estimate("claude-opus-5", "deep")
+
+
+def test_the_wrong_cost_estimates_dict_is_gone():
+    import linklib.agent as agent
+    assert not hasattr(agent, "COST_ESTIMATES")
 
 
 def test_pricing_review_is_stale_thresholds():

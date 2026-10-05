@@ -33,7 +33,7 @@ MAX_FOLLOWUPS = 10
 MAX_HISTORY_CHARS = 6000
 
 # Rough per-turn cost estimate (USD), shown nowhere in the UI today (matching
-# FP&A Buddy's own COST_ESTIMATES intent) but kept here for admin-facing use
+# FP&A Buddy's own tier_cost_estimate intent) but kept here for admin-facing use
 # if that becomes useful later. Based on the ~38-community dataset's system
 # prompt size with prompt caching in effect after the first turn of a
 # conversation (see _client_kwargs's cache_control).

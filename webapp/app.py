@@ -23968,7 +23968,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         return _login_redirect(request)
     authed = _is_authed(request)   # admin flag (e.g. for any admin-only affordances)
 
-    from linklib.agent import COST_ESTIMATES, EFFORT_SETTINGS
+    from linklib.agent import EFFORT_SETTINGS, tier_cost_estimate
 
     # This month's usage-to-date vs. the user's effective dollar cap (their
     # override, else the global default). None for token-only access or the
@@ -24137,10 +24137,15 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # omitted from the page entirely. Keyed by tier only (not model) since the
     # model is no longer a user-visible axis.
     import json as _json
-    tier_cost = {
-        tier: COST_ESTIMATES.get(settings["model"], {}).get(tier)
-        for tier, settings in EFFORT_SETTINGS.items()
-    }
+    _lib_cost = _lib()
+    try:
+        tier_cost = {
+            tier: tier_cost_estimate(_lib_cost.get_role_model(f"buddy_{tier}"), tier,
+                                     _lib_cost.typical_tier_tokens(tier))
+            for tier in EFFORT_SETTINGS
+        }
+    finally:
+        _lib_cost.close()
     cost_js = _json.dumps(tier_cost) if authed else "{}"
     exa_js = _json.dumps(exa_unit) if authed else "0"
     # Admin-only, one muted line at the bottom of the Depth dropdown, next to the
@@ -26914,7 +26919,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Site utilities and system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
-                                  "model_pricing", "model_catalog",
+                                  "model_pricing", "model_catalog", "model_roles",
                                   "narrative_review_log", "entity_citations", "matchmaker_questions",
                                   "compare_summary_cache", "compare_summary_feedback",
                                   "voice_review_queue", "voice_approved_terms",
@@ -27997,7 +28002,6 @@ def admin_system_ai(request: Request):
         return _login_redirect(request)
 
     from linklib.models import models_review_is_stale
-    from linklib.agent import EFFORT_SETTINGS
     from linklib.pricing import exa_pricing_review_is_stale
 
     lib = _lib()
@@ -28015,6 +28019,8 @@ def admin_system_ai(request: Request):
                      for m in _REG}
         matchmaker_model = lib.get_role_model("matchmaker")
         matchmaker_blocks = {m["id"]: lib.role_problems("matchmaker", m["id"]) for m in _REG}
+        buddy_models = {t: lib.get_role_model(f"buddy_{t}") for t in ("quick", "standard", "deep")}
+        buddy_blocks = {t: {m["id"]: lib.role_problems(f"buddy_{t}", m["id"]) for m in _REG} for t in buddy_models}
     finally:
         lib.close()
     has_exa_key = bool(os.environ.get("EXA_API_KEY"))
@@ -28034,7 +28040,6 @@ def admin_system_ai(request: Request):
                 f'</div>{note_html}</div>')
 
     live_badge = '<span style="color:var(--seafoam-deep);font-weight:600;">Live&mdash;no redeploy</span>'
-    code_badge = '<span style="color:#92400e;font-weight:600;">Code-only&mdash;needs a deploy</span>'
 
     # --- Claude ---------------------------------------------------------
     claude_rows = (
@@ -28042,11 +28047,9 @@ def admin_system_ai(request: Request):
              f'Description, Agent taxonomy, Bottom line, Community profile fields, article summaries. {live_badge}&mdash;'
              f'set in Configuration above.')
         + _row("FP&amp;A Buddy",
-               " / ".join(_esc(_enrich_model_label(t["model"])) for t in
-                          [EFFORT_SETTINGS["quick"], EFFORT_SETTINGS["standard"], EFFORT_SETTINGS["deep"]]),
-               f'Quick / Standard / Deep, one model per tier ({_esc(EFFORT_SETTINGS["quick"]["model"])} / '
-               f'{_esc(EFFORT_SETTINGS["standard"]["model"])} / {_esc(EFFORT_SETTINGS["deep"]["model"])}). '
-               f'{code_badge}&mdash;there&rsquo;s no admin picker for this yet. '
+               " / ".join(_esc(_enrich_model_label(buddy_models[t])) for t in ("quick", "standard", "deep")),
+               f'Quick / Standard / Deep, one model per tier. {live_badge}&mdash;set in Configuration above, '
+               f'with a cost confirmation. '
                f'<a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works &rarr;</a>')
         + _row("Matchmaker", _esc(_enrich_model_label(matchmaker_model)),
                f'Software and Community matchmaker chat, one shared model. {live_badge}&mdash;'
@@ -28102,6 +28105,7 @@ def admin_system_ai(request: Request):
 <p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Changes take effect immediately. No redeploy.</p>
 {_card("Enrichment model", _ai_model_config_html(enrich_model))}
 {_card("Matchmaker model", _matchmaker_model_html(matchmaker_model, matchmaker_blocks))}
+{_card("FP&amp;A Buddy tiers", _buddy_tiers_html(buddy_models, buddy_blocks))}
 {_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, enable_blocks, role_info))}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
 
@@ -28135,6 +28139,9 @@ async def admin_system_ai_model_save(request: Request):
     role = (payload.get("role") or "enrichment").strip()
     if not model:
         return JSONResponse({"ok": False, "error": "No model given."}, status_code=400)
+    if role.startswith("buddy_") and payload.get("confirm") is not True:
+        return JSONResponse({"ok": False, "error": "Confirm the change first: a Buddy tier change needs the cost confirmation."},
+                            status_code=400)
     lib = _lib()
     try:
         problems = lib.set_role_model(role, model)
@@ -28170,6 +28177,131 @@ def _matchmaker_model_html(current: str, blocks: dict) -> str:
             f'if(!r.ok){{var d=await r.json().catch(function(){{return {{}};}});throw new Error(d.error||"");}}'
             f's.dataset.current=s.value;t.textContent="Saved.";t.style.color="#065f46";}}catch(e){{s.value=s.dataset.current;'
             f't.textContent=e.message||"Save failed.";t.style.color="#b91c1c";}}finally{{s.disabled=false;}}}}</script>')
+
+
+def _buddy_tiers_html(models: dict, blocks: dict) -> str:
+    """Buddy tier pickers (PR 3b-2). Changing a tier asks for confirmation that
+    shows the per-question cost estimate before and after (derived from
+    model_pricing and typical token counts); the server refuses an
+    unconfirmed change. Models not allowed for Buddy are disabled with the reason."""
+    from linklib.models import _REGISTRY
+    rows = []
+    for tier in ("quick", "standard", "deep"):
+        cur = models[tier]
+        opts = "".join(
+            f'<option value="{_esc(m["id"])}"{" selected" if m["id"] == cur else ""}'
+            f'{" disabled" if blocks[tier].get(m["id"]) and m["id"] != cur else ""}>{_esc(m["label"])}'
+            f'{"" if not blocks[tier].get(m["id"]) or m["id"] == cur else " (" + _esc(blocks[tier][m["id"]][0]) + ")"}</option>'
+            for m in _REGISTRY)
+        rows.append(f'<div style="display:flex;gap:10px;align-items:center;margin:0 0 8px;flex-wrap:wrap;">'
+                    f'<span style="width:90px;font-size:14px;font-weight:600;">{tier.title()}</span>'
+                    f'<select data-tier="{tier}" data-current="{_esc(cur)}" onchange="previewTier(this)" '
+                    f'style="flex:1;min-width:180px;max-width:360px;padding:8px 12px;border:1px solid var(--line);'
+                    f'border-radius:10px;font:inherit;background:#fff;">{opts}</select></div>')
+    return ("".join(rows)
+            + '<div id="tier-confirm" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--line);'
+              'border-radius:10px;font-size:14px;"></div>'
+            + '<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;">Estimates are per question, from the pricing table '
+              'and typical token counts. They are not charges.</p>'
+            + """<script>
+async function previewTier(sel){var box=document.getElementById('tier-confirm');
+var r=await fetch('/admin/system/ai/buddy-tier/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:sel.dataset.tier,model:sel.value})});
+var d=await r.json();box.style.display='block';
+if(!d.ok){box.textContent=d.error;sel.value=sel.dataset.current;return;}
+box.innerHTML='';var t=document.createElement('div');t.textContent=d.summary;box.appendChild(t);
+var ok=document.createElement('button');ok.className='btn';ok.style.cssText='font-size:13px;padding:6px 16px;margin:8px 8px 0 0;';ok.textContent='Confirm change';
+ok.onclick=async function(){var r2=await fetch('/admin/system/ai/model/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({role:'buddy_'+sel.dataset.tier,model:sel.value,confirm:true})});
+if(r2.ok){location.reload();}else{var e=await r2.json().catch(function(){return {};});t.textContent=e.error||'Save failed.';sel.value=sel.dataset.current;}};
+var no=document.createElement('button');no.className='btn btn-ghost';no.style.cssText='font-size:13px;padding:6px 16px;margin-top:8px;';no.textContent='Cancel';
+no.onclick=function(){sel.value=sel.dataset.current;box.style.display='none';};box.appendChild(ok);box.appendChild(no);}
+</script>""")
+
+
+@app.post("/admin/system/ai/buddy-tier/preview")
+async def admin_system_ai_buddy_tier_preview(request: Request):
+    """Confirmation text for a Buddy tier change: the per-question estimate
+    before and after. Writes nothing."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    from linklib.agent import tier_cost_estimate
+    p = await request.json()
+    tier, model = (p.get("tier") or ""), (p.get("model") or "").strip()
+    lib = _lib()
+    try:
+        role = f"buddy_{tier}"
+        problems = lib.role_problems(role, model)
+        if problems:
+            return JSONResponse({"ok": False, "error": f"Can't use {_enrich_model_label(model)} for Buddy {tier.title()}: {', '.join(problems)}."})
+        before_m = lib.get_role_model(role)
+        tokens = lib.typical_tier_tokens(tier)
+        b, a = tier_cost_estimate(before_m, tier, tokens), tier_cost_estimate(model, tier, tokens)
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True, "summary": (
+        f"Buddy {tier.title()}: {_enrich_model_label(before_m)} to {_enrich_model_label(model)}. "
+        f"Estimated cost per question ${b:.3f} before, ${a:.3f} after.")})
+
+
+@app.get("/admin/system/ai/deactivate/{model_id}", response_class=HTMLResponse)
+def admin_system_ai_deactivate_page(model_id: str, request: Request, error: str = ""):
+    """The deactivation dialog: names every role using the model and requires a
+    replacement for each. Nothing is applied until the form is submitted."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    from linklib.models import _REGISTRY, ROLE_LABELS
+    lib = _lib()
+    try:
+        if lib.get_model_status(model_id) is None:
+            raise HTTPException(status_code=404, detail="unknown model")
+        roles = lib.roles_using(model_id)
+        choices = {r: [m for m in _REGISTRY if m["id"] != model_id and not lib.role_problems(r, m["id"])] for r in roles}
+    finally:
+        lib.close()
+    rows = "".join(
+        f'<label style="display:block;margin:0 0 10px;font-size:14px;">{_esc(ROLE_LABELS[r])} moves to '
+        f'<select name="role_{r}" required style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;">'
+        f'<option value="">Choose a replacement</option>'
+        + "".join(f'<option value="{_esc(m["id"])}">{_esc(m["label"])}</option>' for m in choices[r])
+        + '</select></label>' for r in roles)
+    intro = ("Roles using it: " + ", ".join(_esc(ROLE_LABELS[r]) for r in roles) + ". Each needs a replacement before it can be deactivated."
+             if roles else "No role uses this model. Deactivating only stops it being chosen.")
+    err = (f'<div style="background:var(--coral-wash);color:var(--navy);border-radius:8px;padding:8px 12px;margin:0 0 12px;">{_esc(error)}</div>' if error else "")
+    body = f"""<div class="page page-standard"><a href="/admin/system/ai#model-pricing" style="color:var(--accent);">&larr; AI configuration</a>
+<h1>Deactivate {_esc(_enrich_model_label(model_id))}</h1>
+<div style="max-width:720px;"><p>{intro} Deactivating keeps its pricing row and all cost history.</p>{err}
+<form method="post" action="/admin/system/ai/deactivate/{_esc(model_id)}">{rows}
+<button class="btn" type="submit">Deactivate</button> <a href="/admin/system/ai#model-pricing" class="btn btn-ghost">Cancel</a></form></div></div>"""
+    return HTMLResponse(_page("Deactivate model—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/system/ai/deactivate/{model_id}")
+async def admin_system_ai_deactivate(model_id: str, request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    reps = {k.removeprefix("role_"): v for k, v in form.items() if k.startswith("role_") and v}
+    lib = _lib()
+    try:
+        problems = lib.deactivate_model(model_id, reps)
+    finally:
+        lib.close()
+    if problems:
+        from urllib.parse import quote
+        return RedirectResponse(f"/admin/system/ai/deactivate/{quote(model_id)}?error={quote('; '.join(problems))}", status_code=303)
+    return RedirectResponse("/admin/system/ai#model-pricing", status_code=303)
+
+
+@app.post("/admin/system/ai/reactivate/{model_id}")
+def admin_system_ai_reactivate(model_id: str, request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    lib = _lib()
+    try:
+        if lib.get_model_status(model_id) == "deactivated":
+            lib.set_model_status(model_id, "available")
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/system/ai#model-pricing", status_code=303)
 
 
 _PRICE_COLS = (("input", "Input"), ("output", "Output"), ("cache_write", "Cache write"),
@@ -28215,7 +28347,12 @@ def _model_pricing_card_html(rows: list[dict], status: dict, enable_blocks: dict
                 f'<label style="font-size:12px;"><input type="checkbox" name="verified" value="1"> '
                 f'I checked these rates against Anthropic&rsquo;s page today</label>'
                 f'<button class="btn" type="submit" style="font-size:12px;padding:5px 12px;">Save</button>'
-                f'</form></details>')
+                f'</form>' + (
+                    f'<form method="post" action="/admin/system/ai/reactivate/{_esc(mid)}" style="margin-top:8px;">'
+                    f'<button class="btn btn-ghost" type="submit" style="font-size:12px;padding:5px 12px;">Reactivate</button></form>'
+                    if cat.get("status") == "deactivated" else
+                    f'<a href="/admin/system/ai/deactivate/{_esc(mid)}" style="display:inline-block;margin-top:8px;'
+                    f'font-size:12px;color:var(--accent);">Deactivate&hellip;</a>') + '</details>')
         block = enable_blocks.get(mid) or []
         note = f'<div style="font-size:12px;color:var(--muted);">Can&rsquo;t be enabled: {_esc(", ".join(block))}</div>' if block else ""
         src = f'<div style="font-size:12px;color:var(--muted);">{_esc(r["source_note"])}</div>' if r["source_note"] else ""

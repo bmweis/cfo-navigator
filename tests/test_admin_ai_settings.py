@@ -332,7 +332,7 @@ def test_claude_section_shows_all_three_surfaces_and_their_current_models(env):
     assert EFFORT_SETTINGS["deep"]["model"] in body
     assert DEFAULT_CHAT_MODEL in body
     assert "Live" in body
-    assert "Code-only" in body
+    assert "Code-only" not in body   # every Claude surface is live-configurable now (PR 3b)
 
 
 def test_enrichment_model_in_usage_index_reflects_a_changed_setting(env):
