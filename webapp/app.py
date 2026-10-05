@@ -93,6 +93,7 @@ from webapp.ask_orchestrator import (
     ForbiddenConversationError as _AskForbiddenConversationError,
     UnknownConversationError as _AskUnknownConversationError,
     AskTurnFailed as _AskTurnFailed,
+    FAILED_TURN_MESSAGE as _ASK_FAILED_TURN_MESSAGE,
     run_ask,
 )
 from webapp.matchmaker_orchestrator import (
@@ -25168,13 +25169,16 @@ async function doAsk(followUp, skipSimilar) {{
       body: JSON.stringify({{ question: q, effort: effort, sources: sources, conversation_id: convoId,
         private: (!followUp && !convoId) ? !!(document.getElementById('ask-private') || {{}}).checked : undefined }})
     }});
-    var d = await resp.json();
+    // An edge error page (Cloudflare, Railway) is HTML, so the body may not parse.
+    var d = await resp.json().catch(function() {{ return {{}}; }});
     if (stale()) {{ if (d.usage) updateUsage(d.usage); dropLate(resp.ok && !d.capped); return; }}
     if (!resp.ok) {{
-      answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(d.detail || 'Error') + '</span>';
+      // A 5xx with no JSON detail is the same failure to the reader.
+      var edgeFail = resp.status >= 500 && !d.detail;
+      answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(edgeFail ? {json.dumps(_ASK_FAILED_TURN_MESSAGE)} : (d.detail || 'Error')) + '</span>';
       if (d.usage) updateUsage(d.usage);
       // The question goes back in the box so a retry is one tap.
-      if (d.failed) {{ qEl.value = q; qEl.dispatchEvent(new Event('input')); }}
+      if (d.failed || edgeFail) {{ qEl.value = q; qEl.dispatchEvent(new Event('input')); }}
       done(asked ? 'ready' : 'none');
       return;
     }}
@@ -25202,6 +25206,7 @@ async function doAsk(followUp, skipSimilar) {{
     if (stale()) {{ dropLate(false); return; }}
     console.error('FP&A Buddy ask failed', e);
     answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong. Try again.</span>';
+    qEl.value = q; qEl.dispatchEvent(new Event('input'));
     done(asked ? 'ready' : 'none');
   }}
 }}
