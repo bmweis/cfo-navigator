@@ -1,5 +1,5 @@
 """Coverage for the model-config consolidation (default-model literal, not
-behavior): agent.py/matchmaker.py's identical `LINKLIB_CHAT_MODEL`
+behavior): agent.py's `LINKLIB_CHAT_MODEL`
 fallback now resolves to one shared `linklib.models.DEFAULT_CHAT_MODEL`
 constant instead of separately-typed literals; dedupe.py keeps its own
 extra `LINKLIB_DEDUPE_MODEL` override layer, with only its innermost literal
@@ -39,15 +39,20 @@ def test_shared_constant_is_the_confirmed_default():
 def test_agent_matchmaker_default_to_the_shared_constant_with_no_env():
     import os
     env = {"PATH": os.environ.get("PATH", "")}
-    for module in ("linklib.agent", "linklib.matchmaker"):
-        assert _resolve(module, "DEFAULT_MODEL", env=env) == DEFAULT_CHAT_MODEL
+    assert _resolve("linklib.agent", "DEFAULT_MODEL", env=env) == DEFAULT_CHAT_MODEL
 
 
-def test_agent_matchmaker_still_honor_linklib_chat_model_override():
+def test_agent_still_honors_linklib_chat_model_override():
     import os
     env = {"PATH": os.environ.get("PATH", ""), "LINKLIB_CHAT_MODEL": "custom-chat-model"}
-    for module in ("linklib.agent", "linklib.matchmaker"):
-        assert _resolve(module, "DEFAULT_MODEL", env=env) == "custom-chat-model"
+    assert _resolve("linklib.agent", "DEFAULT_MODEL", env=env) == "custom-chat-model"
+
+
+def test_matchmaker_no_longer_reads_the_env_var_at_import():
+    """PR 3b: the Matchmaker's model is the model_roles row, seeded once from
+    LINKLIB_CHAT_MODEL (see tests/test_model_roles.py), not a module constant."""
+    import linklib.matchmaker as m
+    assert not hasattr(m, "DEFAULT_MODEL")
 
 
 def test_dedupe_still_falls_back_to_the_shared_constant_with_no_env():
