@@ -26913,6 +26913,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Site utilities and system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
+                                  "model_pricing", "model_catalog",
                                   "narrative_review_log", "entity_citations", "matchmaker_questions",
                                   "compare_summary_cache", "compare_summary_feedback",
                                   "voice_review_queue", "voice_approved_terms",
