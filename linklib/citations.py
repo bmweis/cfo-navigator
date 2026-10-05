@@ -41,6 +41,26 @@ def strip_citation_markers(text: str, numbers=None) -> str:
     return _MARKER_RE.sub(_sub, text)
 
 
+def citation_problem(texts, citations) -> str | None:
+    """Why a grounded AI draft's citations are unusable, or None when they
+    are fine (issue #642). `texts` is every cited field's text; `citations`
+    is the draft's own list ([{n, ...}]).
+
+      "no_citations"   the draft carries no citation at all
+      "orphan_markers" a `[n]` marker in the text has no matching source
+
+    A missing `entity_citations` row and `'[]'` are the same thing: both are
+    an empty list here. 1-2 digit markers only, so a year such as "[2024]"
+    is never read as a marker."""
+    cited = {int(c["n"]) for c in (citations or []) if isinstance(c, dict) and "n" in c}
+    if not cited:
+        return "no_citations"
+    used = {int(m) for t in texts for m in _MARKER_RE.findall(t or "")}
+    if used - cited:
+        return "orphan_markers"
+    return None
+
+
 def make_document_block(title: str, body: str) -> dict:
     """One Citations-API `document` content block: plain text, citations
     enabled. Title is truncated to the API's practical limit. Caller is

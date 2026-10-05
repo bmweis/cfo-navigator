@@ -63,6 +63,7 @@ def _mock_generate_tool_agent_taxonomy(monkeypatch, *, taxonomy="Uses an agent c
             agent_taxonomy_needs_verification=not taxonomy_confident,
             low_confidence=False, model="claude-opus-4-8",
             input_tokens=500, output_tokens=300, cost_usd=0.02,
+            citations=[{"n": 1, "title": "T", "url": "https://x.example", "type": "tool_page"}],
         )
 
     import linklib.enrich as enrich_mod

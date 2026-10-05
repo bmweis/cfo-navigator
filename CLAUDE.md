@@ -11012,6 +11012,8 @@ it supersedes the old "`/save` is token-gated" note.
   repair shipped; existing `'[]'` rows stay until those fields are
   regenerated.
 
+- **Uncited AI drafts are refused (issue #642, 2026-10).** A grounded Generate (Agent taxonomy, Description, Community profile) whose draft has no citations, or `[n]` markers with no matching source (`linklib.citations.citation_problem`), gets one automatic retry over the same fetched page; a second bad draft raises `enrich.UncitedDraft` and nothing is saved: the previous text and its citation set stay, with a specific admin message (what happened, what was kept, what to do). Both calls' cost is summed and recorded (a refused field is billed twice). `Library.set_generated_entity_citations` is the only write a Generate path uses and it never writes an empty set; `tests/test_uncited_drafts.py` forbids a direct `set_entity_citations` call in `webapp/` or `scripts/`. A missing `entity_citations` row and `'[]'` are the same thing everywhere. The three AJAX/Refresh surfaces, `scripts/regen_ai_drafted_fields.py` (apply and `--sample`), `enrich_agent_taxonomy.py` and `enrich_community_profiles.py` all handle the refusal. The on-add background research run has no UI, so a refusal there only logs. See ARCHITECTURE.md's matching bullet.
+
 - **Community and software edit page polish, PR 2a.1 (2026-09).** Standing rule
   from Brian: a name in the edit view must never differ from the visitor-facing
   name. Exempt only admin-only controls with no public rendering (Verification

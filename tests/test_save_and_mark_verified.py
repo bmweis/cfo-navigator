@@ -270,7 +270,7 @@ def test_agent_taxonomy_generate_summary_shows_mark_verified_with_no_extra_save(
         agent_taxonomy_needs_verification = True
         confident = False
         low_confidence = False
-        citations = []
+        citations = [{"n": 1, "title": "T", "url": "https://x.example", "type": "tool_page"}]
         model = "test-model"
         input_tokens = 10
         output_tokens = 10

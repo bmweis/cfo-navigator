@@ -17,6 +17,15 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib import enrich
+
+
+@pytest.fixture(autouse=True)
+def _no_citation_policy(monkeypatch):
+    """This file tests parsing/grounding, not citation policy (the retry and
+    refusal rules are covered in tests/test_uncited_drafts.py), so a draft is
+    accepted here whether or not it carries citations."""
+    from linklib import enrich as _enrich
+    monkeypatch.setattr(_enrich, "_run_cited_draft", lambda attempt, *a, **k: attempt())
 from linklib.db import Library
 
 
