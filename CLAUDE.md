@@ -13116,7 +13116,9 @@ the em-dash form would otherwise be fine.
 - Enrichment (article summaries and every AI-drafted directory field — Description,
   Agent taxonomy, Competitive differentiation, Community profile fields, and so on):
   `claude-opus-5` by default, quality over cost — see "AI model selection" below for
-  how this is now chosen and where it's overridable.
+  how this is now chosen and where it's overridable. `claude-opus-5-5` (Opus 5.5, $4/$20,
+  cache read $0.20 = 0.05x input, not 0.1x) is selectable there; the stored setting is
+  Brian's to flip after a one-tool spot-check.
 - Q&A and post drafting: `claude-sonnet-4-6` (better synthesis quality)
 - Embeddings (hybrid retrieval, `linklib/embeddings.py`): OpenAI `text-embedding-3-small`
 

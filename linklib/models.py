@@ -67,8 +67,14 @@ _REGISTRY: list[dict] = [
      "enrich": "Solid summaries at a lower cost."},
     {"id": "claude-sonnet-5", "label": "Sonnet 5", "short": "Balanced · newest",
      "enrich": "Newest balanced model — stronger summaries than Sonnet 4.6 at similar cost."},
-    {"id": "claude-opus-5", "label": "Opus 5", "short": "Best quality",
-     "enrich": "Deepest summaries. The one to standardize the archive on."},
+    {"id": "claude-opus-5", "label": "Opus 5", "short": "Deep · previous generation",
+     "enrich": "Deep summaries. Superseded by Opus 5.5, which is newer and cheaper."},
+    # Opus 5.5 ($4/$20 per MTok vs Opus 5's $5/$25). Id and price from Anthropic's
+    # published model table; the models check on /admin/checks confirms the id
+    # against the live Models API after deploy. Thinking is always on at a
+    # default effort of medium; no call in this repo sets thinking or effort.
+    {"id": "claude-opus-5-5", "label": "Opus 5.5", "short": "Best quality · newest",
+     "enrich": "Deepest summaries, and cheaper than Opus 5. The one to standardize the archive on."},
 ]
 
 _API_TTL = 1800.0  # 30 min, matching the feed cache
