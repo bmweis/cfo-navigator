@@ -1241,7 +1241,7 @@ def _narrative_verify_widget(needs_verification: bool, verify_form_id: str, veri
         )
         action_html = (
             f'<button type="submit" form="{verify_form_id}" '
-            f'class="tool-admin-btn" style="margin-top:8px;">{_esc(action_label)}</button>'
+            f'class="admin-only" style="margin-top:8px;">{_esc(action_label)}</button>'
         )
         form_html = (
             f'<form id="{verify_form_id}" method="post" action="{verify_url}" '
@@ -1884,6 +1884,16 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .btn:hover{background:var(--navy-deep);border-color:var(--navy-deep);text-decoration:none;}
 .btn-ghost{background:transparent;color:var(--navy);border:1px solid var(--navy);}
 .btn-ghost:hover{background:var(--accent-light);color:var(--navy);}
+
+/* Admin-only controls (BRAND.md, Admin-only controls): ONE class. Outlined, no fill, 1px
+   deep-seafoam border and text, so it can't be mistaken for a seafoam category tag.
+   Two size tiers: card controls 28px/6px (default), page-level 42px/10px (.admin-only-page). */
+.admin-only{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:28px;padding:0 10px;border-radius:6px;background:transparent;color:var(--seafoam-deep);border:1px solid var(--seafoam-deep);font:600 12px var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;}
+.admin-only-page{height:42px;padding:0 22px;border-radius:10px;font-size:15px;gap:6px;}
+.admin-only:focus-visible{outline:2px solid var(--seafoam-deep);outline-offset:2px;}
+.admin-only:disabled{opacity:.5;cursor:not-allowed;}
+.admin-only[hidden]{display:none;}
+@media(hover:hover){.admin-only:hover{background:var(--seafoam-wash);color:var(--seafoam-deep);text-decoration:none;}.admin-only-del:hover{background:#fee2e2;color:#b91c1c;border-color:#b91c1c;}}
 
 /* Edit-page footer action row (primary save / stay-on-page save / cancel)—
    shared by the Software and Community edit pages. A plain inline-block row
@@ -3252,9 +3262,9 @@ def _app_screenshot_admin_section(entity: dict, entity_id: int, kind: str, banne
       placeholder="https://…/demo">
     <p id="app-screenshot-recapture-err-{idsfx}" style="display:none;"></p>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-      <button type="submit" form="app-screenshot-recapture-form-{idsfx}" class="tool-admin-btn"
+      <button type="submit" form="app-screenshot-recapture-form-{idsfx}" class="admin-only"
         onclick="return submitAppScreenshotRecapture('{idsfx}') && confirmDiscardsUnsavedEdits(this, '{_confirm_form_id}') && startGenAnim('{_gen_host_id}')">Generate {_esc(tool_labels.APP_SCREENSHOT.lower())}</button>
-      <button type="button" class="tool-admin-btn" onclick="document.getElementById('app-screenshot-file-{idsfx}').click()">Upload {_esc(tool_labels.APP_SCREENSHOT.lower())}&hellip;</button>
+      <button type="button" class="admin-only" onclick="document.getElementById('app-screenshot-file-{idsfx}').click()">Upload {_esc(tool_labels.APP_SCREENSHOT.lower())}&hellip;</button>
     </div>
     <input type="file" id="app-screenshot-file-{idsfx}" accept="image/jpeg,image/png,image/webp" style="display:none;"
       onchange="handleShotFile(this, '{idsfx}', 'app')">
@@ -3344,8 +3354,8 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
             "This logo was manually set before the URL below changed—confirm it's still the "
             "right logo for the new site, or clear the override to go back to automatic fetching."
             '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">'
-            f'<button type="submit" form="logo-dismiss-stale-form-{idsfx}" class="tool-admin-btn">Still correct&mdash;dismiss</button>'
-            f'<button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn">Clear override</button>'
+            f'<button type="submit" form="logo-dismiss-stale-form-{idsfx}" class="admin-only">Still correct&mdash;dismiss</button>'
+            f'<button type="submit" form="logo-clear-form-{idsfx}" class="admin-only">Clear override</button>'
             '</div></div>'
         )
 
@@ -3365,13 +3375,13 @@ def _logo_admin_section(entity: dict, entity_id: int, kind: str, banner_html: st
           <input form="logo-seturl-form-{idsfx}" name="logo_url" type="text" maxlength="500"
             style="flex:1 1 160px;min-width:0;max-width:100%;box-sizing:border-box;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:13px;background:#fff;"
             placeholder="https://…/logo.png">
-          <button type="submit" form="logo-seturl-form-{idsfx}" class="tool-admin-btn" style="flex-shrink:0;">Fetch from URL</button>
-          <button type="submit" form="logo-clear-form-{idsfx}" class="tool-admin-btn" style="flex-shrink:0;"{clear_disabled}>Pull from Logo.dev</button>
+          <button type="submit" form="logo-seturl-form-{idsfx}" class="admin-only" style="flex-shrink:0;">Fetch from URL</button>
+          <button type="submit" form="logo-clear-form-{idsfx}" class="admin-only" style="flex-shrink:0;"{clear_disabled}>Pull from Logo.dev</button>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <input form="logo-upload-form-{idsfx}" type="file" name="file" accept="image/jpeg,image/png,image/webp" required
             style="flex:1 1 160px;min-width:0;max-width:100%;box-sizing:border-box;font-size:12px;padding:4px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-          <button type="submit" form="logo-upload-form-{idsfx}" class="tool-admin-btn" style="flex-shrink:0;">Upload</button>
+          <button type="submit" form="logo-upload-form-{idsfx}" class="admin-only" style="flex-shrink:0;">Upload</button>
         </div>
       </div>
     </div>
@@ -4111,7 +4121,7 @@ def _card_icon(index: int, svg_path: str, size: int = 34) -> str:
 # clearly set apart, not just outlined); both call sites now pull from this
 # one helper so they can't drift apart again.
 _ADMIN_ONLY_BG = "var(--seafoam)"
-_ADMIN_ONLY_BORDER = "1.5px solid var(--seafoam-deep)"
+_ADMIN_ONLY_BORDER = "1px solid var(--seafoam-deep)"
 
 
 def _reader_access_card_html() -> str:
@@ -8931,7 +8941,7 @@ def tools_directory(request: Request, warn: str = ""):
 {warn_banner}
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
   <h1 style="margin:0;">Software</h1>
-  {'<a href="/admin/tools/software/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add tool</a>' if authed else ''}
+  {'<a href="/admin/tools/software/new" class="admin-only admin-only-page">+ Add tool</a>' if authed else ''}
 </div>
 <p style="color:var(--muted);margin:8px 0 28px;">A searchable directory of tools and solutions for the Office of the CFO.
 Not sure which tool's for you? {(
@@ -8953,7 +8963,7 @@ Not sure which tool's for you? {(
   </div>
 </details>
 
-{'<p style="color:var(--muted);margin:0 0 16px;"><a href="/admin/tools/software/categories" style="font-weight:500;">Manage categories &rarr;</a></p>' if authed else ''}
+{'<p style="color:var(--muted);margin:0 0 16px;"><a href="/admin/tools/software/categories" class="admin-only">Manage categories &rarr;</a></p>' if authed else ''}
 
 <div id="tool-count" style="font-size:13px;color:var(--muted);margin-bottom:16px;"></div>
 
@@ -9028,13 +9038,10 @@ Not sure which tool's for you? {(
 .tool-cat{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tool-star{{font-size:14px;color:#b8860b;margin-right:4px;flex-shrink:0;}}
 .tool-admin{{display:flex;align-items:stretch;gap:6px;flex-shrink:0;margin-top:2px;}}
-.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
-.tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
-.tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 .tool-meta{{font-size:12px;color:var(--muted);margin-top:10px;}}
 .tool-card-featured{{border-color:var(--coral-light);box-shadow:0 0 0 1px var(--coral-light);}}
 .tool-intro-btn{{font-size:12px;font-weight:600;color:var(--navy);background:none;border:1px solid var(--navy);
-  border-radius:6px;padding:3px 10px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
+  display:inline-flex;align-items:center;box-sizing:border-box;height:28px;border-radius:6px;padding:0 10px;cursor:pointer;white-space:nowrap;flex-shrink:0;}}
 .tool-intro-btn:hover{{background:var(--navy-wash);}}
 .tool-intro-btn:disabled{{color:var(--muted);border-color:var(--line);cursor:not-allowed;}}
 .tool-intro-btn:disabled:hover{{background:none;}}
@@ -9178,8 +9185,8 @@ function renderTools(tools) {{
     var quickEditPanel = '';
     if (AUTHED) {{
       adminControls = '<div class="tool-admin">'
-        + '<button type="button" class="tool-admin-btn" onclick="toggleQuickEdit(' + t.id + ')">Quick edit</button>'
-        + '<a href="/tools/software/' + esc(t.slug) + '/edit" class="tool-admin-btn">Full edit</a>'
+        + '<button type="button" class="admin-only" onclick="toggleQuickEdit(' + t.id + ')">Quick edit</button>'
+        + '<a href="/tools/software/' + esc(t.slug) + '/edit" class="admin-only">Full edit</a>'
         // display:contents (not display:inline): .tool-admin is a flex row and
         // its Quick edit/Full edit siblings stretch to a shared height by
         // default, but a plain inline <form> still boxes its own child—so the
@@ -9197,7 +9204,7 @@ function renderTools(tools) {{
         + ' data-toolname="' + esc(t.name) + '"'
         + ' onsubmit="return confirmDelete(this)">'
         + '<input type="hidden" name="redirect_to" value="/tools/software">'
-        + '<button type="submit" class="tool-admin-btn tool-admin-del">Delete</button>'
+        + '<button type="submit" class="admin-only admin-only-del">Delete</button>'
         + '</form></div>';
       // Inline quick-edit: the four fields called out for fast, no-navigation
       // editing — description and the three Warm Intro fields. Everything
@@ -9211,7 +9218,7 @@ function renderTools(tools) {{
         + '<div id="qe-genhost-' + t.id + '" style="display:grid;gap:10px;">'
         + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;">'
         + '<label style="margin:0;">Description</label>'
-        + '<span><button type="button" class="tool-admin-btn" onclick="generateDescription('
+        + '<span><button type="button" class="admin-only" onclick="generateDescription('
         + esc(JSON.stringify(t.name)) + ',' + esc(JSON.stringify(t.url))
         + ',\\'qe-desc-' + t.id + '\\',\\'qe-gen-status-' + t.id + '\\',\\'qe-summary-' + t.id + '\\',\\'qe-gen-err-' + t.id + '\\',\\'qe-genhost-' + t.id + '\\')">Generate summary</button>'
         + ' <span id="qe-gen-status-' + t.id + '" class="qe-status"></span></span>'
@@ -9261,7 +9268,7 @@ function renderTools(tools) {{
     // left the badge+name group free to wrap on its own). Categories share
     // their row with Full profile; Compare gets its own row. Warm Intro
     // shares the card's last row with Quick edit/Full edit/Delete (same
-    // .tool-admin-btn sizing, pinned lower-right), replacing the old
+    // .admin-only sizing, pinned lower-right), replacing the old
     // Added/Edited meta line entirely (see adminMeta above).
     return '<article class="tool-card' + (t.promoted ? ' tool-card-featured' : '') + '" data-tool-id="' + t.id + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:2px;">'
@@ -9288,7 +9295,7 @@ function renderTools(tools) {{
       // Quick edit/Full edit/Delete (admin-only) and Warm Intro share this
       // bottom row—Warm Intro pinned to the right via margin-left:auto so it
       // still lands lower-right even on a non-admin card where adminControls
-      // is empty. Both use .tool-admin-btn's size (Warm Intro overrides just
+      // is empty. Both use .admin-only's size (Warm Intro overrides just
       // color/border to stay visually distinct as the primary action).
       + ((adminControls || introBtn)
           ? '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' + adminControls
@@ -10247,7 +10254,7 @@ function submitIntroForm() {{
         action_row_parts.append(
             '<span style="display:inline-flex;align-items:center;gap:10px;">'
             '<span class="tp-admin-divider"></span>'
-            f'<a class="tp-admin-btn" href="/tools/software/{tool["slug"]}/edit">&#9998; Edit</a>'
+            f'<a class="admin-only admin-only-page" href="/tools/software/{tool["slug"]}/edit">&#9998; Edit</a>'
             '</span>'
         )
     action_row = "".join(action_row_parts)
@@ -10416,10 +10423,6 @@ function submitIntroForm() {{
 .tp-hero-cats{{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px;}}
 .tp-cat-pill{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
-.tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
-  padding:11px 22px;font:600 15px var(--font-body);cursor:pointer;text-decoration:none;display:inline-flex;
-  align-items:center;gap:6px;white-space:nowrap;}}
-.tp-admin-btn:hover{{background:var(--navy-wash);color:var(--ink);text-decoration:none;}}
 .tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
 .tp-card-h{{font-family:var(--font-head);font-weight:600;font-size:18px;color:var(--ink);margin:0 0 14px;letter-spacing:-0.01em;}}
 .tp-card-h small{{display:block;font-family:var(--font-body);font-weight:500;font-size:12px;color:var(--muted);
@@ -10780,7 +10783,7 @@ def tools_resources(request: Request):
 <p style="margin:0 0 4px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
 <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:12px;">
   <h1 style="margin:0;">Resources</h1>
-  {'<a href="/admin/tools/resources" style="font-size:14px;font-weight:500;">Manage →</a>' if authed else ''}
+  {'<a href="/admin/tools/resources" class="admin-only">Manage →</a>' if authed else ''}
 </div>
 <p style="color:var(--ink-soft);font-size:15px;line-height:1.6;margin:14px 0 0;">What&rsquo;s here: the benchmarking sources I rely on, and books that shaped how I do this job. Not exhaustive, just what&rsquo;s held up.</p>
 <p style="font-size:13px;color:var(--muted);margin:8px 0 24px;"><a href="/contact?context=resource-suggestion" style="color:var(--accent);font-weight:500;">Suggest a resource &rarr;</a></p>
@@ -12227,7 +12230,7 @@ def tools_community_profile(request: Request, slug: str):
         action_row_parts.append(
             '<span style="display:inline-flex;align-items:center;gap:10px;">'
             '<span class="tp-admin-divider"></span>'
-            f'<a class="tp-admin-btn" href="/tools/communities/{community["slug"]}/edit">&#9998; Edit</a>'
+            f'<a class="admin-only admin-only-page" href="/tools/communities/{community["slug"]}/edit">&#9998; Edit</a>'
             '</span>'
         )
     action_row = "".join(action_row_parts)
@@ -12503,10 +12506,6 @@ def tools_community_profile(request: Request, slug: str):
 .tp-cat-pill{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;overflow-wrap:break-word;word-break:break-word;}}
 .tp-hero-actions{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
-.tp-admin-btn{{background:transparent;color:var(--muted);border:1.5px solid var(--line-strong);border-radius:10px;
-  padding:11px 22px;font:600 15px var(--font-body);cursor:pointer;text-decoration:none;display:inline-flex;
-  align-items:center;gap:6px;white-space:nowrap;}}
-.tp-admin-btn:hover{{background:var(--navy-wash);color:var(--ink);text-decoration:none;}}
 .tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
 .tp-card-h{{font-family:var(--font-head);font-weight:600;font-size:18px;color:var(--ink);margin:0 0 14px;letter-spacing:-0.01em;}}
 .tp-card p{{font-size:15px;line-height:1.7;color:var(--ink-soft);margin:0;overflow-wrap:break-word;word-break:break-word;}}
@@ -12642,7 +12641,7 @@ function showSaveAndMarkVerified(fieldName, badgeHostId, actionHostId) {
     actionHost.innerHTML = '';
     var btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'tool-admin-btn';
+    btn.className = 'admin-only';
     btn.style.marginTop = '8px';
     btn.textContent = 'Save and mark verified';
     btn.onclick = function() { saveAndMarkVerified(fieldName); };
@@ -13938,15 +13937,14 @@ def _review_status_action_html(reviewed: bool, mark_reviewed_url: str, flag_url:
     id="{standalone_form_id}">, OUTSIDE any other <form> — see
     _review_status_hidden_form_html — same split _logo_admin_section and
     _app_screenshot_admin_section already use for the same reason."""
-    btn_cls = "btn btn-ghost" if ghost else "btn"
+    btn_cls = "admin-only" if ghost else "btn"
     label = "Flag for review" if reviewed else "Mark reviewed"
     if standalone_form_id:
-        return (f'<button type="submit" form="{standalone_form_id}" class="{btn_cls}" '
-                f'style="padding:5px 12px;font-size:13px;white-space:nowrap;">{label}</button>')
+        return (f'<button type="submit" form="{standalone_form_id}" class="{btn_cls}">{label}</button>')
     url = flag_url if reviewed else mark_reviewed_url
     return (f'<form method="post" action="{url}" style="margin:0;display:inline;">'
             f'<input type="hidden" name="redirect_to" value="{_esc(redirect_to)}">'
-            f'<button type="submit" class="{btn_cls}" style="padding:5px 12px;font-size:13px;white-space:nowrap;">{label}</button></form>')
+            f'<button type="submit" class="{btn_cls}">{label}</button></form>')
 
 
 def _review_status_hidden_form_html(reviewed: bool, mark_reviewed_url: str, flag_url: str,
@@ -17841,7 +17839,7 @@ def _community_form_fields_parts(c: dict | None = None, categories: list[dict] |
       placeholder="https://…">
   </div>
   <div>
-    <button type="button" class="tool-admin-btn" onclick="generateCommunityListing(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'comm-gen-status', 'comm-gen-err', 'gen-host-community-listing')">Auto-fill from URL</button>
+    <button type="button" class="admin-only" onclick="generateCommunityListing(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'comm-gen-status', 'comm-gen-err', 'gen-host-community-listing')">Auto-fill from URL</button>
     <span id="comm-gen-status" class="qe-status"></span>
     <p id="comm-gen-err" style="display:none;"></p>
   </div>"""
@@ -18410,7 +18408,7 @@ def admin_communities(request: Request, filter: str = ""):
 <p style="margin:0 0 12px;">
   <a href="/tools/communities" style="font-size:13px;color:var(--muted);">View public directory →</a>
   &nbsp;&middot;&nbsp;
-  <a href="/admin/tools/communities/categories" style="font-size:13px;color:var(--muted);">Manage categories →</a>
+  <a href="/admin/tools/communities/categories" class="admin-only">Manage categories →</a>
   {review_filter_link}{clear_filter_link}
 </p>
 <p style="margin:0 0 24px;">
@@ -19050,7 +19048,7 @@ def _community_edit_page(request: Request, slug: str, screenshot_captured: str =
                 f'border-top:1px solid var(--line);">'
                 f'<a href="/tools/communities/{comp["slug"]}/edit" style="font-size:14px;font-weight:500;color:var(--ink);">{_esc(comp["name"])}</a>'
                 f'<form method="post" action="/admin/tools/communities/{community_id}/competitors/{comp["id"]}/remove" style="margin:0;">'
-                f'<button type="submit" class="tool-admin-btn tool-admin-del">Remove</button></form></div>')
+                f'<button type="submit" class="admin-only admin-only-del">Remove</button></form></div>')
 
     def _suggestion_row(s: dict) -> str:
         cats_label = ", ".join(_esc(x) for x in s["categories"])
@@ -19067,14 +19065,14 @@ def _community_edit_page(request: Request, slug: str, screenshot_captured: str =
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—same category</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\', \'community-competitor-gen-err\', \'gen-host-community-competitors\')">Suggest similar communities</button>'
+            f'<button type="button" class="admin-only" onclick="generateCommunityCompetitorMatches({community_id}, \'community-competitor-gen-status\', \'community-competitor-gen-err\', \'gen-host-community-competitors\')">Suggest similar communities</button>'
             '</div>'
             '<p id="community-competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
             '<p id="community-competitor-gen-err" style="display:none;"></p>'
             f'<form method="post" action="/admin/tools/communities/{community_id}/competitors/add-selected">'
             '<input type="hidden" id="community-competitor-ai-drafted-fields" name="ai_drafted_fields" value="">'
             + "".join(_suggestion_row(s) for s in suggestions) +
-            '<button type="submit" class="tool-admin-btn" style="margin-top:8px;">+ Add selected</button>'
+            '<button type="submit" class="admin-only" style="margin-top:8px;">+ Add selected</button>'
             '</form></div>'
         )
     _other_communities_options_html = "".join(
@@ -19095,7 +19093,7 @@ def _community_edit_page(request: Request, slug: str, screenshot_captured: str =
         <option value="">Add a similar community by name&hellip;</option>
         {_other_communities_options_html}
       </select>
-      <button type="submit" class="tool-admin-btn">+ Add</button>
+      <button type="submit" class="admin-only">+ Add</button>
     </form>
   </div>
 </div>
@@ -19247,8 +19245,8 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     _generate_panel_html = """<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;">
   <h2 style="font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 10px;">Profile draft</h2>
   <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;">
-    <button type="button" class="tool-admin-btn" onclick="generateCommunityProfile(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'cp-gen-status', 'cp-gen-err', 'gen-host-community-profile')">Generate full profile</button>
-    <button type="button" id="cp-restore-btn" class="tool-admin-btn" onclick="cpRestorePrevious()" hidden>Restore previous</button>
+    <button type="button" class="admin-only" onclick="generateCommunityProfile(document.getElementById('comm-name').value, document.getElementById('comm-url').value, 'cp-gen-status', 'cp-gen-err', 'gen-host-community-profile')">Generate full profile</button>
+    <button type="button" id="cp-restore-btn" class="admin-only" onclick="cpRestorePrevious()" hidden>Restore previous</button>
     <span id="cp-gen-status" class="qe-status" role="status" aria-live="polite"></span>
   </div>
   <p style="font-size:12px;color:var(--muted);margin:8px 0 0;">Fills every profile box below for review. Nothing is saved until you click Save changes.</p>
@@ -19300,7 +19298,7 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
     {screenshot_banner_html}
     {screenshot_preview_html}
     <form method="post" action="/admin/tools/communities/{c['id']}/screenshot/recapture" style="margin-top:12px;">
-      <button type="submit" class="tool-admin-btn" onclick="return startGenAnim('gen-host-community-screenshot-home')">Generate screenshot</button>
+      <button type="submit" class="admin-only" onclick="return startGenAnim('gen-host-community-screenshot-home')">Generate screenshot</button>
     </form>
   </div>
 
@@ -19318,9 +19316,6 @@ async function generateCommunityCompetitorMatches(communityId, statusId, errBoxI
 </div>
 </div>
 <style>
-.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
-.tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
-.tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 {_SHOT_CROP_CSS}
 </style>
 <script>{_GENERATE_LISTING_JS}{_GENERATE_PROFILE_JS}{_APP_SCREENSHOT_CROP_JS}</script>
@@ -20096,7 +20091,7 @@ def _tool_new_page(request: Request, form=None, refusal: list | None = None):
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">{_esc(tool_labels.DESCRIPTION)} *</label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err', 'gen-host-tool-desc-new')">Generate summary</button>
+        <button type="button" class="admin-only" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err', 'gen-host-tool-desc-new')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -20409,7 +20404,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
                 f'border-top:1px solid var(--line);">'
                 f'<a href="/tools/software/{c["slug"]}/edit" style="font-size:14px;font-weight:500;color:var(--ink);">{_esc(c["name"])}</a>'
                 f'<form method="post" action="/admin/tools/software/{tool_id}/competitors/{c["id"]}/remove" style="margin:0;">'
-                f'<button type="submit" class="tool-admin-btn tool-admin-del">Remove</button></form></div>')
+                f'<button type="submit" class="admin-only admin-only-del">Remove</button></form></div>')
 
     def _suggestion_row(s: dict) -> str:
         cats_label = ", ".join(_esc(x) for x in s["categories"])
@@ -20426,14 +20421,14 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
             '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;">'
             '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;'
             'letter-spacing:.07em;">Suggested—same category</div>'
-            f'<button type="button" class="tool-admin-btn" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\', \'competitor-gen-err\', \'gen-host-tool-competitors\')">Suggest competitors</button>'
+            f'<button type="button" class="admin-only" onclick="generateCompetitorMatches({tool_id}, \'competitor-gen-status\', \'competitor-gen-err\', \'gen-host-tool-competitors\')">Suggest competitors</button>'
             '</div>'
             '<p id="competitor-gen-status" style="font-size:12px;color:var(--muted);margin:0 0 8px;"></p>'
             '<p id="competitor-gen-err" style="display:none;"></p>'
             f'<form method="post" action="/admin/tools/software/{tool_id}/competitors/add-selected">'
             '<input type="hidden" id="competitor-ai-drafted-fields" name="ai_drafted_fields" value="">'
             + "".join(_suggestion_row(s) for s in suggestions) +
-            '<button type="submit" class="tool-admin-btn" style="margin-top:8px;">+ Add selected</button>'
+            '<button type="submit" class="admin-only" style="margin-top:8px;">+ Add selected</button>'
             '</form></div>'
         )
     _other_tools_options_html = "".join(
@@ -20797,7 +20792,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin:32px 0 16px;padding-top:24px;border-top:1px solid var(--line);">
       <h2 style="font-size:16px;font-weight:600;margin:0;">Business summary</h2>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err', 'gen-host-tool-business-summary')">Generate summary</button>
+        <button type="button" class="admin-only" onclick="generateDescription(document.getElementById('tool-name').value, document.getElementById('tool-url').value, 'tool-desc', 'tool-gen-status', 'tool-summary', 'tool-desc-gen-err', 'gen-host-tool-business-summary')">Generate summary</button>
         <span id="tool-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -20832,7 +20827,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
         <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
           <label style="font-size:14px;font-weight:500;color:var(--navy);">{_esc(tool_labels.AGENT)}{_taxonomy_verify_badge}</label>
           <span>
-            <button type="submit" form="research-refresh-form" class="tool-admin-btn"
+            <button type="submit" form="research-refresh-form" class="admin-only"
               onclick="return confirmDiscardsUnsavedEdits(this, 'tool-edit-form') && startGenAnim('gen-host-tool-taxonomy')">Generate summary</button>
           </span>
         </div>
@@ -20891,7 +20886,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
           <option value="">Add a competitor by name&hellip;</option>
           {_other_tools_options_html}
         </select>
-        <button type="submit" class="tool-admin-btn">+ Add</button>
+        <button type="submit" class="admin-only">+ Add</button>
       </form>
     </div>
   </div>
@@ -20900,7 +20895,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">{_esc(tool_labels.BOTTOM_LINE)}<span id="differentiation-verify-badge">{_differentiation_verify_badge}</span></label>
       <span>
-        <button type="button" class="tool-admin-btn" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err', 'gen-host-tool-differentiation')">Generate summary</button>
+        <button type="button" class="admin-only" onclick="generateDifferentiation({tool_id}, 'tool-differentiation', 'diff-gen-status', 'diff-gen-err', 'gen-host-tool-differentiation')">Generate summary</button>
         <span id="diff-gen-status" class="qe-status"></span>
       </span>
     </div>
@@ -20923,9 +20918,9 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
     <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px 10px;margin-bottom:6px;">
       <label style="font-size:14px;font-weight:500;color:var(--navy);">Homepage</label>
       <span style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button type="submit" form="screenshot-recapture-form" class="tool-admin-btn"
+        <button type="submit" form="screenshot-recapture-form" class="admin-only"
           onclick="return confirmDiscardsUnsavedEdits(this, 'tool-edit-form') && startGenAnim('gen-host-tool-screenshot-home')">Generate homepage screenshot</button>
-        <button type="button" class="tool-admin-btn" onclick="document.getElementById('home-screenshot-file-tools-{tool_id}').click()">Upload homepage screenshot&hellip;</button>
+        <button type="button" class="admin-only" onclick="document.getElementById('home-screenshot-file-tools-{tool_id}').click()">Upload homepage screenshot&hellip;</button>
       </span>
     </div>
     <!-- type="text", not "url": Generate screenshot writes a site-relative
@@ -20963,9 +20958,6 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
 </div>
 </div>
 <style>
-.tool-admin-btn{{font-size:12px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 10px;cursor:pointer;text-decoration:none;white-space:nowrap;}}
-.tool-admin-btn:hover{{background:var(--accent-light);color:var(--ink);text-decoration:none;}}
-.tool-admin-del:hover{{background:#fee2e2;color:#b91c1c;border-color:#fca5a5;}}
 {_SHOT_CROP_CSS}
 </style>
 <script>{_GENERATE_DESC_JS}{_APP_SCREENSHOT_CROP_JS}
@@ -23793,7 +23785,7 @@ _ASK_CTL_CSS = (
     ".ask-ctl{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 16px;"
     "box-sizing:border-box;border:1px solid var(--navy);border-radius:10px;background:transparent;color:var(--navy);"
     "font:600 14px var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;}"
-    "@media(hover:hover){.ask-ctl:hover{background:var(--accent-light);}.ask-ctl-admin:hover{background:var(--seafoam);filter:brightness(.95);}}"
+    "@media(hover:hover){.ask-ctl:hover{background:var(--accent-light);}}"
     ".ask-ctl:focus-visible{outline:2px solid var(--navy);outline-offset:2px;}"
     # Compact variant: 28px visible, with a 44px touch target from a pseudo-element
     # that adds no layout height (inset from the 1px border, so -9px gives 44px). -w gives the row buttons one shared width
@@ -23803,8 +23795,6 @@ _ASK_CTL_CSS = (
     # Width is a floor, not a fixed value: a label that fits renders at exactly 128px, a wider
     # one (fallback font) grows instead of spilling out of the pill.
     ".ask-ctl-w{min-width:128px;padding-left:10px;padding-right:10px;white-space:nowrap;}"
-    # Seafoam fill on a button marks a control visible only to admins on a public page (BRAND.md).
-    ".ask-ctl-admin{background:var(--seafoam);border-color:var(--seafoam-deep);color:var(--navy);}"
     ".ask-ctl[aria-pressed=true]{background:var(--navy);color:#fff;}"
 )
 
@@ -23931,7 +23921,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         admin_controls = ""
         if authed:
             admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
-      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w ask-ctl-admin">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>
+      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="admin-only ask-ctl-sm ask-ctl-w">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>
     </div>"""
         # Meta: status chips first (Hidden for admins, Private, rating, from the
         # one chip function), then the byline and date as plain nowrap segments.
@@ -36384,7 +36374,7 @@ def admin_brand(request: Request):
         '<li><strong>Balance ~70 / 20 / 10</strong>—navy + neutrals, then seafoam, then a sliver of coral. One coral element per screen, max.</li>'
         '<li><strong>Coral is decorative, never status.</strong> Alert red means error; coral means highlight. They\'re 96 RGB-units apart—keep it that way.</li>'
         '<li><strong>Coral is display-only.</strong> It\'s too light for body text (2.8:1); use coral-deep, or navy-on-coral-wash, when text is involved.</li>'
-        '<li><strong>Buttons are navy or ghost</strong>—never a seafoam or coral fill.</li>'
+        '<li><strong>Buttons are navy or ghost</strong>—never a seafoam or coral fill. The one exception is an admin-only control: outlined, no fill, 1px deep-seafoam border and text.</li>'
         '<li><strong>One marker-underline, one or two stickers</strong> per page, restricted to a header/hero or card corner—never mid-copy, never on admin/data surfaces. Outfit for headings, DM Sans for body copy and everything else—no other content/reading fonts anywhere on the site, the standalone single-article reader included—Caveat for stickers only.</li>'
         '</ul>'
     )

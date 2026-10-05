@@ -352,6 +352,8 @@ past-questions list and `POST /ask/similar` (`chips_html`) call. The Recent rows
 Private chip as a server-built string (`PRIVATE_CHIP_HTML`), never hand-built in JS; the open thread's footer and `/ask/history` (via `Library.ask_rating_counts`) use the same function, and the chip CSS is the shared `_ASK_CHIP_CSS`. See
 BRAND.md's Status chips and `tests/test_status_chips.py`.
 
+**Admin-only controls (2026-10).** One `.admin-only` class in `_CSS` (`webapp/app.py`) draws every control only an admin sees on a public page: outlined, 1px `--seafoam-deep` border and text, 28px/6px (`.admin-only-page`: 42px/10px). It replaced `.tool-admin-btn`, `.tp-admin-btn` and `.ask-ctl-admin`; Hide/Unhide, Mark reviewed (`_review_status_action_html`), "+ Add tool", the Manage links and the profile Edit buttons all use it. The Reader card is a surface and keeps a seafoam fill with a 1px border (`_ADMIN_ONLY_BORDER`). See BRAND.md and `tests/test_admin_only_controls.py`.
+
 **FP&A Buddy collapsed rows (2026-10).** Every past or recent question is a
 collapsed, click-expandable row. Past questions are `<details class="ask-pq-row">`
 (closed on load); a `?c=` load no longer fetches the transcript, it highlights the

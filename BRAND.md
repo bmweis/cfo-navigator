@@ -50,24 +50,36 @@ measured on the `#F5F4EF` canvas.
 1. **Category tag:** a non-interactive pill, seafoam fill, navy text, no border.
 2. **Text highlight:** a seafoam background behind running text, such as the summary
    above a Compare table. No border.
-3. **Admin-only surface:** a control or box visible only to admins on a public page.
-   Seafoam fill (`--seafoam`, `_ADMIN_ONLY_BG`), navy text and a 1px border in
-   `--seafoam-deep` (the token the Playbook tag uses; no new colour). The border is
-   the admin-only signal: a seafoam element without it is never admin-only. The
-   label and context also say it is admin-only, so colour is not the only cue.
-   Controls inside `/admin/*` are all admin-only and do not take the border.
+3. **Admin-only control:** a control visible only to admins on a public page. **Admin-only
+   controls are outlined: no fill, 1px deep-seafoam border, deep-seafoam text**
+   (`--seafoam-deep`, `#1F7A66`; no new colour). **Seafoam fills are reserved for category
+   tags, text highlights and the Reader card.** An earlier version used a seafoam fill with a
+   border; it read as a category tag sitting next to the tag it resembled, so the fill went.
+   One class, `.admin-only`, defined once in the sitewide stylesheet, carries the look;
+   nothing else may. Two size tiers, each taking the tier of the public control it sits
+   beside: **card controls 28px high, 6px radius** (Quick edit, Full edit, Delete, Mark
+   reviewed, Hide, Unhide, Manage links) and **page-level controls 42px high, 10px radius**
+   (`.admin-only-page`: the profile Edit button, "+ Add tool"). Border is 1px everywhere.
+   Delete keeps its red hover, but only under `@media (hover: hover)` so touch devices never
+   get a sticky red, and its existing confirm dialog.
+   Contrast on the page background (`#F5F4EF`): text and border 4.73:1. Do not use coral:
+   coral is a rare accent (one per screen in body content), never a button, and already marks
+   Featured and the Under review pill.
+   **Whole-page admin-only routes are treated like `/admin/*`:** every control on them is
+   admin-only by definition. They are `/read`, `/read/{id}`, `/bookmarklet`,
+   `/read-later-bookmarklet` and `/tools/*/edit`. Inside `/admin/*` the existing navy and
+   ghost buttons stay; the outlined look is for admin-only controls on pages other people
+   can see. (The edit-page action buttons moved to `.admin-only` when the old
+   `.tool-admin-btn` class was retired, so they now share this one look.)
+   The Reader box (`_reader_access_card_html`) is a surface, not a control: it keeps a seafoam
+   fill with a 1px `--seafoam-deep` border.
    **Admin-only status:** "⊘ Hidden" on a past-question row is a status chip, not a control; see Status chips in section 5.
 
-First user of the button form: `.ask-ctl-admin` on FP&A Buddy's "Hide" and "Unhide"
-(28px high, 44px touch target, width at least 128px). Contrast: the deep seafoam
-border is 3.65:1 against the seafoam fill and 4.73:1 against the page background
-(both over the 3:1 non-text minimum); navy text on the seafoam fill is 9.35:1. The Reader
-box (`_reader_access_card_html`) already follows the surface form (1.5px border). Other
-admin-only controls on public pages (Quick edit, Full edit and Delete on vendor
-cards, the profile Edit button, Manage links) are still grey or navy; restyling them
-is a separate decision. Seafoam uses that fit none of the three, noted so they are
-not mistaken for admin-only: the "Reviewed" status pill, the selected state of
-`.ask-tag` source chips, and the `.ask-src-list` link hover.
+Seafoam uses that fit none of the above, noted so they are not mistaken for admin-only: the
+"Reviewed" status pill, the selected state of `.ask-tag` source chips, and the
+`.ask-src-list` link hover. Seafoam beside navy: an admin-only outline next to a navy ghost
+button is told apart by colour and by the tier rule; if that ever reads as the same colour
+on a real screen, the fix is a dashed border, not a fill.
 
 **Coral — warm accent (rare)**
 | Token | Hex | Contrast | Use |
@@ -1165,7 +1177,7 @@ or a plain break device, even if it originated as a "pull-quote."
 | Keep status colors for status only | Use `--alert` red as a highlight, or coral as a *system* status/error color |
 | Outfit for headings, DM Sans for body copy — every reading surface, both reader templates included, no exceptions | Introduce a serif or any other third content font, or put body copy in Outfit anywhere |
 | One marker-underline, one or two stickers per page, in a header/hero or card corner | Repeat the graffiti kit decoratively, or put it on admin/data surfaces |
-| Buttons navy or ghost | Make a coral button, or a seafoam button without the deep seafoam border (that form means admin-only) |
+| Buttons navy or ghost; admin-only controls outlined in deep seafoam | Make a coral button, or give any button a seafoam fill |
 
 The one sanctioned exception to "buttons navy or ghost": Delete/Reject actions use the
 status-red `#b91c1c`/`#fee2e2`/`#fca5a5` family (§5) — a destructive-action signal, the
