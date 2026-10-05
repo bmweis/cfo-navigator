@@ -48,6 +48,26 @@ class ForbiddenConversationError(Exception):
     """`conversation_id` belongs to a different user than the caller."""
 
 
+# What a user sees when a turn fails. Plain on purpose: no exception text, no
+# model id. The raw detail is logged (linklib.agent) and stored on the failed
+# row for an admin only.
+FAILED_TURN_MESSAGE = "Couldn't answer that just now. Try again, or pick another depth."
+
+
+class AskTurnFailed(Exception):
+    """The answer call did not produce an answer. The turn was recorded as a
+    failed row (so its spend still counts) and is never shown as a question.
+    `message` is the plain text safe to show; `usage` is the same
+    `{"spent", "cap"}` dict a successful turn returns (None without a user
+    id). Each caller turns this into its own error shape: a 502 for
+    `POST /ask`, a tool error for the MCP tool."""
+
+    def __init__(self, message: str = FAILED_TURN_MESSAGE, usage: dict | None = None):
+        super().__init__(message)
+        self.message = message
+        self.usage = usage
+
+
 def run_ask(
     lib: Library,
     user_id: int | None,
@@ -69,7 +89,8 @@ def run_ask(
     `ToolError` for the MCP tool), not this function's job.
 
     Raises `UnknownConversationError`/`ForbiddenConversationError` for a
-    bad `conversation_id`. Otherwise always returns a dict — either the
+    bad `conversation_id`, and `AskTurnFailed` when the answer call fails
+    (after recording the failed turn's spend). Otherwise always returns a dict — either the
     `{"capped": True, ...}` shape (dollar cap or follow-up-count cap hit)
     or the full answer shape (answer/citations/sources/feed_sources/
     web_sources/followups_left/conversation_id/turn_id/usage) — matching
@@ -134,6 +155,35 @@ def run_ask(
         opml_path=opml_path if (use_feed or use_web) else None,
         history=history,
     )
+
+    if getattr(ans, "failed", False):
+        # Record the spend (rewrite, embedding, Exa, any partial usage) on a
+        # failed row so the dollar cap and admin usage stay honest; the row is
+        # excluded from every question view. Nothing is returned as an answer.
+        usage_line = None
+        if user_id is not None:
+            lib.record_ask_question(
+                user_id, question, "", ans.model, effort,
+                use_library, use_feed, use_web,
+                conversation_id=conversation_id, turn_index=prior_questions,
+                input_tokens=ans.input_tokens, output_tokens=ans.output_tokens,
+                cache_creation_tokens=ans.cache_creation_tokens,
+                cache_read_tokens=ans.cache_read_tokens,
+                cost_usd=ans.cost_usd,
+                rewrite_input_tokens=ans.rewrite_input_tokens,
+                rewrite_output_tokens=ans.rewrite_output_tokens,
+                rewrite_cost_usd=ans.rewrite_cost_usd,
+                embed_input_tokens=ans.embed_input_tokens,
+                embed_cost_usd=ans.embed_cost_usd,
+                exa_result_count=ans.exa_result_count,
+                exa_cost_usd=ans.exa_cost_usd,
+                is_private=is_private,
+                web_scope=getattr(ans, "web_scope", ""),
+                failed=True, error=ans.error,
+            )
+            usage_line = {"spent": round(lib.ask_cost_this_month(user_id), 2),
+                          "cap": round(lib.get_effective_ask_cap(user_id), 2)}
+        raise AskTurnFailed(usage=usage_line)
 
     # None for token-only / break-glass access: nothing was recorded, so
     # there is no conversation to continue (the guards above already
