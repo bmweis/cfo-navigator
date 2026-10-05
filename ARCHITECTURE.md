@@ -10063,6 +10063,11 @@ allowlist, neither of which this function attempts.
     profile fields, article summaries) — `Library.get_enrich_model()`, a
     live `settings` value, editable in the Configuration section of
     `/admin/system/ai` with no redeploy. Defaults to `claude-opus-5`.
+    `claude-opus-5-5` (Opus 5.5, $4/$20 per MTok, cache read $0.20) is in the
+    registry and `MODEL_PRICING` and selectable there; the stored setting is
+    unchanged until an admin picks it. No generate call sets `thinking`,
+    `effort`, `temperature` or `tool_choice`, so Opus 5.5's always-on adaptive
+    thinking at default `medium` effort needs no request change.
   - **FP&A Buddy** (Quick/Standard/Deep) — `linklib.agent.EFFORT_SETTINGS`,
     a fully separate hardcoded dict with one model per tier
     (`claude-haiku-4-5-20251001` / `claude-sonnet-4-6` / `claude-opus-4-8`).
