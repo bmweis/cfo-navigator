@@ -89,12 +89,14 @@ SEED_PRICING_VERIFIED_ON = "2026-09-28"
 # Models added to the catalog before their pricing is confirmed. A None rate
 # means "not confirmed": it is never filled from a multiplier. Source: the
 # cached API reference of 2026-09-25, not confirmed against the live page.
+# Fable 5's cache read is left empty too: the reference's $1.00 is exactly 0.1x
+# input, the multiplier guess this table avoids, and Fable 5.1 does not follow it.
 # Cache-write rates are unconfirmed for all three, so every row here is
 # incomplete and the model cannot be enabled for any role until a person
 # fills the gaps and verifies the row on /admin/system/ai.
 _UNVERIFIED_NOTE = "from cached API reference 2026-09-25, not confirmed against the live page"
 SEED_ONLY_PRICING: dict[str, dict] = {
-    "claude-fable-5":   {"input": 10.0, "output": 50.0, "cache_write": None, "cache_write_1h": None, "cache_read": 1.00},
+    "claude-fable-5":   {"input": 10.0, "output": 50.0, "cache_write": None, "cache_write_1h": None, "cache_read": None},
     "claude-fable-5-1": {"input": 10.0, "output": 50.0, "cache_write": None, "cache_write_1h": None, "cache_read": 0.25},
     "claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_write": None, "cache_write_1h": None, "cache_read": 0.20},
 }

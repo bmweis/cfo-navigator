@@ -71,6 +71,8 @@ def test_seed_rows_verified_on_and_new_models_unverified(lib):
         assert row["verified_on"] == ""
         assert "not confirmed against the live page" in row["source_note"]
         assert row["cache_write"] is None and row["cache_write_1h"] is None
+    assert lib.get_model_pricing("claude-fable-5")["cache_read"] is None
+    assert lib.get_model_pricing("claude-fable-5-1")["cache_read"] == 0.25
 
 
 # -- refusal ---------------------------------------------------------------------
