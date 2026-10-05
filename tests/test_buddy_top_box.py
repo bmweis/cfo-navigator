@@ -157,7 +157,15 @@ def test_admin_sees_the_estimate_in_the_depth_options_and_on_the_button(admin_pg
         assert pg.inner_text("#ask-dd-top .ask-tag[data-tier='%s'] .ask-tag-name" % tier) == label
     assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % (cost["standard"] + exa)
     assert "per query" not in pg.inner_text("body")
-    assert pg.inner_text(".ask-cost-note").strip() == "Dollar amounts are estimates."
+    # The note lives at the bottom of the Depth dropdown (next to the amounts), not under the controls.
+    panel = "#ask-dd-top .ask-dd-panel[data-dd='depth'] .ask-cost-note"
+    assert pg.locator(panel).count() == 1
+    assert pg.locator(".ask-cost-note").count() == 1
+    assert pg.locator("#ask-dd-top [data-dd='sources'].ask-dd-panel .ask-cost-note").count() == 0
+    assert pg.locator(panel).text_content().strip() == "Dollar amounts are estimates."
+    pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
+    assert pg.locator(panel).is_visible()
+    pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
     # Current feed off and Open web off: no web search, no Exa call in any figure.
     pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
     pg.click("#ask-dd-top .ask-tag[data-source='feed']")
