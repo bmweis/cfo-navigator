@@ -107,6 +107,7 @@ from linklib.db import Library
 from webapp.ask_orchestrator import (
     ForbiddenConversationError as _AskForbiddenConversationError,
     UnknownConversationError as _AskUnknownConversationError,
+    AskTurnFailed as _AskTurnFailed,
     run_ask,
 )
 from webapp.matchmaker_orchestrator import (
@@ -162,7 +163,8 @@ def register_qa_tools(mcp: FastMCP, lib_factory: Callable[[], Library], opml_pat
         that conversation as a follow-up — history is rebuilt server-side
         from the recorded turns, never trusted from the caller. A
         conversation belonging to a different user, or one that's reached
-        its follow-up limit, is refused (a conversation_id from someone
+        its follow-up limit, is refused (a failed answer call is also a
+        tool error, with a plain message; the spend still counts) (a conversation_id from someone
         else raises a tool error; a follow-up-limit or dollar-cap hit
         returns a normal `{"capped": true, "answer": "..."}` result, not
         an error — being over budget is an expected outcome, not a
@@ -209,6 +211,9 @@ def register_qa_tools(mcp: FastMCP, lib_factory: Callable[[], Library], opml_pat
                 raise ToolError(f"unknown conversation_id: {conversation_id!r}")
             except _AskForbiddenConversationError:
                 raise ToolError("that conversation belongs to a different user")
+            except _AskTurnFailed as e:
+                # A failed turn is an error to the client, never an answer.
+                raise ToolError(e.message)
         finally:
             lib.close()
 

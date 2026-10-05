@@ -605,8 +605,9 @@ A status is a **non-interactive chip**: a plain glyph plus a word, 18px tall, ro
 | Mixed | ± | rated both ways |
 | Private | 🔒 | the asker marked the question private |
 | Hidden | ⊘ | an admin hid the question (admin-only) |
+| Failed | ⚠ | the answer call produced no answer (admin-only) |
 
-**Hidden is admin-only deep-seafoam text with no fill and no border** (`--seafoam-deep`), same size as the other chips; the list never returns a hidden row to anyone else, so colour is not what hides it. Unrated, public, visible shows nothing. Order is always Hidden, Private, rating, then byline and date.
+**Hidden is admin-only deep-seafoam text with no fill and no border** (`--seafoam-deep`), same size as the other chips; the list never returns a hidden row to anyone else, so colour is not what hides it. Unrated, public, visible shows nothing. **Failed is admin-only, `--alert` text with no fill**, same shape as Hidden; no other viewer is ever returned a failed row. Order is always Failed, Hidden, Private, rating, then byline and date.
 
 Every chip is drawn by one function, `_ask_status_chip` (`webapp/app.py`), and every surface that shows one (the past-questions list and its expanded rows, the similar-question suggestions, the Recent rows and the open thread for Private, and `/ask/history`) takes it from there. Client scripts never build chip markup; the server hands them the HTML. Glyphs are plain single code points (no joiners, selectors or skin tones), each chip carries `role="img"` and an `aria-label` ("Rated helpful", "Rated mixed", "Hidden by an admin"), and `tests/test_status_chips.py` pins all of it. The 🔒 is the one colour emoji left; the other glyphs are text glyphs, so their look depends on the system fallback font.
 

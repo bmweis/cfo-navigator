@@ -93,6 +93,8 @@ from webapp.markdown_render import render_narrative_markdown
 from webapp.ask_orchestrator import (
     ForbiddenConversationError as _AskForbiddenConversationError,
     UnknownConversationError as _AskUnknownConversationError,
+    AskTurnFailed as _AskTurnFailed,
+    FAILED_TURN_MESSAGE as _ASK_FAILED_TURN_MESSAGE,
     run_ask,
 )
 from webapp.matchmaker_orchestrator import (
@@ -23876,6 +23878,7 @@ _ASK_STATUS_CHIPS = {
     "mixed": ("&#177;", "Mixed", "Rated mixed"),
     "private": ("&#128274;", "Private", "Private"),
     "hidden": ("&#8856;", "Hidden", "Hidden by an admin"),
+    "failed": ("&#9888;", "Failed", "Failed turn, no answer was produced"),
 }
 
 
@@ -23885,6 +23888,7 @@ _ASK_CHIP_CSS = (
     "/* Status chips (BRAND.md, Status chips): non-interactive, 18px, no border. One neutral fill; Hidden is admin-only deep-seafoam text with no fill. */\n"
     ".ask-chip{display:inline-flex;align-items:center;gap:3px;box-sizing:border-box;height:18px;padding:0 8px;border-radius:999px;background:var(--line);color:var(--ink-soft);font-size:12px;line-height:1;white-space:nowrap;}\n"
     ".ask-chip-hidden{background:none;padding:0;color:var(--seafoam-deep);}\n"
+    ".ask-chip-failed{background:none;padding:0;color:var(--alert);}\n"
 )
 
 
@@ -23910,11 +23914,13 @@ def _ask_rating_kind(helpful_count, negative_count) -> str | None:
 
 
 def _ask_status_chips_html(helpful_count=0, negative_count=0, *, private=False,
-                           hidden=False, viewer_is_admin=False) -> str:
+                           hidden=False, viewer_is_admin=False, failed=False) -> str:
     """The chips for one question, in the one order every surface uses:
-    Hidden (admin only), Private, rating. Unrated, public, visible shows
-    nothing."""
+    Failed and Hidden (admin only), Private, rating. Unrated, public, visible
+    shows nothing."""
     kinds = []
+    if failed and viewer_is_admin:
+        kinds.append("failed")
     if hidden and viewer_is_admin:
         kinds.append("hidden")
     if private:
@@ -23998,7 +24004,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         # shows nothing.
         chips = _ask_status_chips_html(r.get("helpful_count"), r.get("negative_count"),
                                        private=bool(r.get("is_private")),
-                                       hidden=bool(r.get("hidden_public")), viewer_is_admin=authed)
+                                       hidden=bool(r.get("hidden_public")), viewer_is_admin=authed,
+                                       failed=bool(r.get("failed")))
         segs = [chips] if chips else []
         if who is not None:
             segs.append(f'<span class="ask-pq-seg">{_esc(who)}</span>')
@@ -24007,6 +24014,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]")
+        if r.get("failed"):
+            # Only an admin ever gets a failed row. No answer exists; show the
+            # raw error text instead (admin only).
+            a_html = f'<p style="margin:0;color:var(--alert);">{_esc(r.get("error") or "No answer was produced.")}</p>'
+            src_html = ""
         # Resume is for the reader's own conversations only; another member's
         # row gets nothing. The server still decides (403 for someone else's).
         resume_html = ""
@@ -25233,10 +25245,16 @@ async function doAsk(followUp, skipSimilar) {{
       body: JSON.stringify({{ question: q, effort: effort, sources: sources, conversation_id: convoId,
         private: (!followUp && !convoId) ? !!(document.getElementById('ask-private') || {{}}).checked : undefined }})
     }});
-    var d = await resp.json();
+    // An edge error page (Cloudflare, Railway) is HTML, so the body may not parse.
+    var d = await resp.json().catch(function() {{ return {{}}; }});
     if (stale()) {{ if (d.usage) updateUsage(d.usage); dropLate(resp.ok && !d.capped); return; }}
     if (!resp.ok) {{
-      answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(d.detail || 'Error') + '</span>';
+      // A 5xx with no JSON detail is the same failure to the reader.
+      var edgeFail = resp.status >= 500 && !d.detail;
+      answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(edgeFail ? {json.dumps(_ASK_FAILED_TURN_MESSAGE)} : (d.detail || 'Error')) + '</span>';
+      if (d.usage) updateUsage(d.usage);
+      // The question goes back in the box so a retry is one tap.
+      if (d.failed || edgeFail) {{ qEl.value = q; qEl.dispatchEvent(new Event('input')); }}
       done(asked ? 'ready' : 'none');
       return;
     }}
@@ -25264,6 +25282,7 @@ async function doAsk(followUp, skipSimilar) {{
     if (stale()) {{ dropLate(false); return; }}
     console.error('FP&A Buddy ask failed', e);
     answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong. Try again.</span>';
+    qEl.value = q; qEl.dispatchEvent(new Event('input'));
     done(asked ? 'ready' : 'none');
   }}
 }}
@@ -25427,6 +25446,11 @@ async def ask(request: Request):
             raise HTTPException(status_code=404, detail="unknown conversation")
         except _AskForbiddenConversationError:
             raise HTTPException(status_code=403, detail="not your conversation")
+        except _AskTurnFailed as e:
+            # A failed turn is a 502 with a plain message and the updated
+            # spend, never answer text. The raw error stays server-side.
+            return JSONResponse({"detail": e.message, "failed": True, "usage": e.usage},
+                                status_code=502)
     finally:
         lib.close()
 
@@ -32193,10 +32217,14 @@ def admin_ask_report(request: Request, user: str = ""):
         rw = float(r.get("rewrite_cost_usd") or 0)
         split = (f'<div style="font-size:11px;font-weight:400;color:var(--muted);white-space:nowrap;">'
                  f'${r["cost_usd"] - rw:.4f} + ${rw:.4f} rewrite</div>') if rw > 0 else ""
+        # A failed turn (no answer produced) is labelled here, with the raw
+        # error: this report is admin-only and the cost is real spend.
+        failed = (f'<div style="font-size:12px;margin-top:3px;"><span style="color:var(--alert);font-weight:600;">&#9888; Failed</span> '
+                  f'<span style="color:var(--muted);">{_esc(r.get("error") or "No answer was produced.")}</span></div>') if r.get("failed") else ""
         return f"""<tr class="turn-row"{attrs}>
   <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])}</td>
   <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(r))}</td>
-  <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}</td>
+  <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}{failed}</td>
   <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
   <td class="admin-table-cell" data-label="Cost" style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}{split}</td>
 </tr>"""
