@@ -12695,6 +12695,21 @@ function markAiCitations(citations, model) {
   var modelEl = document.getElementById('ai-drafted-citations-model');
   if (modelEl) modelEl.value = model || '';
 }
+// The Sources list for a fresh draft: the server renders it with the same
+// helper the saved view uses (_citations_list_html) and the Generate route
+// sends it back as sources_html, so the [n] markers can be checked before
+// Save. clearGeneratedSources only removes a list Generate put there, never
+// the saved one the page was rendered with.
+function showGeneratedSources(id, html) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = html || '';
+  el.dataset.generated = '1';
+}
+function clearGeneratedSources(id) {
+  var el = document.getElementById(id);
+  if (el && el.dataset.generated) { el.innerHTML = ''; delete el.dataset.generated; }
+}
 function clearAiCitations() {
   var el = document.getElementById('ai-drafted-citations');
   if (el) el.value = '';
@@ -12810,6 +12825,7 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
     markAiConfidence('description', d.confident);
     markAiLowConfidence('description', d.low_confidence);
     markAiCitations(d.citations || [], d.model || '');
+    showGeneratedSources('description-sources', d.sources_html);
     if (summaryId) {
       var summaryEl = document.getElementById(summaryId);
       if (summaryEl) {
@@ -12842,6 +12858,7 @@ async function generateDescription(name, url, descId, statusId, summaryId, errBo
       function onEdit() {
         unmarkAiDrafted('description');
         clearAiCitations();
+        clearGeneratedSources('description-sources');
         hideSaveAndMarkVerified('description-verify-badge', 'description-verify-action');
         descEl.removeEventListener('input', onEdit);
       }
@@ -13055,6 +13072,7 @@ async function generateCommunityProfile(name, url, statusId, errBoxId, hostId) {
     var lowConf = document.getElementById('cp-low_confidence');
     if (lowConf) lowConf.checked = !!d.low_confidence;
     markAiCitations(d.citations || [], d.model || '');
+    showGeneratedSources('profile-sources', d.sources_html);
     // A hand-edit after this Generate unmarks just that field (so its
     // confidence line stops claiming the model's certainty about text you
     // rewrote). It leaves the citations alone: every marker in the profile
@@ -18133,7 +18151,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
     </label>
   </div>
   <div>
-    {_admin_citations_html}
+    <div id="profile-sources">{_admin_citations_html}</div>
   </div>
   </div>"""
 
@@ -19935,6 +19953,7 @@ async def admin_communities_generate_profile(request: Request):
         "confidence": draft.confidence,
         "citations": draft.citations,
         "model": draft.model,
+        "sources_html": _citations_list_html(draft.citations),
     })
 
 
@@ -20101,6 +20120,7 @@ def _tool_new_page(request: Request, form=None, refusal: list | None = None):
       style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;resize:vertical;"
       placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(_fv('description'))}</textarea>
     {_new_desc_counter}
+    <div id="description-sources"></div>
   </div>
   <div>
     <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(tool_labels.SHORT_SUMMARY)} *</label>
@@ -20815,9 +20835,9 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
             placeholder="What does it do, who's it for, how does it differ? Shown on the profile page—roughly 8-12 sentences.">{_esc(tool['description'])}</textarea>
           {_desc_counter}
           <span id="description-verify-action">{_description_verify_action}</span>
-          {_citations_list_html(description_citations,
+          <div id="description-sources">{_citations_list_html(description_citations,
                                 empty_note="No sources recorded for this draft—it was either written by hand, "
-                                           "or the AI had no page content available to cite.")}
+                                           "or the AI had no page content available to cite.")}</div>
           {_description_confidence_html}
           {_description_review_line_html}
           <button type="submit" form="tool-edit-form" name="save_action" value="continue"
@@ -21848,7 +21868,8 @@ async def admin_tools_generate_description(request: Request):
 
     return JSONResponse({"ok": True, "description": draft.description, "summary": draft.summary,
                          "low_confidence": draft.low_confidence, "confident": draft.confident,
-                         "citations": draft.citations, "model": draft.model})
+                         "citations": draft.citations, "model": draft.model,
+                         "sources_html": _citations_list_html(draft.citations)})
 
 
 @app.post("/admin/tools/software/{tool_id}/generate-differentiation")

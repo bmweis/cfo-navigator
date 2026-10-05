@@ -290,6 +290,21 @@ def test_generate_description_route_returns_citations_and_model(app_module, monk
     assert len(body["citations"]) == 1
     assert body["citations"][0]["url"] == "https://runway.com"
     assert body["model"]
+    # The route also hands back the Sources list, rendered by the same helper
+    # the saved view uses, so the form can show it before Save.
+    assert ">Sources<" in body["sources_html"] and "https://runway.com" in body["sources_html"]
+
+
+def test_new_and_edit_forms_have_a_description_sources_container(app_module):
+    client = _client(app_module)
+    _login(client)
+    assert 'id="description-sources"' in client.get("/admin/tools/software/new").text
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.add_tool(name="Runway", url="https://runway.com", description="d", summary="s",
+                 categories=[], approved=1)
+    slug = lib.conn.execute("SELECT slug FROM tools").fetchone()[0]
+    lib.close()
+    assert 'id="description-sources"' in client.get(f"/tools/software/{slug}/edit").text
 
 
 # -- new-tool submit route: closes the pre-existing needs_verification/ ------

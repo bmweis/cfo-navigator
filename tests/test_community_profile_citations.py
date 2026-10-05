@@ -281,6 +281,7 @@ def test_generate_profile_route_returns_citations_and_model(app_module, monkeypa
     assert len(body["citations"]) == 1
     assert body["citations"][0]["url"] == "https://chief.com"
     assert body["model"]
+    assert ">Sources<" in body["sources_html"] and "https://chief.com" in body["sources_html"]
 
 
 # -- profile submit route: persist / clear, one row for the whole draft ------
