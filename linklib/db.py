@@ -691,6 +691,9 @@ CREATE TABLE IF NOT EXISTS ask_questions (
     stop_reason           TEXT NOT NULL DEFAULT '',    -- answer call's API stop_reason ('max_tokens' = cut off); '' = unknown/pre-2026-10
     created_at            TEXT NOT NULL
 );
+-- web_scope (2026-10, Open web) arrives via the migration loop: 'open' | 'trusted' | ''.
+-- '' = no web search armed, OR a legacy row recorded before this column existed, where
+-- use_feed meant RSS items only and use_web meant a trusted-domain search. Never backfilled.
 
 CREATE INDEX IF NOT EXISTS idx_ask_questions_user ON ask_questions(user_id);
 CREATE INDEX IF NOT EXISTS idx_ask_questions_created ON ask_questions(created_at);
@@ -2584,6 +2587,7 @@ class Library:
             # conversation out of the member-visible past-questions list.
             # Set on every turn of a conversation together; admins still see it.
             "ALTER TABLE ask_questions ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ask_questions ADD COLUMN web_scope TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE matchmaker_questions ADD COLUMN stop_reason TEXT NOT NULL DEFAULT ''",
             # Current Feed (/current-feed, 2026-09) — replaces the original
             # section-name-matching design (Blogs=Side A, Substacks=Side B,
@@ -8972,7 +8976,8 @@ class Library:
                             exa_result_count: int = 0, exa_cost_usd: float = 0.0,
                             citations: Optional[list[dict]] = None,
                             stop_reason: str = "",
-                            is_private: bool = False) -> int:
+                            is_private: bool = False,
+                            web_scope: str = "") -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
@@ -9000,15 +9005,16 @@ class Library:
                 rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
                 embed_input_tokens, embed_cost_usd,
                 exa_result_count, exa_cost_usd,
-                citations_json, stop_reason, is_private, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                citations_json, stop_reason, is_private, web_scope, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
              cost_usd, rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
              embed_input_tokens, embed_cost_usd,
              exa_result_count, exa_cost_usd,
-             json.dumps(citations or []), stop_reason or "", int(bool(is_private)), now),
+             json.dumps(citations or []), stop_reason or "", int(bool(is_private)),
+             web_scope if web_scope in ("open", "trusted") else "", now),
         )
         row_id = cur.lastrowid
         if not conversation_id:

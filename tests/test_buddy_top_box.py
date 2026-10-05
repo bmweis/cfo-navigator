@@ -152,19 +152,21 @@ def test_admin_sees_the_estimate_in_the_depth_options_and_on_the_button(admin_pg
     cost, exa = pg.evaluate("[COST, EXA_UNIT]")
     assert exa > 0 and set(cost) == {"quick", "standard", "deep"}
     for tier, label in (("quick", "Quick"), ("standard", "Standard"), ("deep", "Deep")):
-        want = "($%.3f)" % (cost[tier] + exa)                              # Web is on by default
+        want = "($%.3f)" % (cost[tier] + exa)                              # Current feed is on by default and searches the trusted sites
         assert pg.inner_text("#ask-dd-top .ask-tag[data-tier='%s'] .ask-tag-cost" % tier) == want
         assert pg.inner_text("#ask-dd-top .ask-tag[data-tier='%s'] .ask-tag-name" % tier) == label
     assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % (cost["standard"] + exa)
     assert "per query" not in pg.inner_text("body")
     assert pg.inner_text(".ask-cost-note").strip() == "Dollar amounts are estimates."
-    # Turning Web off removes the Exa call from every figure.
+    # Current feed off and Open web off: no web search, no Exa call in any figure.
     pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
-    pg.click("#ask-dd-top .ask-tag[data-source='web']")
+    pg.click("#ask-dd-top .ask-tag[data-source='feed']")
     assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % cost["standard"]
-    pg.click("#ask-dd-top .ask-tag[data-source='feed']")                  # the RSS feed makes no Exa call
-    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % cost["standard"]
-    pg.click("#ask-dd-top .ask-tag[data-source='web']")
+    # Open web alone is one Exa call.
+    pg.click("#ask-dd-top .ask-tag[data-source='open_web']")
+    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % (cost["standard"] + exa)
+    # Both on is still one call, not two.
+    pg.click("#ask-dd-top .ask-tag[data-source='feed']")
     assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % (cost["standard"] + exa)
 
 

@@ -151,7 +151,7 @@ def test_first_answer_brings_the_bubble_and_top_button_stays_ask(live):
     first = pg.evaluate("window.__calls[0]")
     assert first["conversation_id"] is None
     # Sources are the top controls only: no depth tier, no cloned chips.
-    assert first["sources"] == ["library", "web"]
+    assert first["sources"] == ["library", "feed"]
 
 
 def test_follow_up_continues_the_conversation_and_top_box_starts_a_new_one(live):
@@ -183,14 +183,14 @@ def test_bubble_chips_and_top_chips_share_one_state(live):
     assert "active" in pg.get_attribute(".fpa-intro-area-controls .ask-tag[data-tier='deep']", "class")
     assert "active" not in pg.get_attribute(".fpa-intro-area-controls .ask-tag[data-tier='standard']", "class")
     pg.click("#fu .ask-dd-btn[data-dd='sources']")
-    pg.click("#fu .ask-tag[data-source='feed']")
-    assert "active" in pg.get_attribute(".fpa-intro-area-controls .ask-tag[data-source='feed']", "class")
+    pg.click("#fu .ask-tag[data-source='open_web']")
+    assert "active" in pg.get_attribute(".fpa-intro-area-controls .ask-tag[data-source='open_web']", "class")
     pg.fill("#fu-q", "Again")
     pg.click("#fu-btn")
     pg.wait_for_function("window.__calls.length === 2")
     second = pg.evaluate("window.__calls[1]")
     assert second["effort"] == "deep"
-    assert sorted(second["sources"]) == ["feed", "library", "web"]
+    assert sorted(second["sources"]) == ["feed", "library", "open_web"]
     # Re-rendered bubble reflects the state.
     pg.wait_for_selector("#fu-q")
     assert "active" in pg.get_attribute("#fu .ask-tag[data-tier='deep']", "class")
