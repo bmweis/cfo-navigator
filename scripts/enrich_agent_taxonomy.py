@@ -114,8 +114,18 @@ def main() -> int:
                 continue
 
             print(f"[{t['name']}] researching…", flush=True)
-            result = enrich_mod.generate_tool_agent_taxonomy(
-                t["name"], t["url"], t.get("description", ""), model=args.model, voice_core=voice_core)
+            try:
+                result = enrich_mod.generate_tool_agent_taxonomy(
+                    t["name"], t["url"], t.get("description", ""), model=args.model, voice_core=voice_core)
+            except enrich_mod.UncitedDraft as e:
+                # Issue #642: nothing is saved; both model calls were paid for.
+                print(f"  REFUSED, nothing saved (existing note kept): citations {e.reason} "
+                      f"after {e.attempts} attempts, ${e.cost_usd:.4f}")
+                if not args.dry_run:
+                    lib.record_enrichment_cost(None, e.model, e.input_tokens, e.output_tokens, e.cost_usd)
+                total_cost += e.cost_usd
+                total_failed += 1
+                continue
             if result is None:
                 print("  FAILED (SDK/key unavailable or the call errored)")
                 total_failed += 1

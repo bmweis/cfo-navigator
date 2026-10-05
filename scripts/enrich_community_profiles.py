@@ -126,9 +126,18 @@ def main() -> int:
                 field: existing_profile.get(field) for field in enrich_mod.COMMUNITY_PROFILE_FIELDS
                 if str(existing_profile.get(field) or "").strip()
             }
-            draft = enrich_mod.generate_community_profile(
-                c["name"], c["url"], existing=existing_for_prompt or None, model=args.model,
-                voice_core=voice_core)
+            try:
+                draft = enrich_mod.generate_community_profile(
+                    c["name"], c["url"], existing=existing_for_prompt or None, model=args.model,
+                    voice_core=voice_core)
+            except enrich_mod.UncitedDraft as e:
+                # Issue #642: nothing is saved; both model calls were paid for.
+                print(f"  REFUSED, nothing saved (existing profile kept): citations {e.reason} "
+                      f"after {e.attempts} attempts, ${e.cost_usd:.4f}")
+                if not args.dry_run:
+                    lib.record_enrichment_cost(None, e.model, e.input_tokens, e.output_tokens, e.cost_usd)
+                total_failed += 1
+                continue
             if draft is None:
                 print("  FAILED (SDK/key unavailable or the call errored)")
                 total_failed += 1

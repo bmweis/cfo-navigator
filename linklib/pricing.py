@@ -65,6 +65,10 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-sonnet-4-6":         {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_write_1h": 6.00, "cache_read": 0.30},
     "claude-sonnet-5":           {"input": 2.00, "output": 10.00, "cache_write": 2.50, "cache_write_1h": 4.00, "cache_read": 0.20},  # permanent rate (was introductory; the planned $3/$15 increase was cancelled — see module docstring)
     "claude-opus-4-8":           {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_write_1h": 10.00, "cache_read": 0.50},
+    # Opus 5.5: cache_read is 0.20, which is 0.05x input. Every other row uses
+    # ~0.1x. That is Anthropic's published rate for this model, not a typo; do
+    # not "correct" it to 0.40. cache_write_1h follows the repo-wide 2x rule.
+    "claude-opus-5-5":           {"input": 4.00, "output": 20.00, "cache_write": 5.00, "cache_write_1h": 8.00, "cache_read": 0.20},
     "claude-opus-5":             {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_write_1h": 10.00, "cache_read": 0.50},
 }
 

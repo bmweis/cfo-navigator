@@ -21,7 +21,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from .citations import extract_citations, make_document_block, strip_citation_markers
+from .citations import citation_problem, extract_citations, make_document_block, strip_citation_markers
 from .community_profile import generated_cpe
 from .stop_reason import warn_if_max_tokens
 
@@ -191,6 +191,71 @@ class GroundingUnavailable(Exception):
         self.reason = reason
         self.url = url
         super().__init__(f"could not fetch usable grounding content for {url} ({reason})")
+
+
+class UncitedDraft(Exception):
+    """Raised by generate_tool_agent_taxonomy/generate_tool_description/
+    generate_community_profile when a grounded draft came back without valid
+    citations twice (issue #642): no citation at all, or a `[n]` marker with
+    no matching source. The caller refuses to save: the previous text and its
+    citation set stay exactly as they were. Nothing is stripped or patched
+    quietly.
+
+    `field` is "agent_taxonomy", "description" or "community_profile";
+    `reason` is "no_citations" or "orphan_markers". The two calls were
+    already paid for, so their summed usage rides on the exception and the
+    caller records it (Library.record_enrichment_cost) before showing the
+    refusal."""
+    def __init__(self, field: str, reason: str, url: str, model: str = "",
+                 input_tokens: int = 0, output_tokens: int = 0, cost_usd: float = 0.0,
+                 exa_cost_usd: float = 0.0, attempts: int = 2):
+        self.field = field
+        self.reason = reason
+        self.url = url
+        self.model = model
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.cost_usd = cost_usd
+        self.exa_cost_usd = exa_cost_usd
+        self.attempts = attempts
+        super().__init__(f"{field} draft for {url} had unusable citations ({reason}) after {attempts} attempts")
+
+
+def _run_cited_draft(attempt, texts_of, field: str, url: str, exa_cost_usd: float = 0.0):
+    """Run one grounded generation, and the one automatic retry when its
+    citations are unusable (issue #642). `attempt()` makes one model call
+    over the already-fetched grounding and returns a draft or None;
+    `texts_of(draft)` lists the texts whose `[n]` markers must resolve.
+
+    A bad first draft (no citations, or markers with no source) triggers
+    exactly one retry, which re-uses the same fetched page (no second fetch).
+    A good retry is returned with both calls' tokens and cost summed and
+    `attempts=2`. A bad retry raises UncitedDraft carrying both calls' usage.
+    A first draft that is simply None (SDK, key or call failure) is returned
+    as None unchanged, so every existing "generation failed" path is the
+    same as before."""
+    first = attempt()
+    if first is None:
+        return None
+    reason = citation_problem(texts_of(first), first.citations)
+    if reason is None:
+        return first
+    _logger.warning("%s draft for %s had unusable citations (%s); retrying once", field, url, reason)
+    second = attempt()
+    if second is not None:
+        second.input_tokens += first.input_tokens
+        second.output_tokens += first.output_tokens
+        second.cost_usd += first.cost_usd
+        second.attempts = 2
+        reason = citation_problem(texts_of(second), second.citations)
+        if reason is None:
+            return second
+        base = second
+    else:
+        base = first
+    raise UncitedDraft(field, reason, url, model=base.model, input_tokens=base.input_tokens,
+                       output_tokens=base.output_tokens, cost_usd=base.cost_usd,
+                       exa_cost_usd=exa_cost_usd)
 
 
 @dataclass
@@ -537,6 +602,7 @@ class ToolDescriptionDraft:
                                  # actually fired — recorded as its own enrichment_cost row
                                  # by the caller (webapp/app.py), never folded into cost_usd,
                                  # so it isn't misattributed to `model`'s own per-token rate
+    attempts: int = 1   # model calls spent on this draft (2 = the one automatic uncited-draft retry ran)
 
 
 def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
@@ -633,65 +699,68 @@ def generate_tool_description(name: str, url: str, model: str = DEFAULT_MODEL,
     # what was actually sent.
     message_content = (doc_blocks + [{"type": "text", "text": prompt}]) if doc_blocks else prompt
 
-    try:
-        client = Anthropic()
-        resp = client.messages.create(
-            model=model,
-            max_tokens=_checked_max_tokens(3000),  # was 1600, predating the citation-tag fix's
-                              # move to verbose prose + paragraph/bullet structure guidance + a
-                              # trailing sentinel block (see CLAUDE.md's citation-tag investigation
-                              # bullets) — that ceiling only cleared MIN_GENERATE_MAX_TOKENS by 400
-                              # tokens, nowhere near enough margin for Opus 5's adaptive thinking
-                              # (max_tokens caps thinking + response together — see PR 260's note on
-                              # MIN_GENERATE_MAX_TOKENS above) to absorb on a content-rich page: a
-                              # live spot-check (2026-08) found 6 of 7 sampled tools truncating mid-
-                              # response, correlating with richer source content giving the model
-                              # more to reason about before writing. Raised to real parity-plus-
-                              # margin over Agent taxonomy's working 2000-token ceiling, empirically
-                              # verified clean against the worst-truncating tools (Concourse, Coupa,
-                              # GoClose) via --sample before this was considered resolved.
-            messages=[{"role": "user", "content": message_content}],
-        )
-        warn_if_max_tokens(resp, "enrich.generate_tool_description")
-        # inject_markers=True: real citations now surface as genuine [n]
-        # markers spliced into the text by extract_citations itself, not
-        # left for the model to signal on its own — see the docstring above.
-        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=True)
-        raw = raw.strip().removeprefix("```").removesuffix("```").strip()   # defensive: a stray
-                          # code fence despite the instruction not to use one
-        body_text, sentinels = _split_trailing_sentinels(raw, ["SUMMARY", "CONFIDENT"])
-        description_text = body_text.strip()
-        if not description_text:
-            # Degenerate case: essentially nothing came back (the old
-            # json.loads("") "Expecting value" failure's equivalent) — no
-            # usable draft to return.
-            raise ValueError("empty description after parsing")
-        # The prompt asks for no markers in the summary, but the API can attach
-        # a citation to the SUMMARY text block and extract_citations splices
-        # [n] into it; strip this draft's own markers (and only those).
-        summary_text = strip_citation_markers(
-            sentinels.get("SUMMARY", "").strip(), [c["n"] for c in citations]).strip()
-        confident = sentinels.get("CONFIDENT", "").strip().lower() == "true"
+    def _attempt():
+        try:
+            client = Anthropic()
+            resp = client.messages.create(
+                model=model,
+                max_tokens=_checked_max_tokens(3000),  # was 1600, predating the citation-tag fix's
+                                  # move to verbose prose + paragraph/bullet structure guidance + a
+                                  # trailing sentinel block (see CLAUDE.md's citation-tag investigation
+                                  # bullets) — that ceiling only cleared MIN_GENERATE_MAX_TOKENS by 400
+                                  # tokens, nowhere near enough margin for Opus 5's adaptive thinking
+                                  # (max_tokens caps thinking + response together — see PR 260's note on
+                                  # MIN_GENERATE_MAX_TOKENS above) to absorb on a content-rich page: a
+                                  # live spot-check (2026-08) found 6 of 7 sampled tools truncating mid-
+                                  # response, correlating with richer source content giving the model
+                                  # more to reason about before writing. Raised to real parity-plus-
+                                  # margin over Agent taxonomy's working 2000-token ceiling, empirically
+                                  # verified clean against the worst-truncating tools (Concourse, Coupa,
+                                  # GoClose) via --sample before this was considered resolved.
+                messages=[{"role": "user", "content": message_content}],
+            )
+            warn_if_max_tokens(resp, "enrich.generate_tool_description")
+            # inject_markers=True: real citations now surface as genuine [n]
+            # markers spliced into the text by extract_citations itself, not
+            # left for the model to signal on its own — see the docstring above.
+            raw, citations = extract_citations(resp.content, sent_docs, inject_markers=True)
+            raw = raw.strip().removeprefix("```").removesuffix("```").strip()   # defensive: a stray
+                              # code fence despite the instruction not to use one
+            body_text, sentinels = _split_trailing_sentinels(raw, ["SUMMARY", "CONFIDENT"])
+            description_text = body_text.strip()
+            if not description_text:
+                # Degenerate case: essentially nothing came back (the old
+                # json.loads("") "Expecting value" failure's equivalent) — no
+                # usable draft to return.
+                raise ValueError("empty description after parsing")
+            # The prompt asks for no markers in the summary, but the API can attach
+            # a citation to the SUMMARY text block and extract_citations splices
+            # [n] into it; strip this draft's own markers (and only those).
+            summary_text = strip_citation_markers(
+                sentinels.get("SUMMARY", "").strip(), [c["n"] for c in citations]).strip()
+            confident = sentinels.get("CONFIDENT", "").strip().lower() == "true"
 
-        from .pricing import compute_cost
-        usage = getattr(resp, "usage", None)
-        in_tok = getattr(usage, "input_tokens", 0) or 0
-        out_tok = getattr(usage, "output_tokens", 0) or 0
-        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
-        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+            from .pricing import compute_cost
+            usage = getattr(resp, "usage", None)
+            in_tok = getattr(usage, "input_tokens", 0) or 0
+            out_tok = getattr(usage, "output_tokens", 0) or 0
+            cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+            cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        return ToolDescriptionDraft(
-            description=description_text,
-            summary=summary_text,
-            low_confidence=low_confidence, confident=confident,
-            citations=citations, model=model,
-            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
-            exa_cost_usd=fetch.exa_cost_usd,
-        )
-    except Exception as e:
-        _logger.warning("generate_tool_description() failed: %s: %s", type(e).__name__, e)
-        return None
+            return ToolDescriptionDraft(
+                description=description_text,
+                summary=summary_text,
+                low_confidence=low_confidence, confident=confident,
+                citations=citations, model=model,
+                input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+                exa_cost_usd=fetch.exa_cost_usd,
+            )
+        except Exception as e:
+            _logger.warning("generate_tool_description() failed: %s: %s", type(e).__name__, e)
+            return None
+
+    return _run_cited_draft(_attempt, lambda d: [d.description], "description", url, fetch.exa_cost_usd)
 
 
 _TOOL_DIFFERENTIATION_PROMPT = """You are drafting the "Bottom line" callout for a vendor's profile page on the
@@ -1140,6 +1209,7 @@ class AgentTaxonomyResult:
     exa_cost_usd: float = 0.0   # summed across every candidate page that needed the Exa
                                  # fallback (0.0 when none did) — see ToolDescriptionDraft's
                                  # matching field for where this gets recorded
+    attempts: int = 1   # model calls spent on this draft (2 = the one automatic uncited-draft retry ran)
 
 
 # Total grounding text budget across every fetched page for one agent-
@@ -1256,49 +1326,52 @@ def generate_tool_agent_taxonomy(name: str, url: str, description: str = "",
     # resolve against what was actually sent.
     message_content = (doc_blocks + [{"type": "text", "text": prompt}]) if doc_blocks else prompt
 
-    try:
-        client = Anthropic()
-        resp = client.messages.create(
-            model=model,
-            max_tokens=_checked_max_tokens(2000),  # headroom for Opus 5's on-by-default adaptive thinking
-            messages=[{"role": "user", "content": message_content}],
-        )
-        warn_if_max_tokens(resp, "enrich.generate_tool_agent_taxonomy")
-        # inject_markers=True: real citations now surface as genuine [n]
-        # markers spliced into the note text by extract_citations itself—
-        # see the docstring above. `citations` is collected the same way
-        # regardless, already deduped by document_index (== deduped by url
-        # in practice, since each fetched page has its own distinct URL).
-        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=True)
-        raw = raw.strip().removeprefix("```").removesuffix("```").strip()   # defensive: a stray
-                          # code fence despite the instruction not to use one
-        note_text, sentinels = _split_trailing_sentinels(raw, ["CONFIDENT"])
-        note_text = note_text.strip()
-        if not note_text:
-            # Degenerate case: essentially nothing came back — no usable
-            # draft to return (the old json.loads("") failure's equivalent).
-            raise ValueError("empty agent taxonomy note after parsing")
-        confident = sentinels.get("CONFIDENT", "").strip().lower() == "true"
+    def _attempt():
+        try:
+            client = Anthropic()
+            resp = client.messages.create(
+                model=model,
+                max_tokens=_checked_max_tokens(2000),  # headroom for Opus 5's on-by-default adaptive thinking
+                messages=[{"role": "user", "content": message_content}],
+            )
+            warn_if_max_tokens(resp, "enrich.generate_tool_agent_taxonomy")
+            # inject_markers=True: real citations now surface as genuine [n]
+            # markers spliced into the note text by extract_citations itself—
+            # see the docstring above. `citations` is collected the same way
+            # regardless, already deduped by document_index (== deduped by url
+            # in practice, since each fetched page has its own distinct URL).
+            raw, citations = extract_citations(resp.content, sent_docs, inject_markers=True)
+            raw = raw.strip().removeprefix("```").removesuffix("```").strip()   # defensive: a stray
+                              # code fence despite the instruction not to use one
+            note_text, sentinels = _split_trailing_sentinels(raw, ["CONFIDENT"])
+            note_text = note_text.strip()
+            if not note_text:
+                # Degenerate case: essentially nothing came back — no usable
+                # draft to return (the old json.loads("") failure's equivalent).
+                raise ValueError("empty agent taxonomy note after parsing")
+            confident = sentinels.get("CONFIDENT", "").strip().lower() == "true"
 
-        from .pricing import compute_cost
-        usage = getattr(resp, "usage", None)
-        in_tok = getattr(usage, "input_tokens", 0) or 0
-        out_tok = getattr(usage, "output_tokens", 0) or 0
-        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
-        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+            from .pricing import compute_cost
+            usage = getattr(resp, "usage", None)
+            in_tok = getattr(usage, "input_tokens", 0) or 0
+            out_tok = getattr(usage, "output_tokens", 0) or 0
+            cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+            cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        return AgentTaxonomyResult(
-            agent_taxonomy_note=note_text,
-            agent_taxonomy_needs_verification=not confident,
-            confident=confident,
-            low_confidence=low_confidence, citations=citations, model=model,
-            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
-            exa_cost_usd=exa_cost_total,
-        )
-    except Exception as e:
-        _logger.warning("generate_tool_agent_taxonomy() failed: %s: %s", type(e).__name__, e)
-        return None
+            return AgentTaxonomyResult(
+                agent_taxonomy_note=note_text,
+                agent_taxonomy_needs_verification=not confident,
+                confident=confident,
+                low_confidence=low_confidence, citations=citations, model=model,
+                input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+                exa_cost_usd=exa_cost_total,
+            )
+        except Exception as e:
+            _logger.warning("generate_tool_agent_taxonomy() failed: %s: %s", type(e).__name__, e)
+            return None
+
+    return _run_cited_draft(_attempt, lambda d: [d.agent_taxonomy_note], "agent_taxonomy", url, exa_cost_total)
 
 
 # The fields generate_community_profile drafts (excludes low_confidence,
@@ -1484,6 +1557,7 @@ class CommunityProfileDraft:
     output_tokens: int = 0
     cost_usd: float = 0.0
     exa_cost_usd: float = 0.0   # see ToolDescriptionDraft's matching field
+    attempts: int = 1   # model calls spent on this draft (2 = the one automatic uncited-draft retry ran)
 
 
 def generate_community_profile(name: str, url: str, existing: dict | None = None,
@@ -1594,87 +1668,90 @@ def generate_community_profile(name: str, url: str, existing: dict | None = None
     # what was actually sent.
     message_content = (doc_blocks + [{"type": "text", "text": prompt}]) if doc_blocks else prompt
 
-    try:
-        client = Anthropic()
-        resp = client.messages.create(
-            model=model,
-            max_tokens=_checked_max_tokens(6000),  # headroom for Opus 5's on-by-default adaptive thinking
-            messages=[{"role": "user", "content": message_content}],
-        )
-        warn_if_max_tokens(resp, "enrich.generate_community_profile")
-        # inject_markers=True: real citations now surface as genuine [n]
-        # markers spliced into whichever field actually got cited — see
-        # the docstring above.
-        raw, citations = extract_citations(resp.content, sent_docs, inject_markers=True)
-        raw = raw.strip().removeprefix("```").removesuffix("```").strip()   # defensive: a stray
-                          # code fence despite the instruction not to use one
-        blocks = _parse_labeled_blocks(raw, COMMUNITY_PROFILE_FIELDS + ["confidence"],
-                                        terminal_key="confidence")
-        if not blocks:
-            # No recognized field header anywhere in the response (e.g. the
-            # model reverted to a JSON blob) — nothing to safely save. See
-            # the docstring above for why this is stricter than Description/
-            # Agent taxonomy's "some text beats none."
-            raise ValueError("no recognized field headers in generate_community_profile response")
+    def _attempt():
+        try:
+            client = Anthropic()
+            resp = client.messages.create(
+                model=model,
+                max_tokens=_checked_max_tokens(6000),  # headroom for Opus 5's on-by-default adaptive thinking
+                messages=[{"role": "user", "content": message_content}],
+            )
+            warn_if_max_tokens(resp, "enrich.generate_community_profile")
+            # inject_markers=True: real citations now surface as genuine [n]
+            # markers spliced into whichever field actually got cited — see
+            # the docstring above.
+            raw, citations = extract_citations(resp.content, sent_docs, inject_markers=True)
+            raw = raw.strip().removeprefix("```").removesuffix("```").strip()   # defensive: a stray
+                              # code fence despite the instruction not to use one
+            blocks = _parse_labeled_blocks(raw, COMMUNITY_PROFILE_FIELDS + ["confidence"],
+                                            terminal_key="confidence")
+            if not blocks:
+                # No recognized field header anywhere in the response (e.g. the
+                # model reverted to a JSON blob) — nothing to safely save. See
+                # the docstring above for why this is stricter than Description/
+                # Agent taxonomy's "some text beats none."
+                raise ValueError("no recognized field headers in generate_community_profile response")
 
-        _, confidence_pairs = _split_trailing_sentinels(
-            blocks.get("confidence", ""), COMMUNITY_CONFIDENCE_FIELDS)
+            _, confidence_pairs = _split_trailing_sentinels(
+                blocks.get("confidence", ""), COMMUNITY_CONFIDENCE_FIELDS)
 
-        def _field(key: str) -> str:
-            return blocks.get(key, "").strip()
+            def _field(key: str) -> str:
+                return blocks.get(key, "").strip()
 
-        def _field_or_placeholder_empty(key: str) -> str:
-            """Same as _field, but coerces the model's null-placeholder
-            words ("Unclear", "None reported", "None publicly reported")
-            back to "" — the old JSON prompt used a real `null` for
-            "unknown" on this field, stored as "" via `data.get(f) or ""`;
-            plain text has no null, so the new prompt asks for a literal
-            word instead, and this restores the original storage contract
-            rather than silently changing it. NOT used for cpe_eligible,
-            whose "Unclear" was already a real, literal stored value in
-            the ORIGINAL prompt (rule 9), not a null-placeholder."""
-            value = _field(key)
-            # Tolerate a trailing period the model may add out of habit
-            # even to a short literal phrase ("None reported." vs "None
-            # reported") — the placeholder match shouldn't be defeated by
-            # punctuation the prompt never asked for either way.
-            normalized = value.strip().lower().rstrip(".")
-            return "" if normalized in _COMMUNITY_NULL_PLACEHOLDERS else value
+            def _field_or_placeholder_empty(key: str) -> str:
+                """Same as _field, but coerces the model's null-placeholder
+                words ("Unclear", "None reported", "None publicly reported")
+                back to "" — the old JSON prompt used a real `null` for
+                "unknown" on this field, stored as "" via `data.get(f) or ""`;
+                plain text has no null, so the new prompt asks for a literal
+                word instead, and this restores the original storage contract
+                rather than silently changing it. NOT used for cpe_eligible,
+                whose "Unclear" was already a real, literal stored value in
+                the ORIGINAL prompt (rule 9), not a null-placeholder."""
+                value = _field(key)
+                # Tolerate a trailing period the model may add out of habit
+                # even to a short literal phrase ("None reported." vs "None
+                # reported") — the placeholder match shouldn't be defeated by
+                # punctuation the prompt never asked for either way.
+                normalized = value.strip().lower().rstrip(".")
+                return "" if normalized in _COMMUNITY_NULL_PLACEHOLDERS else value
 
-        from .pricing import compute_cost
-        usage = getattr(resp, "usage", None)
-        in_tok = getattr(usage, "input_tokens", 0) or 0
-        out_tok = getattr(usage, "output_tokens", 0) or 0
-        cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
-        cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
+            from .pricing import compute_cost
+            usage = getattr(resp, "usage", None)
+            in_tok = getattr(usage, "input_tokens", 0) or 0
+            out_tok = getattr(usage, "output_tokens", 0) or 0
+            cache_w = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
+            cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        return CommunityProfileDraft(
-            ideal_member=_field("ideal_member"),
-            anti_fit=_field("anti_fit"),
-            value_prop=_field("value_prop"),
-            format_reality=_field("format_reality"),
-            engagement_level=_field("engagement_level"),
-            sponsor_relationship_note=_field("sponsor_relationship_note"),
-            business_model=_field("business_model"),
-            application_friction=_field("application_friction"),
-            cost_value_verdict=_field("cost_value_verdict"),
-            notable_members=_field_or_placeholder_empty("notable_members"),
-            public_criticism=_field_or_placeholder_empty("public_criticism"),
-            verdict_summary=_field("verdict_summary"),
-            jobs_program=_field_or_placeholder_empty("jobs_program"),
-            resources_included=_field_or_placeholder_empty("resources_included"),
-            cpe_eligible=generated_cpe(_field("cpe_eligible")),   # only Yes/No/Unclear can be written by a run, never Not assessed
-            low_confidence=low_confidence,
-            confidence=_parse_community_confidence(confidence_pairs),
-            citations=citations,
-            model=model,
-            input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
-            exa_cost_usd=fetch.exa_cost_usd,
-        )
-    except Exception as e:
-        _logger.warning("generate_community_profile() failed: %s: %s", type(e).__name__, e)
-        return None
+            return CommunityProfileDraft(
+                ideal_member=_field("ideal_member"),
+                anti_fit=_field("anti_fit"),
+                value_prop=_field("value_prop"),
+                format_reality=_field("format_reality"),
+                engagement_level=_field("engagement_level"),
+                sponsor_relationship_note=_field("sponsor_relationship_note"),
+                business_model=_field("business_model"),
+                application_friction=_field("application_friction"),
+                cost_value_verdict=_field("cost_value_verdict"),
+                notable_members=_field_or_placeholder_empty("notable_members"),
+                public_criticism=_field_or_placeholder_empty("public_criticism"),
+                verdict_summary=_field("verdict_summary"),
+                jobs_program=_field_or_placeholder_empty("jobs_program"),
+                resources_included=_field_or_placeholder_empty("resources_included"),
+                cpe_eligible=generated_cpe(_field("cpe_eligible")),   # only Yes/No/Unclear can be written by a run, never Not assessed
+                low_confidence=low_confidence,
+                confidence=_parse_community_confidence(confidence_pairs),
+                citations=citations,
+                model=model,
+                input_tokens=in_tok, output_tokens=out_tok, cost_usd=cost,
+                exa_cost_usd=fetch.exa_cost_usd,
+            )
+        except Exception as e:
+            _logger.warning("generate_community_profile() failed: %s: %s", type(e).__name__, e)
+            return None
+
+    return _run_cited_draft(_attempt, lambda d: [getattr(d, f) for f in COMMUNITY_PROFILE_FIELDS], "community_profile", url, fetch.exa_cost_usd)
 
 
 # The old JSON prompt used a real `null` for "unknown" on several fields

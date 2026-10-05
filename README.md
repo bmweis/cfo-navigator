@@ -124,7 +124,7 @@ article. This is the material FP&A Buddy reads from:
 python -m scripts.enrich_backfill --db library.db
 ```
 
-Defaults to `claude-opus-5`, chosen for summary quality over per-article
+Defaults to `claude-opus-5` (`claude-opus-5-5` is selectable), chosen for summary quality over per-article
 cost; override with `LINKLIB_ENRICH_MODEL`, or change it live from
 `/admin/system/ai` without a redeploy. To judge whether a different model is
 worth it before a full re-enrich, compare models side by side on one
