@@ -62,6 +62,8 @@ def live_server(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", db)
     monkeypatch.setenv("LINKLIB_PUBLIC_BASE", "https://bmweis.com")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from tests.ask_stub import ok_answer_question
+    monkeypatch.setattr("linklib.agent.answer_question", ok_answer_question)
     import importlib
     import webapp.app as appmod
     importlib.reload(appmod)
@@ -404,3 +406,23 @@ def test_ask_fpa_buddy_every_sources_combination_without_open_web_is_never_open(
                                 {"question": "Burn multiple?", "sources": src}))
         use_feed, use_web, scope = _last_scope(live_server.db_path)
         assert use_web == 0 and scope != "open", src
+
+
+def test_ask_fpa_buddy_failed_turn_is_a_tool_error_and_spend_is_recorded(live_server, monkeypatch):
+    from linklib.agent import Answer
+
+    def failing(lib, question, **kw):
+        return Answer(text="", failed=True, error="upstream 500 secret-detail-xyz",
+                      model="m", cost_usd=0.02)
+    monkeypatch.setattr("linklib.agent.answer_question", failing)
+    r = _call_tool(live_server.base_url, live_server.member, "ask_fpa_buddy",
+                   {"question": "Burn multiple?"})
+    msg = _error_text(r)
+    assert "Couldn't answer that just now" in msg
+    assert "secret-detail" not in msg and "upstream" not in msg
+    lib = Library(live_server.db_path)
+    try:
+        assert lib.ask_cost_this_month(live_server.member_id_) == 0.02
+        assert lib.list_recent_conversations(live_server.member_id_) == []
+    finally:
+        lib.close()
