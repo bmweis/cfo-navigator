@@ -390,3 +390,17 @@ def test_ask_fpa_buddy_open_web_only_via_the_explicit_parameter(live_server):
     _dict_result(_call_tool(live_server.base_url, live_server.member, "ask_fpa_buddy",
                             {"question": "Burn multiple?", "open_web": True}))
     assert _last_scope(live_server.db_path) == (1, 1, "open")
+
+
+def test_ask_fpa_buddy_feed_and_web_together_is_still_trusted_not_open(live_server):
+    _dict_result(_call_tool(live_server.base_url, live_server.member, "ask_fpa_buddy",
+                            {"question": "Burn multiple?", "sources": ["feed", "web"]}))
+    assert _last_scope(live_server.db_path) == (1, 0, "trusted")
+
+
+def test_ask_fpa_buddy_every_sources_combination_without_open_web_is_never_open(live_server):
+    for src in (["library"], ["library", "feed", "web"], ["web"], ["feed"]):
+        _dict_result(_call_tool(live_server.base_url, live_server.member, "ask_fpa_buddy",
+                                {"question": "Burn multiple?", "sources": src}))
+        use_feed, use_web, scope = _last_scope(live_server.db_path)
+        assert use_web == 0 and scope != "open", src

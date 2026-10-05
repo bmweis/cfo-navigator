@@ -148,8 +148,9 @@ def register_qa_tools(mcp: FastMCP, lib_factory: Callable[[], Library], opml_pat
 
         `sources` is a subset of `["library", "feed", "web"]` (default
         `["library", "web"]`) — which retrieval tiers to use. `"feed"` and
-        `"web"` both mean the site's Current feed: recent RSS items plus a
-        web search restricted to the sites Brian trusts. Neither is ever an
+        `"web"` both mean the site's Current feed, so passing `"web"` also pulls
+        RSS items (the Current feed is recent RSS items plus a web search
+        restricted to the sites Brian trusts), and neither value is ever an
         unrestricted search. To search the whole web, set `open_web=true`
         (default `false`); that is the only way to get an unrestricted
         search, and it replaces the trusted-only search with one open call.
