@@ -723,6 +723,9 @@ CREATE TABLE IF NOT EXISTS ask_questions (
     stop_reason           TEXT NOT NULL DEFAULT '',    -- answer call's API stop_reason ('max_tokens' = cut off); '' = unknown/pre-2026-10
     created_at            TEXT NOT NULL
 );
+-- failed/error (2026-10, failed Buddy turns) arrive via the migration loop: failed=1 marks a
+-- turn whose answer call did not produce an answer; error holds the raw detail (admin-only).
+-- A failed row keeps its cost_usd (spend still counts) but is never shown as a question.
 -- web_scope (2026-10, Open web) arrives via the migration loop: 'open' | 'trusted' | ''.
 -- '' = no web search armed, OR a legacy row recorded before this column existed, where
 -- use_feed meant RSS items only and use_web meant a trusted-domain search. Never backfilled.
@@ -2620,6 +2623,13 @@ class Library:
             # Set on every turn of a conversation together; admins still see it.
             "ALTER TABLE ask_questions ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE ask_questions ADD COLUMN web_scope TEXT NOT NULL DEFAULT ''",
+            # Failed Buddy turns (2026-10): a turn whose answer call failed is
+            # recorded for cost accounting only. failed=1 rows are excluded
+            # everywhere a question is shown (ask_visibility_clause and the
+            # per-user history/conversation queries); an admin sees them
+            # labelled Failed with `error`, the raw detail.
+            "ALTER TABLE ask_questions ADD COLUMN failed INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE ask_questions ADD COLUMN error TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE matchmaker_questions ADD COLUMN stop_reason TEXT NOT NULL DEFAULT ''",
             # Current Feed (/current-feed, 2026-09) — replaces the original
             # section-name-matching design (Blogs=Side A, Substacks=Side B,
@@ -3787,8 +3797,17 @@ class Library:
         _resolve_reader_content already ran for a Feed item that turns out
         to already be saved (Phase 5c). Kept as a real Library method
         (rather than inline SQL a second time) since there's now a second
-        call site."""
+        call site.
+
+        Tries the exact string first, then `normalize_url(url)`, so a pasted
+        `http://` or `www.` variant finds the article saved under its canonical
+        (https, no-www) URL. Articles are stored normalized (`upsert`), and the
+        exact-first order means a legacy row stored un-normalized still matches."""
         row = self.conn.execute("SELECT * FROM articles WHERE url=?", (url,)).fetchone()
+        if row is None:
+            canon = normalize_url(url)
+            if canon and canon != url:
+                row = self.conn.execute("SELECT * FROM articles WHERE url=?", (canon,)).fetchone()
         return self._row_to_dict(row) if row else None
 
     def embedding_content_hash(self, article_id: int) -> Optional[str]:
@@ -9022,7 +9041,9 @@ class Library:
                             citations: Optional[list[dict]] = None,
                             stop_reason: str = "",
                             is_private: bool = False,
-                            web_scope: str = "") -> int:
+                            web_scope: str = "",
+                            failed: bool = False,
+                            error: str = "") -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
@@ -9050,8 +9071,8 @@ class Library:
                 rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
                 embed_input_tokens, embed_cost_usd,
                 exa_result_count, exa_cost_usd,
-                citations_json, stop_reason, is_private, web_scope, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                citations_json, stop_reason, is_private, web_scope, failed, error, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
@@ -9059,7 +9080,8 @@ class Library:
              embed_input_tokens, embed_cost_usd,
              exa_result_count, exa_cost_usd,
              json.dumps(citations or []), stop_reason or "", int(bool(is_private)),
-             web_scope if web_scope in ("open", "trusted") else "", now),
+             web_scope if web_scope in ("open", "trusted") else "",
+             int(bool(failed)), error if failed else "", now),
         )
         row_id = cur.lastrowid
         if not conversation_id:
@@ -9432,7 +9454,9 @@ class Library:
         """Newest-first Q&A rows, joined with the asker's identity. Pass
         `user_id` to scope to one user's own history; omit for the full
         admin archive."""
-        where = "WHERE aq.user_id=?" if user_id is not None else ""
+        # A user's own history never shows a failed turn; the admin archive
+        # (user_id None) does, so spend stays visible and labelled.
+        where = "WHERE aq.user_id=? AND aq.failed=0" if user_id is not None else ""
         params: list = [user_id] if user_id is not None else []
         rows = self.conn.execute(
             f"""SELECT aq.*, u.username AS asker_username, u.name AS asker_name
@@ -9459,7 +9483,7 @@ class Library:
     def count_ask_questions(self, user_id: int | None = None) -> int:
         if user_id is not None:
             return self.conn.execute(
-                "SELECT COUNT(*) FROM ask_questions WHERE user_id=?", (user_id,)
+                "SELECT COUNT(*) FROM ask_questions WHERE user_id=? AND failed=0", (user_id,)
             ).fetchone()[0]
         return self.conn.execute("SELECT COUNT(*) FROM ask_questions").fetchone()[0]
 
@@ -9478,7 +9502,7 @@ class Library:
             return []
         if feedback_user_id is None:
             rows = self.conn.execute(
-                "SELECT * FROM ask_questions WHERE conversation_id=?"
+                "SELECT * FROM ask_questions WHERE conversation_id=? AND failed=0"
                 " ORDER BY turn_index, id",
                 (conversation_id,),
             ).fetchall()
@@ -9488,7 +9512,7 @@ class Library:
                    FROM ask_questions aq
                    LEFT JOIN ask_feedback f
                      ON f.question_id = aq.id AND f.user_id = ?
-                   WHERE aq.conversation_id=?
+                   WHERE aq.conversation_id=? AND aq.failed=0
                    ORDER BY aq.turn_index, aq.id""",
                 (feedback_user_id, conversation_id),
             ).fetchall()
@@ -9506,10 +9530,10 @@ class Library:
                       MAX(aq.created_at) AS last_at,
                       MAX(aq.is_private) AS is_private,
                       (SELECT q2.question FROM ask_questions q2
-                       WHERE q2.conversation_id = aq.conversation_id
+                       WHERE q2.conversation_id = aq.conversation_id AND q2.failed=0
                        ORDER BY q2.turn_index, q2.id LIMIT 1) AS first_question
                FROM ask_questions aq
-               WHERE aq.user_id=? AND aq.conversation_id != ''
+               WHERE aq.user_id=? AND aq.conversation_id != '' AND aq.failed=0
                GROUP BY aq.conversation_id
                ORDER BY last_at DESC LIMIT ?""",
             (user_id, limit),
@@ -9524,10 +9548,12 @@ class Library:
         the two cannot drift. A hidden row (`hidden_public`, set by an admin) and
         a private row (`is_private`) are never returned to anyone but an admin
         (`see_private`); a private row is also returned to its own asker
-        (`viewer_id`). Returns (" AND ..." fragment, params)."""
+        (`viewer_id`). A failed turn (`failed`, no answer was produced) is
+        never returned to anyone but an admin, its own asker included.
+        Returns (" AND ..." fragment, params)."""
         if see_private:
             return "", []
-        return (f" AND {alias}.hidden_public=0 AND ({alias}.is_private=0 OR {alias}.user_id=?)",
+        return (f" AND {alias}.failed=0 AND {alias}.hidden_public=0 AND ({alias}.is_private=0 OR {alias}.user_id=?)",
                 [viewer_id if viewer_id is not None else -1])
 
     def similar_ask_candidates(self, viewer_id: int | None, see_private: bool,
@@ -9543,7 +9569,7 @@ class Library:
                        (SELECT COUNT(*) FROM ask_feedback f
                          WHERE f.question_id = aq.id AND f.rating <> 'helpful') AS negative_count
                   FROM ask_questions aq
-                 WHERE aq.turn_index=0
+                 WHERE aq.turn_index=0 AND aq.failed=0
                    AND NOT EXISTS (SELECT 1 FROM ask_feedback f
                                     WHERE f.question_id = aq.id AND f.rating = 'inaccurate')
                    {vis_sql}

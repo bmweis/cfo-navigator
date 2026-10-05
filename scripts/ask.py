@@ -29,6 +29,10 @@ def main() -> int:
 
     lib = Library(args.db)
     ans = answer_question(lib, args.question, effort=args.effort)
+    if ans.failed:
+        print(f"Answer failed: {ans.error}", file=sys.stderr)
+        lib.close()
+        return 1
     print("\n" + ans.text + "\n")
     if ans.citations:
         # Cited sources, numbered to match the [n] markers in the answer.
