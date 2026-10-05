@@ -31,7 +31,7 @@ import os
 
 import markdown as _markdown
 
-from .db import Library
+from .db import Library, normalize_url
 
 # Deliberately duplicated from webapp.app._OC_MARKDOWN_EXTENSIONS rather than
 # imported — linklib never imports from webapp (a one-way dependency this
@@ -137,7 +137,10 @@ def sync_original_content_article(lib: Library, item_id: int) -> int | None:
         # than colliding on articles.url's UNIQUE constraint — the mirror's
         # content always wins from here on, via update_mirrored_article
         # below, same as any other re-sync.
-        existing = lib.get_article_by_url(url)
+        # Normalize first: every writer stores articles.url via normalize_url
+        # (https, no www), so a raw http:// base would miss a stray stored as
+        # https and the insert below would collide (issue #665).
+        existing = lib.get_article_by_url(normalize_url(url))
         article_id = existing["id"] if existing else None
 
     if article_id is None:
