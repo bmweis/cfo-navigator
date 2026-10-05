@@ -4251,11 +4251,10 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   toggle the way a top-of-page block competing for attention did. A teaser
   line under the intro ("Curious how this works? Scroll down or read the full
   breakdown →") links to both the relocated section (`#fpa-features`) and the
-  new deep-dive page. A clearly-labeled illustrative example (a realistic
-  sample question + a mocked cited answer, reusing the real `.ask-q-bubble`/
-  `.ask-answer`/`.ask-src-list` components) sits near the top — there's no
-  real usage yet to pull a genuine example from, so it's explicit about being
-  mocked rather than reading as a captured real answer. **The deep-dive page
+  new deep-dive page. An example conversation sits near the top, reusing the real
+  `.ask-q-bubble`/`.ask-answer`/`.ask-src-list` components. (Superseded 2026-10:
+  it was a mocked answer then, labeled as such; it is now a real snapshot, see
+  the "Buddy example is a real conversation" bullet at the end of this file.) **The deep-dive page
   is now public**, moved from `/admin/system/how-fpa-buddy-works` to
   `/tools/fpa-buddy/how-it-works` — reachable by anyone with the link (no
   `noindex`, not linked from primary nav, same discoverability tier as a
@@ -13557,3 +13556,24 @@ subscription.
 
 - **Admin-only controls: one outlined `.admin-only` class (2026-10, Refs 655).** Replaces `.tool-admin-btn` (three definitions), `.tp-admin-btn` (two) and `.ask-ctl-admin`. Brian picked Option B after a three-look mock: no fill, 1px `--seafoam-deep` border and text. Option A (seafoam fill) read as a category tag sitting next to the real tag, C (solid) was too loud on a three-button card; coral was ruled out (BRAND.md: rare accent, never a button). Defined once in `_CSS`. Two tiers, taking the tier of the public control beside it: card 28px/6px, page-level `.admin-only-page` 42px/10px. Brought in line: "+ Add tool" 34px to 42px, Mark reviewed 27px/10px to 28px/6px, the public Warm intro 22px to 28px (so every button on a directory card is 28px; Full profile stays a plain link), "Manage" links on `/tools/software`, `/tools/resources` and the Communities admin page, Hide and Unhide, and the Reader card border 1.5px to 1px. `font: inherit` fixes Full edit's bolder weight. Delete keeps its `confirm()` dialog and its red hover, now under `@media (hover: hover)`. **Side effect, disclosed:** the ~40 buttons on the `/tools/*/edit` and Communities edit pages used the same old class, so they now share this look too (grey to green outline, 22px to 28px). Brian declined a `/admin/checks` row for the look (single admin; it would have been a source scan with a Reader-card exception); `tests/test_admin_only_controls.py` has one test that fails on a leftover old class name. Public buttons still off-tier, listed not changed: Warm intro's emoji label width, Full profile (link), Compare checkbox label. Chromium measured; WebKit unavailable.
 
+- **Buddy example is a real conversation; sources renamed; "member" to "users" (2026-10, labels PR).**
+  The example on `/tools/fpa-buddy` is a hardcoded, verbatim snapshot of a real production
+  conversation (`ask_questions` row 5: Brian's own question, first turn, rated helpful, not hidden,
+  not private), in `webapp/buddy_example.py`. It is never read live and has no setting, so hiding,
+  privatizing or deleting that row cannot silently remove it. Do not edit, shorten or reflow it;
+  `tests/test_buddy_real_example.py` pins it by sha256. It renders through `_render_cited_answer`
+  (the history pages' renderer) with four library citations that open in a new tab; caption "A real
+  question and answer, shown as asked."; settings line "Depth: Standard · Sources: Curated archive,
+  Current feed"; no cost (dollar amounts are admin-only). The voice and typography scanners find
+  nothing in it. **Box shape: Expand, not scroll** (Brian's call: a scroll box inside a scrolling page
+  traps the swipe on iPhone): the answer is clipped to 300px with a fade and a "Show full answer"
+  button (`aria-expanded`, `aria-controls`, toggles to "Show less") directly under it; citations stay
+  visible below the button because they are the point of the example. The clip is CSS gated on a class
+  the script adds (`ask-ex-js`), so without JavaScript the whole answer shows and the button stays
+  hidden; the full text is always in the DOM. The sources read Curated archive, Current feed, Open
+  web (were Saved archive, RSS feed, Trusted web). The question textarea is 5 rows (was 3) so the
+  placeholder shows whole at 390px and 402px; the follow-up bubble textarea has its own rule and is
+  unchanged. "member(s)" is "user(s)" in user-facing and public copy (`/privacy`) and in plain-prose
+  admin blurbs; role and form labels that name the role itself ("Add a member", "Member (user)",
+  "Members" on `/admin/users`) and community-member wording (profile fields, "Member experience") are
+  unchanged on purpose.

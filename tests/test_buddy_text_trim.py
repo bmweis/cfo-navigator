@@ -16,11 +16,13 @@ ORIGIN, _launch, Site = T.ORIGIN, T._launch, T.Site
 buddy_html = T.buddy_html   # a signed-in non-admin reader
 
 
-def test_example_caption_is_gone_but_the_example_and_its_label_stay(buddy_html):
+def test_example_caption_is_gone_and_the_label_reads_real(buddy_html):
     html, _ = buddy_html
     assert "A mocked example" not in html and "no real question history" not in html
     assert "ask-example-caption" not in html
-    assert "Illustrative example" in html and 'class="ask-example"' in html
+    # The example is a real question and answer now (tests/test_buddy_real_example.py).
+    assert "Illustrative example" not in html and "not a captured real answer" not in html
+    assert "A real question and answer, shown as asked." in html and 'class="ask-example"' in html
 
 
 def test_the_seamlessly_line_is_gone(buddy_html):
