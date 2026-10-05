@@ -107,9 +107,11 @@ def env(monkeypatch):
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SAVE_TOKEN", "tok-secret")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
-    # POST /ask must take the deterministic no-key fallback path (which still
-    # records the turn) — never a real API call from the test suite.
+    # POST /ask uses a stub answer (a missing key is a failed turn now) so it still
+    # records the turn, never a real API call from the test suite.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from tests.ask_stub import ok_answer_question
+    monkeypatch.setattr("linklib.agent.answer_question", ok_answer_question)
     import importlib, webapp.app as appmod
     importlib.reload(appmod)
     lib = Library(db)

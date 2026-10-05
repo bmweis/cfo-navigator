@@ -238,7 +238,7 @@ def test_answer_question_folds_exa_cost_on_answer_call_exception(monkeypatch, tm
 
     # The Exa call already spent real money even though the answer call
     # failed — its cost must still be recorded on the Answer.
-    assert ans.text.startswith("(Answer call failed")
+    assert ans.failed and ans.text == "" and "Answer call failed" in ans.error
     assert ans.web_sources == exa_hits
     assert ans.exa_result_count == 3
     assert ans.exa_cost_usd == pytest.approx(0.007)
