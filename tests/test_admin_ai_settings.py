@@ -521,3 +521,18 @@ def test_pricing_save_route_verifies_and_unblocks(env):
     html = client.get("/admin/system/ai").text
     assert 'id="model-pricing"' in html and "Open Anthropic&rsquo;s pricing" in html
     assert 'target="_blank" rel="noopener"' in html
+
+
+def test_matchmaker_role_save_route_enforces_allowed_roles(env):
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    lib_.seed_model_catalog(); lib_.seed_model_roles()
+    lib_.close()
+    client = _admin_client(env)
+    r = client.post("/admin/system/ai/model/save", json={"role": "matchmaker", "model": "claude-fable-5-1"})
+    assert r.status_code == 400 and "not allowed for Matchmaker" in r.json()["error"]
+    r = client.post("/admin/system/ai/model/save", json={"role": "matchmaker", "model": "claude-sonnet-5"})
+    assert r.status_code == 200 and r.json()["role"] == "matchmaker"
+    html = client.get("/admin/system/ai").text
+    assert 'id="mm-select"' in html and "seeded this once" in html
+    assert "Buddy not yet checked for always-on thinking" in html
+    assert "Requires 30-day data retention" in html

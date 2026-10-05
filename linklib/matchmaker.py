@@ -18,11 +18,9 @@ from dataclasses import dataclass
 from .db import Library
 from .enrich import NEEDS_VERIFICATION
 from .gates import MATCHMAKER_COMMUNITY_NOTE, MATCHMAKER_DISCLAIMER, MATCHMAKER_FIELD_SUFFIX
-from .models import DEFAULT_CHAT_MODEL
 from .stop_reason import stop_reason_of
 from .voice_settings import VoicePromptMissing, require_voice_setting
 
-DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", DEFAULT_CHAT_MODEL)
 MAX_TOKENS = 900
 
 # Conversation cost guard — a matching conversation is naturally more
@@ -297,7 +295,7 @@ def _answer(lib: Library, kind: str, question: str,
     (cache_control on the system block) so a multi-turn conversation only
     pays full price for that system prompt once.
     """
-    model = DEFAULT_MODEL
+    model = lib.get_role_model("matchmaker")
     trimmed_history = _trim_history(history)
 
     import importlib.util

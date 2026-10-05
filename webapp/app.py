@@ -888,6 +888,7 @@ def _seed_model_catalog():
     lib = _lib()
     try:
         lib.seed_model_catalog()
+        lib.seed_model_roles()
     except Exception:
         pass
     finally:
@@ -27994,7 +27995,7 @@ def admin_system_ai(request: Request):
     if not _is_authed(request):
         return _login_redirect(request)
 
-    from linklib.models import DEFAULT_CHAT_MODEL, models_review_is_stale
+    from linklib.models import models_review_is_stale
     from linklib.agent import EFFORT_SETTINGS
     from linklib.pricing import exa_pricing_review_is_stale
 
@@ -28007,7 +28008,12 @@ def admin_system_ai(request: Request):
         exa_pricing_last_verified = lib.get_setting("exa_pricing_last_verified")
         pricing_rows = lib.list_model_pricing()
         model_status = {r["model_id"]: r for r in lib.list_model_catalog()}
-        enable_blocks = {m["id"]: lib.model_enable_problems(m["id"]) for m in __import__("linklib.models", fromlist=["_REGISTRY"])._REGISTRY}
+        from linklib.models import _REGISTRY as _REG
+        enable_blocks = {m["id"]: lib.model_enable_problems(m["id"]) for m in _REG}
+        role_info = {m["id"]: {"used_by": lib.roles_using(m["id"]), "allowed": lib.model_allowed_roles(m["id"])}
+                     for m in _REG}
+        matchmaker_model = lib.get_role_model("matchmaker")
+        matchmaker_blocks = {m["id"]: lib.role_problems("matchmaker", m["id"]) for m in _REG}
     finally:
         lib.close()
     has_exa_key = bool(os.environ.get("EXA_API_KEY"))
@@ -28041,9 +28047,9 @@ def admin_system_ai(request: Request):
                f'{_esc(EFFORT_SETTINGS["standard"]["model"])} / {_esc(EFFORT_SETTINGS["deep"]["model"])}). '
                f'{code_badge}&mdash;there&rsquo;s no admin picker for this yet. '
                f'<a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works &rarr;</a>')
-        + _row("Matchmaker", _esc(_enrich_model_label(DEFAULT_CHAT_MODEL)),
-               f'Software and Community matchmaker chat, one shared default. {code_badge}&mdash;'
-               f'set via the <code>LINKLIB_CHAT_MODEL</code> environment variable, independent of the enrichment setting above.')
+        + _row("Matchmaker", _esc(_enrich_model_label(matchmaker_model)),
+               f'Software and Community matchmaker chat, one shared model. {live_badge}&mdash;'
+               f'set in Configuration above. <code>LINKLIB_CHAT_MODEL</code> seeded it once and is ignored now.')
     )
     claude_freshness = (
         _ai_usage_freshness_dot("Pricing", pricing_freshness["oldest"],
@@ -28094,7 +28100,8 @@ def admin_system_ai(request: Request):
 <h2 style="margin:0 0 4px;">Configuration</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Changes take effect immediately. No redeploy.</p>
 {_card("Enrichment model", _ai_model_config_html(enrich_model))}
-{_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, enable_blocks))}
+{_card("Matchmaker model", _matchmaker_model_html(matchmaker_model, matchmaker_blocks))}
+{_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, enable_blocks, role_info))}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
 
 <h2 style="margin:28px 0 4px;">Usage index</h2>
@@ -28117,23 +28124,51 @@ def admin_system_ai(request: Request):
 
 @app.post("/admin/system/ai/model/save")
 async def admin_system_ai_model_save(request: Request):
+    """Assign a model to a role (default "enrichment"). Refused with a 400
+    naming every problem when the model is not allowed for that role, is
+    marked not using or deactivated, or has incomplete or unverified pricing."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
     model = (payload.get("model") or "").strip()
+    role = (payload.get("role") or "enrichment").strip()
     if not model:
         return JSONResponse({"ok": False, "error": "No model given."}, status_code=400)
     lib = _lib()
     try:
-        problems = lib.model_enable_problems(model)
+        problems = lib.set_role_model(role, model)
         if problems:
             return JSONResponse({"ok": False, "error": (
                 f"Can't switch to {_enrich_model_label(model)}: {', '.join(problems)}. "
-                "Fix it in the model pricing table below.")}, status_code=400)
-        lib.set_enrich_model(model)
+                "See the model table below.")}, status_code=400)
     finally:
         lib.close()
-    return JSONResponse({"ok": True, "model": model})
+    return JSONResponse({"ok": True, "model": model, "role": role})
+
+
+def _matchmaker_model_html(current: str, blocks: dict) -> str:
+    """Matchmaker model picker (PR 3b). Options a model is not allowed for are
+    disabled with the reason; the server refuses them too. LINKLIB_CHAT_MODEL
+    seeded this once on first boot and is ignored now."""
+    from linklib.models import _REGISTRY
+    opts = "".join(
+        f'<option value="{_esc(m["id"])}"{" selected" if m["id"] == current else ""}'
+        f'{" disabled" if blocks.get(m["id"]) and m["id"] != current else ""}>{_esc(m["label"])}'
+        f'{"" if not blocks.get(m["id"]) or m["id"] == current else " (" + _esc(blocks[m["id"]][0]) + ")"}</option>'
+        for m in _REGISTRY)
+    return (f'<select id="mm-select" data-current="{_esc(current)}" onchange="saveMatchmaker()" '
+            f'style="width:100%;max-width:520px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;'
+            f'font:inherit;font-size:15px;background:#fff;">{opts}</select>'
+            f'<span id="mm-status" style="font-size:13px;color:var(--muted);margin-left:8px;"></span>'
+            f'<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;">Used by the Software and Community matchmaker chats. '
+            f'The <code>LINKLIB_CHAT_MODEL</code> variable seeded this once on first boot and is ignored now; '
+            f'change it here, no redeploy.</p>'
+            f'<script>async function saveMatchmaker(){{var s=document.getElementById("mm-select"),t=document.getElementById("mm-status");'
+            f's.disabled=true;t.textContent="Saving…";try{{var r=await fetch("/admin/system/ai/model/save",{{method:"POST",'
+            f'headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{role:"matchmaker",model:s.value}})}});'
+            f'if(!r.ok){{var d=await r.json().catch(function(){{return {{}};}});throw new Error(d.error||"");}}'
+            f's.dataset.current=s.value;t.textContent="Saved.";t.style.color="#065f46";}}catch(e){{s.value=s.dataset.current;'
+            f't.textContent=e.message||"Save failed.";t.style.color="#b91c1c";}}finally{{s.disabled=false;}}}}</script>')
 
 
 _PRICE_COLS = (("input", "Input"), ("output", "Output"), ("cache_write", "Cache write"),
@@ -28141,7 +28176,7 @@ _PRICE_COLS = (("input", "Input"), ("output", "Output"), ("cache_write", "Cache 
 _ANTHROPIC_PRICING_URL = "https://www.anthropic.com/pricing"
 
 
-def _model_pricing_card_html(rows: list[dict], status: dict, enable_blocks: dict) -> str:
+def _model_pricing_card_html(rows: list[dict], status: dict, enable_blocks: dict, role_info: dict) -> str:
     """The Model pricing table on /admin/system/ai (PR 3a): one row per model,
     rates in USD per million tokens, a per-row freshness chip, a link to
     Anthropic's pricing page, and an Edit form. Saving with the verify box
@@ -28174,6 +28209,8 @@ def _model_pricing_card_html(rows: list[dict], status: dict, enable_blocks: dict
                 f'<label style="font-size:12px;display:block;">Source note<input name="source_note" '
                 f'value="{_esc(r["source_note"])}" style="width:100%;min-width:0;padding:4px 6px;'
                 f'border:1px solid var(--line);border-radius:6px;font:inherit;"></label>'
+                f'<label style="font-size:12px;display:block;">Note<input name="note" value="{_esc(cat.get("note", ""))}" '
+                f'style="width:100%;min-width:0;padding:4px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;"></label>'
                 f'<label style="font-size:12px;"><input type="checkbox" name="verified" value="1"> '
                 f'I checked these rates against Anthropic&rsquo;s page today</label>'
                 f'<button class="btn" type="submit" style="font-size:12px;padding:5px 12px;">Save</button>'
@@ -28181,6 +28218,19 @@ def _model_pricing_card_html(rows: list[dict], status: dict, enable_blocks: dict
         block = enable_blocks.get(mid) or []
         note = f'<div style="font-size:12px;color:var(--muted);">Can&rsquo;t be enabled: {_esc(", ".join(block))}</div>' if block else ""
         src = f'<div style="font-size:12px;color:var(--muted);">{_esc(r["source_note"])}</div>' if r["source_note"] else ""
+        info = role_info.get(mid)
+        if info:
+            from linklib.models import ROLES, ROLE_LABELS, role_block_reason
+            used = ", ".join(ROLE_LABELS[x] for x in info["used_by"]) or "none"
+            src += f'<div style="font-size:12px;color:var(--muted);">Used by: {_esc(used)}</div>'
+            for role in ROLES:
+                if role not in info["allowed"]:
+                    why = role_block_reason(mid, role) or "not allowed"
+                    src += (f'<div style="font-size:12px;color:var(--muted);">{_esc(ROLE_LABELS[role])}: '
+                            f'not allowed. {_esc(why)}</div>')
+        note = cat.get("note", "")
+        if note:
+            src += f'<div style="font-size:12px;color:var(--muted);">{_esc(note)}</div>'
         body.append(
             f'<tr><td style="font-weight:600;">{_esc(_enrich_model_label(mid))}'
             f'<div style="font-size:11.5px;color:var(--muted);font-weight:400;">{_esc(mid)} &middot; {_esc(stat)}</div></td>'
@@ -28219,6 +28269,8 @@ async def admin_system_ai_pricing_save(request: Request):
             raise HTTPException(status_code=404, detail="unknown model")
         lib.set_model_pricing(model_id, rates, verified=form.get("verified") == "1",
                               source_note=(form.get("source_note") or ""))
+        if "note" in form:
+            lib.set_model_note(model_id, form.get("note") or "")
     finally:
         lib.close()
     return RedirectResponse("/admin/system/ai#model-pricing", status_code=303)
