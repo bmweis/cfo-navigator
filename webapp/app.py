@@ -69,6 +69,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from linklib import compare, gates, tool_labels
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.voice_mechanics import norm_for_compare
+from webapp import buddy_example as _BUDDY_EXAMPLE
 from linklib.voice_review import (
     guess_ampersand_terms as _voice_guess_ampersand_terms,
     validate_ampersand_term,
@@ -24018,9 +24019,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # Sources — the same seafoam-fill/navy-text tag component used elsewhere on
     # the site (BRAND.md §5), toggled on/off by tap instead of a checkbox list.
     source_defs = [
-        ("library", "Saved archive", True),
-        ("feed", "RSS feed", False),
-        ("web", "Trusted web", True),
+        ("library", "Curated archive", True),
+        ("feed", "Current feed", False),
+        ("web", "Open web", True),
     ]
     _CHECK_SVG = ('<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">'
                   '<path d="M1 5L4 8L9 2" stroke="#001B4F" stroke-width="1.6" fill="none" '
@@ -24082,6 +24083,10 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # closes the intro-to-Question-box dead space; see the CSS comment
     # below for why a spaced-out `usage` row happens at all otherwise.
     usage_div = f'<div class="fpa-intro-area-usage">{usage_html}</div>' if usage_html else ""
+    # The example is a hardcoded snapshot of a real conversation (webapp/buddy_example.py),
+    # rendered through the same helper the history pages use, so it reads like a real answer.
+    _example_answer_html, _example_sources_html = _render_cited_answer(
+        _BUDDY_EXAMPLE.ANSWER, _BUDDY_EXAMPLE.CITATIONS_JSON)
     _intro_areas_desktop = (
         '"intro example" "usage example" "question example"'
         if usage_html else
@@ -24113,16 +24118,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
   </div>
   <div class="fpa-intro-area-example">
     <div class="ask-example">
-      <div class="ask-example-label">Illustrative example&mdash;not a captured real answer</div>
-      <div class="ask-q-bubble">What FP&amp;A team size do peer SaaS companies run at our stage?</div>
-      <div class="ask-answer">
-        <p>Most peer benchmarks put FP&amp;A headcount around one analyst per 75 to 150 employees, with the ratio tightening as ARR growth accelerates [1]. Companies preparing for a new funding round often add a dedicated FP&amp;A hire ahead of the raise to support board-reporting cadence [2]. Recent hiring trends across sub-$100M-ARR SaaS companies lean toward one generalist analyst before adding a dedicated planning lead [3].</p>
-        <ul class="ask-src-list">
-          <li>&#128218; <span class="ask-src-static">[1] FP&amp;A Team Sizing Benchmarks</span></li>
-          <li>&#128240; <span class="ask-src-static">[2] Board Reporting Cadence at Growth Stage</span></li>
-          <li>&#127760; <span class="ask-src-static">[3] Hiring Trends Across Early-Stage FP&amp;A Teams</span></li>
-        </ul>
-      </div>
+      <div class="ask-example-label">A real question and answer, shown as asked.</div>
+      <div class="ask-example-settings">Depth: Standard &middot; Sources: Curated archive, Current feed</div>
+      <div class="ask-q-bubble">{_esc(_BUDDY_EXAMPLE.QUESTION)}</div>
+      <div class="ask-answer ask-hist-answer">{_example_answer_html}</div>
+      {_example_sources_html}
     </div>
   </div>
   {usage_div}
@@ -24308,6 +24308,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fpa-intro-area-example .ask-answer{{flex:1;}}
 
 .ask-example{{border:1px dashed var(--line-strong);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--surface);}}
+.ask-example-settings{{font-size:12px;color:var(--muted);margin:0 0 10px;}}
 .ask-example-label{{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);border-radius:999px;padding:3px 10px;margin-bottom:12px;}}
 
 /* Scoped scale-down for the example inside the intro's right column only—
