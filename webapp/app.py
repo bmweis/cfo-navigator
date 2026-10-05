@@ -24060,8 +24060,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     }
     cost_js = _json.dumps(tier_cost) if authed else "{}"
     exa_js = _json.dumps(exa_unit) if authed else "0"
-    # Admin-only, one muted line; the dollar amounts themselves sit in the Depth
-    # options and on the closed Depth button.
+    # Admin-only, one muted line at the bottom of the Depth dropdown, next to the
+    # dollar amounts it explains (same look as the Sources note).
     cost_note = ('<p class="ask-dd-note ask-cost-note" style="color:var(--muted);">Dollar amounts are estimates.</p>'
                  if authed else "")
 
@@ -24140,6 +24140,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             <div class="ask-tags" role="radiogroup" aria-label="Depth">
               {tier_tags}
             </div>
+            {cost_note}
           </div>
           <div class="ask-dd-panel" data-dd="sources" hidden>
             <div class="ask-tags">
@@ -24148,7 +24149,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
             <p class="ask-dd-note"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
           </div>
         </div>
-        {cost_note}
       </div>
       <label for="ask-q" class="ask-q-label">Start a new conversation</label>
       <div class="ask-q-wrap">
@@ -24271,7 +24271,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-dd-k{{display:none;}}
 .fu .ask-dd-h{{display:none;}}
 .fu .ask-dd-k{{display:inline;}}
-.ask-cost-note{{margin:8px 0 0;}}
 .ask-tag-cost{{margin-left:auto;font-weight:500;color:var(--muted);}}
 .ask-q-wrap{{position:relative;flex:1;display:flex;}}
 .ask-q-wrap textarea{{flex:1;width:100%;box-sizing:border-box;padding:11px 56px 11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:var(--bg);resize:none;}}
