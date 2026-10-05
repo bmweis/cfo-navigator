@@ -661,7 +661,7 @@ Exa is unavailable.
 
 | Call site | Module | Falls back to |
 |---|---|---|
-| FP&A Buddy web tier | `linklib/agent.py` | Claude's native `web_search_20250305`, same trusted-sites allowlist either way—the only surface with a real substitute |
+| FP&A Buddy web tier | `linklib/agent.py` | Claude's native `web_search_20250305`, same scope either way (trusted-sites allowlist for Current feed, unrestricted for Open web)—the only surface with a real substitute |
 | Reader backfill: domain migration | `linklib/domain_migration.py` | Nothing of its own—the pipeline's existing Wayback Machine tier still catches the miss, same as any other backfill failure, but a real hit this tier would have found is simply not tried |
 | Reader backfill: Medium-platform | `linklib/medium_platform.py` | Same as domain migration—Wayback only, no substitute of its own |
 | Vendor profile drafting's grounding fallback (Description, Agent taxonomy, Community profile, Community listing) | `linklib/enrich.py::_fetch_grounding_page` | **Nothing—refuses to draft rather than saving anything**, when the direct fetch is blocked/thin and this can't recover it. The admin writes the field by hand instead. |

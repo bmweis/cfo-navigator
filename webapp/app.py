@@ -4843,7 +4843,7 @@ def about_page(request: Request):
 _AI_SURFACES = (
     ("FP&A Buddy",
      "An interactive chatbot that answers your burning strategic finance questions from my "
-     "curated archive, my current feed, and trusted-site web search, with every claim tied to "
+     "curated archive and my current feed, plus the open web when you turn it on, with every claim tied to "
      "a real, numbered citation.",
      "/tools/fpa-buddy/how-it-works"),
     ("Web search",
@@ -4916,7 +4916,7 @@ _HTIB_HOW_I_DECIDED_DEFAULT = """FP&A Buddy is required to trace everything to a
 
 All AI-generated content stays in a draft state until a human reviews it, and carries a badge showing which state it's in.
 
-The tools are picked based on what each is good at. Claude drafts and reasons. A separate embedding model finds what a keyword search would miss. Search is restricted to [a list of sites I trust](/current-feed), not the open web."""
+The tools are picked based on what each is good at. Claude drafts and reasons. A separate embedding model finds what a keyword search would miss. Web search is limited to [a list of sites I trust](/current-feed) unless you turn on Open web, which searches the whole web and tags what it finds."""
 
 _HTIB_WHAT_ELSE_DEFAULT = """This site isn't where the experimenting stops.
 
@@ -5448,7 +5448,7 @@ def current_feed(request: Request):
 <p style="margin:0 0 4px;"><a href="/how-this-is-built" style="font-size:13px;color:var(--muted);">&larr; How this is built</a></p>
 <h1 style="margin-bottom:6px;">Current feed</h1>
 <p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">Remember that friend who had the best mixtape? The one you couldn't get enough of and seemed to have the best stuff you didn't know existed.</p>
-<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">While I can't give you direct access to my feed, I can do the next best thing. Below is my reading list, the same list that powers the FP&amp;A Buddy, split into two eras. If the Buddy cites something from trusted web, it came from one of these.</p>
+<p style="color:var(--ink-soft);margin:0 0 10px;font-size:15.5px;line-height:1.6;">While I can't give you direct access to my feed, I can do the next best thing. Below is my reading list, the same list that powers the FP&amp;A Buddy, split into two eras. If the Buddy cites something from the current feed, it came from one of these or from the trusted sites listed at the bottom.</p>
 <p style="color:var(--muted);font-size:13px;margin:0;">Every name links to the writer's own site, not the raw feed. And the list is dynamic, changing as I change my own reading list.</p>
 <div class="cf-tape-card">
 <div class="cf-sides">
@@ -24007,9 +24007,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # information, available on demand, without three cards' worth of vertical
     # space for what is a one-of-three choice.
     effort_details = [
-        ("quick",    "Quick",    "4 archive sources &middot; 2 web searches &middot; ~700 tokens out"),
-        ("standard", "Standard", "8 archive sources &middot; 4 web searches &middot; ~1,500 tokens out"),
-        ("deep",     "Deep",     "16 archive sources &middot; 6 web searches &middot; ~2,500 tokens out"),
+        ("quick",    "Quick",    "4 archive sources &middot; 2 web results &middot; ~700 tokens out"),
+        ("standard", "Standard", "8 archive sources &middot; 4 web results &middot; ~1,500 tokens out"),
+        ("deep",     "Deep",     "16 archive sources &middot; 6 web results &middot; ~2,500 tokens out"),
     ]
     RECOMMENDED_TIER = "standard"
     # Logged-in (Brian) gets the balanced default; anonymous users default to
@@ -25802,7 +25802,7 @@ async def read_later_refresh(request: Request):
 # grouping (Archive backup stands outside all three — see that function's own
 # note on why).
 _LIBRARY_TOOLS = [
-    ("/admin/reader/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is restricted to, so a source added here becomes citable there too."),
+    ("/admin/reader/feeds",        "Manage feeds",        "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them into sections. The same list is the allowlist for FP&amp;A Buddy&rsquo;s Current feed web search (Open web is not limited to it), so a source added here becomes citable there too."),
     ("/admin/reader/backfill-content", "Reader content backfill", "Re-fetch already-saved articles so the Reader shows real structure&mdash;paragraphs, images, links&mdash;instead of the flattened plain text most saves were originally stored as. Rate-limited, resumable, stoppable. It re-processes articles you've <em>already</em> saved for better structure; it never finds new ones."),
     ("/admin/reader/dedupe",       "Content de-dupe",     "Scan a source for potentially duplicate or redundant articles (similar content saved within ~3 months) and remove the extras."),
     # Tag cleanup and Tagging style merged into one page (PR 7, 2026-09) — see
@@ -27617,9 +27617,9 @@ def fpa_buddy_how_it_works(request: Request):
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where the answers come from</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">Three places, and you can see all of them.</p>
 <ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
-<li><strong>The archive.</strong> Every article in it was saved by hand, by me, because I read it and thought it was worth keeping. That's the difference between this and a tool pointed at the whole internet: the judgment about what's worth reading happened before anyone asked a question. Keyword search and meaning-based search run against it together, so a relevant piece surfaces even when your wording doesn't match its own.</li>
-<li><strong>My feeds.</strong> Recent items from the blogs and newsletters I subscribe to. Off by default.</li>
-<li><strong>The web,</strong> restricted to a list of finance sources I trust rather than the open internet. It's the same list that fills my own reader, and you can see it: <a href="/current-feed" style="color:var(--accent);">the current feed</a>. More on how that search works: <a href="/how-this-is-built/web-search" style="color:var(--accent);">web search</a>.</li>
+<li><strong>The archive.</strong> Nothing gets in automatically from the feeds. Articles come from bookmarks I saved over the years, pieces I save as I read, and my own writing. That's the difference between this and a tool pointed at the whole internet: I decided what belonged before anyone asked a question. Keyword search and meaning-based search run against it together, so a relevant piece surfaces even when your wording doesn't match its own.</li>
+<li><strong>The current feed.</strong> Recent items from the blogs and newsletters I subscribe to, plus a live search of a list of finance sources I trust. It's the same list that fills my own reader, which you can browse on the <a href="/current-feed" style="color:var(--accent);">current feed</a> page. How the search works is explained under <a href="/how-this-is-built/web-search" style="color:var(--accent);">web search</a>. On by default.</li>
+<li><strong>The open web.</strong> A live search of the whole web, not just my list. It's off by default, and anything it cites from outside my trusted list is tagged Open web in the sources.</li>
 </ul>
 <p style="margin:10px 0 0;font-size:16px;color:var(--ink-soft);line-height:1.65;">My own writing is in there too, mirrored into the archive and labeled as mine when it gets cited. If the source is me, you should know that.</p>
 </section>
@@ -27629,7 +27629,7 @@ def fpa_buddy_how_it_works(request: Request):
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">Every source is handed to Claude as a document with Anthropic's citations turned on, not as text pasted into a prompt.</p>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">The difference is the whole thing. When a model is asked to cite its sources, what you get back is something shaped like a citation. Here each numbered marker is tied to an actual passage in an actual document, and the link is checked by the system rather than reported by the model.</p>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">A made-up citation isn't unlikely here. It isn't available.</p>
-<p style="margin:0;font-size:16px;color:var(--ink-soft);line-height:1.65;">Every source is also tagged by where it came from, so you can see whether an answer leaned on the archive, the feeds, or the web.</p>
+<p style="margin:0;font-size:16px;color:var(--ink-soft);line-height:1.65;">Every source is also tagged by where it came from, so you can see whether an answer leaned on the archive, the current feed, or the web.</p>
 </section>
 
 <section>
@@ -27805,7 +27805,7 @@ def _ai_exa_config_html(exa_enabled: bool, has_key: bool) -> str:
 
     return f"""<div style="margin:0 0 4px;font-size:13.5px;color:var(--ink-soft);line-height:1.6;">This one toggle gates every real Exa call in the app, not just FP&amp;A Buddy's web tier:</div>
 <ul style="color:var(--ink-soft);margin:0 0 16px;font-size:13.5px;line-height:1.7;padding-left:20px;">
-<li><strong>FP&amp;A Buddy's web tier.</strong> Turning Exa off here doesn't disable web search&mdash;it switches to Claude's own <code>web_search_20250305</code> tool instead, restricted to the same trusted-sites allowlist either way. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</li>
+<li><strong>FP&amp;A Buddy's web tier.</strong> Turning Exa off here doesn't disable web search&mdash;it switches to Claude's own <code>web_search_20250305</code> tool instead, with the same scope either way: the trusted-sites allowlist for Current feed, no restriction for Open web. See <a href="/tools/fpa-buddy/how-it-works" style="color:var(--accent);">How FP&amp;A Buddy works</a> for the full mechanism.</li>
 <li><strong>Reader content backfill's domain-migration tier</strong> (a URL on a confirmed migrated domain, e.g. avc.com&nbsp;&rarr;&nbsp;avc.xyz).</li>
 <li><strong>Reader content backfill's Medium-platform tier</strong> (medium.com and other recognized Cloudflare-blocked hosts).</li>
 <li><strong>Vendor profile drafting's grounding fallback</strong> (Description, Agent taxonomy, Community profile, and Community listing generation&mdash;whenever the direct page fetch is blocked, too thin, or returns a WAF-style error).</li>
@@ -27967,7 +27967,7 @@ def admin_system_ai(request: Request):
     )
     exa_rows = (
         _row("FP&amp;A Buddy web tier", "Tracked in <code>ask_questions</code>",
-             "Has a fallback&mdash;Claude's own built-in web search, same trusted-sites allowlist either way.")
+             "Has a fallback&mdash;Claude's own built-in web search, same scope either way (trusted sites for Current feed, unrestricted for Open web).")
         + _row("Reader backfill: domain migration", "Tracked in <code>content_refetch_log</code>",
                "No fallback (other than the existing Wayback tier)&mdash;a real hit is simply not tried when Exa is off.")
         + _row("Reader backfill: Medium-platform", "Tracked in <code>content_refetch_log</code>",
@@ -30024,8 +30024,8 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
     feeds_card_html = _lib_card(
         "/admin/reader/feeds", "Manage feeds",
         "Add, rename, or remove the RSS sources behind the Reader&rsquo;s Feed view and group them "
-        "into sections. The same list is the allowlist FP&amp;A Buddy&rsquo;s web search is "
-        "restricted to.",
+        "into sections. The same list is the allowlist for FP&amp;A Buddy&rsquo;s Current feed "
+        "web search; Open web is not limited to it.",
         _badge_for_href("/admin/reader/feeds", task_counts.get("/admin/reader/feeds", 0)))
 
     # Archive backup is deliberately absent: its card moved to the System
@@ -30224,7 +30224,7 @@ def _feed_form_fields(sections: list, values: dict, auth_status: dict | None = N
     <label style="{lab}">Site URL <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
     <input type="url" name="html_url" value="{_esc(values.get('html_url', ''))}"
       placeholder="https://example.com/" style="{inp}">
-    <p style="{hint}">The publication's own address. This is the one FP&amp;A Buddy's web search is restricted to. Left blank, it's taken from the feed itself.</p>
+    <p style="{hint}">The publication's own address. This is the address FP&amp;A Buddy's Current feed web search is limited to. Left blank, it's taken from the feed itself.</p>
   </div>
 {cookie_readout}  <div>
     <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">

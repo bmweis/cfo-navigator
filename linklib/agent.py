@@ -463,7 +463,8 @@ def retrieve_feed(question: str, opml_path: str, max_items: int = 5) -> list[dic
     return sorted(items, key=score, reverse=True)[:max_items]
 
 
-# Exa's /search endpoint, restricted to the user's trusted domains — the
+# Exa's /search endpoint, restricted to the user's trusted domains for Current
+# feed and unrestricted for Open web — the
 # preferred mechanism for the web tier when enabled (Phase 7 made it a
 # kill switch; Claude's native web_search_20250305 tool is the fallback,
 # restored below — see _web_provider). A slow Exa call isn't worth stalling

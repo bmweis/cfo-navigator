@@ -112,10 +112,10 @@ def test_tier_detail_and_recommended_move_from_persistent_ui_to_hover(env):
     assert "ask-tier-badge" not in html
     assert ">Recommended<" not in html
     # ...but still available on hover, per tier.
-    assert 'title="4 archive sources &middot; 2 web searches &middot; ~700 tokens out"' in html
-    assert ('title="8 archive sources &middot; 4 web searches &middot; ~1,500 tokens out'
+    assert 'title="4 archive sources &middot; 2 web results &middot; ~700 tokens out"' in html
+    assert ('title="8 archive sources &middot; 4 web results &middot; ~1,500 tokens out'
             ' &middot; Recommended"') in html
-    assert 'title="16 archive sources &middot; 6 web searches &middot; ~2,500 tokens out"' in html
+    assert 'title="16 archive sources &middot; 6 web results &middot; ~2,500 tokens out"' in html
 
 
 def test_ask_collects_sources_scoped_so_depth_is_not_swept_in(env):

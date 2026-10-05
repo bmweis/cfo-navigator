@@ -1,7 +1,7 @@
 """Your preferred sources — parsed from your Feedly subscriptions OPML.
 
-These are the trusted sites the Q&A agent is allowed to pull NEW (not-yet-saved)
-articles from via web search, so answers draw on your saved library AND fresh
+These are the trusted sites the Q&A agent's Current feed source searches for NEW
+(not-yet-saved) articles (Open web is not limited to them), so answers draw on your saved library AND fresh
 material from the same voices you already follow.
 
 Edit preferred_sites.opml (or point LINKLIB_SITES_OPML elsewhere) to curate.
