@@ -229,6 +229,16 @@ def test_get_article_by_id_returns_full_content(live_server):
     assert "content_html" not in result
 
 
+def test_get_article_by_http_www_variant(live_server):
+    lib = Library(live_server.db_path)
+    article = _seed_article(lib, "Variant Lookup Article")
+    lib.close()
+    variant = article["url"].replace("https://", "http://www.")
+    result = _dict_result(_call_tool(live_server.base_url, live_server.admin, "get_article",
+                                      {"id_or_url": variant}))
+    assert result["id"] == article["id"]
+
+
 def test_get_article_by_url(live_server):
     lib = Library(live_server.db_path)
     article = _seed_article(lib, "URL Lookup Article")

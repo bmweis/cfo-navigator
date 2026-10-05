@@ -673,6 +673,19 @@ button. The bubble holds a deep clone of `#ask-dd-top` (id removed, panels
 closed), so a panel opens inside the bubble at bubble width, below the input row,
 and cannot cover it. `ddLabels()` keeps every button's value in step. The chip
 equalizer (`fpaEqualizeChipWidths`) and the `.ask-controls`/`.fu-pop` CSS are gone.
+**Panel width (2026-10 follow-up to #690).** Each panel now sits inside its own
+control's column (`.ask-dd-col` holds the `label.ask-dd-lbl` with the header and
+button, then the panel), so it opens directly under that control at the control's
+width and left edge instead of across the whole row. The old full-row-width
+sentence above no longer holds. The row is `align-items:flex-start` so an open
+panel doesn't stretch the other column, and stacks (`align-items:stretch`) below
+640px. The admin-only "Dollar amounts are estimates." note is the last child of
+the Depth panel, so it shows only while Depth is open. In the follow-up bubble
+the controls get narrow on a phone (156px at 390px), so its panels have a 220px
+floor and the Sources panel lines up with its control's right edge when it would
+otherwise pass the bubble. `tests/test_buddy_top_box.py` has a source-level guard
+that runs in CI and Chromium tests that measure computed visibility and geometry
+(not run in CI, issue 669).
 **Second change in the same PR, found by the existing tests:** the bubble's
 collapse-while-typing rule moved from `.fu:has(textarea:focus)` to a `.fu-compact`
 class (set on focus; cleared by a tap outside the bubble or on the summary line).
@@ -1006,7 +1019,7 @@ used manual check rather than a per-turn or overhead cost.
 
 | Table | Purpose | Columns that carry meaning |
 |---|---|---|
-| `ask_questions` | One row per conversation **turn**; the single table behind all three surfaces (admin report, a user's own history, the member-public community view). | `conversation_id` (groups follow-up turns; `= str(id)` of the first turn) + `turn_index`; token columns for the answer call; `rewrite_input_tokens`/`rewrite_output_tokens`/`rewrite_cost_usd` for the follow-up query-rewrite call; `embed_input_tokens`/`embed_cost_usd` for embedding the retrieval QUESTION during hybrid retrieval (#93 — a **user-cap** cost, unlike `article_embeddings.cost_usd`, which is embed-on-save overhead); **`cost_usd` is the turn TOTAL (answer + rewrite + query embedding)** so every `SUM(cost_usd)` — the monthly cap, the reports — needs no special handling; `hidden_public` affects only the community view (`anonymized` is frozen, nothing reads it); `is_private` (2026-10, migration-added, `INTEGER NOT NULL DEFAULT 0`) is the asker's Keep private flag, set on every turn of a conversation together (`Library.set_conversation_private`; a follow-up inherits it in `run_ask`); the community list (`list_public_ask_questions`) returns a private row only to its own asker (`viewer_id`) and to an admin (`see_private`), nobody else; the community list shows first turns only (`turn_index = 0`); **the one visibility rule is `Library.ask_visibility_clause(viewer_id, see_private)`** (hidden and private rows only for an admin; a private row also for its asker), shared by `list_public_ask_questions` and `similar_ask_candidates` so the two cannot drift; no MCP tool other than the admin-only introspection tools reads this table; `citations_json` is the turn's **API-verified cited-source snapshot** (`[{n, title, url, type, article_id?}]` — `article_id` on library entries only; feed/web sources are transient, so the stored title/url *is* the record, never re-resolved); `web_scope` (2026-10, Open web, migration-added, `TEXT NOT NULL DEFAULT ''`) is `'open'`, `'trusted'` or `''`: `'open'` when Open web was on (one unrestricted search, even with Current feed on too), `'trusted'` when only Current feed was on (the search was limited to the `preferred_sites.opml` domains), `''` when no web search was armed **and for every row recorded before this column existed**. For a legacy `''` row `use_feed` meant RSS items only and `use_web` meant a trusted-domain search; for a row with a scope, `use_feed` means Current feed (RSS plus the trusted search) and `use_web` means Open web. `webapp.app._ask_source_labels` is the one place that reads the two shapes (history list, `/ask/history`, admin report badge; the CSV has a `web_scope` column). Never backfilled; `stop_reason` (2026-10, migration-added, `TEXT NOT NULL DEFAULT ''`) is the answer call's API `stop_reason`; `'max_tokens'` means the answer was cut off by the token budget. Measurement only, no UI: `SELECT model, COUNT(*) FROM ask_questions WHERE stop_reason='max_tokens' GROUP BY model;`. `''` for every row before the deploy and for a turn whose call never completed. The same column exists on `matchmaker_questions`; enrichment/generation calls (no table of their own) log one `stop_reason=max_tokens call_site=...` WARNING per cut-off instead (`linklib/stop_reason.py`) |
+| `ask_questions` | One row per conversation **turn**; the single table behind all three surfaces (admin report, a user's own history, the member-public community view). | `conversation_id` (groups follow-up turns; `= str(id)` of the first turn) + `turn_index`; token columns for the answer call; `rewrite_input_tokens`/`rewrite_output_tokens`/`rewrite_cost_usd` for the follow-up query-rewrite call; `embed_input_tokens`/`embed_cost_usd` for embedding the retrieval QUESTION during hybrid retrieval (#93 — a **user-cap** cost, unlike `article_embeddings.cost_usd`, which is embed-on-save overhead); **`cost_usd` is the turn TOTAL (answer + rewrite + query embedding)** so every `SUM(cost_usd)` — the monthly cap, the reports — needs no special handling; `hidden_public` affects only the community view (`anonymized` is frozen, nothing reads it); `is_private` (2026-10, migration-added, `INTEGER NOT NULL DEFAULT 0`) is the asker's Keep private flag, set on every turn of a conversation together (`Library.set_conversation_private`; a follow-up inherits it in `run_ask`); the community list (`list_public_ask_questions`) returns a private row only to its own asker (`viewer_id`) and to an admin (`see_private`), nobody else; the community list shows first turns only (`turn_index = 0`); **the one visibility rule is `Library.ask_visibility_clause(viewer_id, see_private)`** (hidden and private rows only for an admin; a private row also for its asker), shared by `list_public_ask_questions` and `similar_ask_candidates` so the two cannot drift; no MCP tool other than the admin-only introspection tools reads this table; `citations_json` is the turn's **API-verified cited-source snapshot** (`[{n, title, url, type, article_id?}]` — `article_id` on library entries only; feed/web sources are transient, so the stored title/url *is* the record, never re-resolved); `web_scope` (2026-10, Open web, migration-added, `TEXT NOT NULL DEFAULT ''`) is `'open'`, `'trusted'` or `''`: `'open'` when Open web was on (one unrestricted search, even with Current feed on too), `'trusted'` when only Current feed was on (the search was limited to the `preferred_sites.opml` domains), `''` when no web search was armed **and for every row recorded before this column existed**. For a legacy `''` row `use_feed` meant RSS items only and `use_web` meant a trusted-domain search; for a row with a scope, `use_feed` means Current feed (RSS plus the trusted search) and `use_web` means Open web. `webapp.app._ask_source_labels` is the one place that reads the two shapes (history list, `/ask/history`, admin report badge; the CSV has a `web_scope` column). Never backfilled; `stop_reason` (2026-10, migration-added, `TEXT NOT NULL DEFAULT ''`) is the answer call's API `stop_reason`; `'max_tokens'` means the answer was cut off by the token budget. Measurement only, no UI: `SELECT model, COUNT(*) FROM ask_questions WHERE stop_reason='max_tokens' GROUP BY model;`. `''` for every row before the deploy and for a turn whose call never completed. **`failed`/`error`** (2026-10, migration-added, `INTEGER NOT NULL DEFAULT 0` / `TEXT NOT NULL DEFAULT ''`): `failed=1` is a turn whose answer call produced no answer (the call raised, the SDK or key is missing, or the voice prompt is unset). `linklib.agent.answer_question` returns `Answer(failed=True, error=<raw detail>, text="")` instead of answer text and logs the exception with model and effort; `webapp.ask_orchestrator.run_ask` records the row (so `cost_usd`, the rewrite, embedding and Exa spend all still count toward the cap and the admin usage views) and raises `AskTurnFailed`, which `POST /ask` turns into a 502 with the plain message "Couldn't answer that just now. Try again, or pick another depth." and the updated usage, and the `ask_fpa_buddy` MCP tool turns into a tool error. `ask_visibility_clause` excludes `failed` rows for everyone but an admin (its own asker included), `similar_ask_candidates` always excludes them, and the per-user history, Recent conversations and `list_conversation_turns` (so a follow-up's rebuilt history and cap) exclude them too. An admin sees the row labelled Failed with `error` on the past-questions list and the admin report; no failed turn has a `turn_id`, so it cannot be rated. The same column pair does not exist on `matchmaker_questions`. The same column exists on `matchmaker_questions` for `stop_reason`; enrichment/generation calls (no table of their own) log one `stop_reason=max_tokens call_site=...` WARNING per cut-off instead (`linklib/stop_reason.py`) |
 | `ask_feedback` | Member ratings of individual answers — **one row per rated turn per user**, upserted on `(question_id, user_id)` so a changed rating updates in place. Feeds the `/admin/fpa-buddy/feedback` triage view and, later, a retrieval eval set (flagged questions + the rated turn's citation snapshot). Capture + triage only — feedback never mutates prompts or retrieval automatically. | `question_id` (→ `ask_questions.id`), `rating` (`helpful` \| `inaccurate` \| `not_helpful`), `comment` (optional "what was off?" free text), `updated_at` (`''` until first changed — the empty-string-sentinel idiom), `reviewed` (2026-09, migration-added — a manual admin "Mark reviewed" toggle on `/admin/fpa-buddy/feedback`, matching `community_gap_submissions.reviewed`'s own column name/type/default exactly; deliberately **not** auto-clear-on-view, same reasoning as that table — badges `/admin/fpa-buddy/feedback` via `Library.count_unreviewed_ask_feedback()`) |
 
 Cost figures are computed from **real API token usage** at call time
@@ -1033,7 +1046,7 @@ currently mirrors a given piece, so a re-sync on edit is a direct, narrow
 overwrite (`Library.update_mirrored_article` — title/url/content, never
 `Library.upsert()`'s merge-into-existing-row semantics, which are correct
 for an external re-fetch but wrong for a deliberate edit: the edit must
-always win). A piece whose `body_md` is cleared back to `NULL` (card-
+always win). The first sync adopts a stray article already at the mirrored URL; that lookup normalizes the URL with `normalize_url` first (issue #665), because every writer stores `articles.url` as https, so a non-https `LINKLIB_PUBLIC_BASE` would otherwise miss the stray and collide on `UNIQUE(articles.url)`. A piece whose `body_md` is cleared back to `NULL` (card-
 metadata-only, one of the three literal bespoke routes) has its mirror
 deleted outright (`Library.delete_article`) rather than left orphaned — the
 delete route cascades the same way. `plain_text_from_body_md()` renders
@@ -4757,6 +4770,40 @@ Details worth knowing:
   since shipped.
   No schema change — `entity_citations`'s table comment already
   anticipated this exact shape when it was written in Phase 1b.
+- **Uncited AI drafts are refused, never saved (issue #642, 2026-10).** The
+  three grounded generators (`generate_tool_agent_taxonomy`,
+  `generate_tool_description`, `generate_community_profile`) all run through
+  `linklib.enrich._run_cited_draft`. A draft is unusable when
+  `linklib.citations.citation_problem` says so: `no_citations` (the draft has
+  no citation) or `orphan_markers` (a `[n]` marker in the text with no
+  matching source; 1-2 digit markers only, so "[2024]" is not one). One
+  unusable draft triggers exactly one automatic retry over the same fetched
+  page (no second fetch). A good retry is returned with both calls' tokens and
+  cost summed (`attempts=2`). A second unusable draft raises
+  `enrich.UncitedDraft`, which carries both calls' usage, and the caller
+  saves nothing: the previous text and its citation set stay. Nothing is
+  stripped quietly. A retry costs one more call of the same size (the whole
+  field's token budget again), so a refused field is billed twice.
+  **Callers.** `_run_tool_research` (Agent taxonomy, persisted server-side),
+  the two stateless AJAX routes (`generate-description`,
+  `generate-profile`: they return 503 with the refusal text and the form is
+  untouched, so nothing uncited reaches a Save), and the three
+  `scripts/regen_ai_drafted_fields.py` apply paths plus its `--sample` loops,
+  `scripts/enrich_agent_taxonomy.py` and `scripts/enrich_community_profiles.py`
+  each catch it, record the summed cost, and report the refusal. The Refresh
+  button shows it as `research_refreshed=uncited`; the on-add background run
+  has no UI and only logs.
+  **Library guard.** `Library.set_generated_entity_citations` is the only
+  write a Generate path uses: it returns False and writes nothing for an
+  empty list, so a Generate can never replace a stored non-empty set with an
+  empty one. A missing row and `'[]'` are the same thing. A deliberate clear
+  (a hand edit) stays `clear_entity_citations`/`update_tool_agent_taxonomy`.
+  `tests/test_uncited_drafts.py` fails if `webapp/` or `scripts/` call
+  `set_entity_citations` directly.
+  **Persist-time validation.** `_run_tool_research` and the regen script
+  re-check `citation_problem` before writing (the regen script after
+  `_validate_citations_payload` has dropped malformed entries), so a draft
+  whose citations lose their sources in validation is refused too.
 - **Description/Community profile publish gates (2026-08) — the two
   follow-ups the two bullets above deliberately deferred, now built the
   same way Agent taxonomy's Abacum-fix gate works.** A Phase 0 read-only
@@ -10108,7 +10155,9 @@ allowlist, neither of which this function attempts.
   value and `*_review_is_stale()` function `/admin/checks` itself uses, and
   linking to a matching `id` anchor added to that page's own `<h2>`
   headings (`#pricing-freshness`, `#new-model-awareness`,
-  `#exa-pricing-freshness`). Deliberately not a duplicate of the full
+  `#exa-pricing-freshness`; the New-model-awareness dot is now only the
+  180-day backstop, while the lineup diff in `linklib/lineup.py` is the primary
+  signal on `/admin/checks`). Deliberately not a duplicate of the full
   banner or its "Mark reviewed" button — that action stays exclusively on
   `/admin/checks`.
 - **Dollar totals are explicitly out of scope** — the page closes with a

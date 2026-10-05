@@ -11012,6 +11012,8 @@ it supersedes the old "`/save` is token-gated" note.
   repair shipped; existing `'[]'` rows stay until those fields are
   regenerated.
 
+- **Uncited AI drafts are refused (issue #642, 2026-10).** A grounded Generate (Agent taxonomy, Description, Community profile) whose draft has no citations, or `[n]` markers with no matching source (`linklib.citations.citation_problem`), gets one automatic retry over the same fetched page; a second bad draft raises `enrich.UncitedDraft` and nothing is saved: the previous text and its citation set stay, with a specific admin message (what happened, what was kept, what to do). Both calls' cost is summed and recorded (a refused field is billed twice). `Library.set_generated_entity_citations` is the only write a Generate path uses and it never writes an empty set; `tests/test_uncited_drafts.py` forbids a direct `set_entity_citations` call in `webapp/` or `scripts/`. A missing `entity_citations` row and `'[]'` are the same thing everywhere. The three AJAX/Refresh surfaces, `scripts/regen_ai_drafted_fields.py` (apply and `--sample`), `enrich_agent_taxonomy.py` and `enrich_community_profiles.py` all handle the refusal. The on-add background research run has no UI, so a refusal there only logs. See ARCHITECTURE.md's matching bullet.
+
 - **Community and software edit page polish, PR 2a.1 (2026-09).** Standing rule
   from Brian: a name in the edit view must never differ from the visitor-facing
   name. Exempt only admin-only controls with no public rendering (Verification
@@ -13300,23 +13302,24 @@ deliberately curated/manual, the same reasoning the enrichment pickers already u
 for staying non-auto-surfacing) and was left as a possible future decision, not
 something to do silently as part of this reminder.
 
-**New-model-awareness reminder (issue #98, Piece 2)** — same reviewed-toggle
-pattern as the Pricing-freshness reminder directly above (a dated `settings` value,
-a banner on `/admin/checks` separate from the pass/fail list, an admin-only "Mark
-reviewed" action, no auto-clear-on-view), but answering a different question and
-kept as a fully separate, independent reminder: not "has an existing model's price
-gone stale" but "does Anthropic have current models this app doesn't know about at
-all." There's no API for that either (`models.list()`, per `linklib/models.py`'s
-own `_live_models`, only ever returns models already deployed/visible to this
-account — a consequence of a model having been added somewhere already, never a
-way to discover a brand-new release), so this stays a human attestation too.
-`linklib.models.MODELS_REVIEW_STALE_DAYS` = **30 days** (vs. pricing's 90) —
-confirmed with Brian: new models ship roughly every 30-60 days, meaningfully more
-often than an existing model's price changes, so the review window is tighter.
-Settings key `models_last_reviewed`; `POST /admin/checks/mark-models-reviewed`
-records it. The banner links out to both Anthropic's live model-overview docs and
-back to this section (so "what do I actually need to touch" doesn't need
-re-deriving each time it goes stale).
+**New-model awareness is a diff now (#629 Piece 2, 2026-10), not a calendar
+reminder.** The Models API list IS the signal: `linklib/models.py` already fetched
+it every 30 minutes and `_merge` threw the extras away (every caller passed
+`allow_new=False`). The old comment claiming `models.list()` only shows models
+"already added" was wrong: a generally available model is listed for every key.
+`linklib/lineup.py` compares the live list with the registry, `MODEL_PRICING`, the
+FP&A Buddy tiers, the matchmaker default and the enrichment setting, and
+`/admin/checks` shows the findings in the "Anthropic models" row: a live model in
+none of those (ignorable), a used model with no pricing row (not ignorable, since
+it would bill at Sonnet 4.6 rates), a used model the API no longer lists (not
+ignorable). A registry model no Buddy tier uses is NOT a gap. An unreachable API
+shows "Could not compare", never a clean pass. A deliberate "not using" decision is
+recorded with a reason (`models_not_using` setting, `Library.add_model_not_using`),
+stays visible on the page and is removed only by a person. The dated reminder
+(`models_last_reviewed`, `MODELS_REVIEW_STALE_DAYS` = **180**) is now only the
+backstop for what the list cannot show (a silent repricing or retirement date).
+`allow_new` has no caller; discovery is `linklib.lineup`'s job. The admin badge
+counts findings only from an already-warm cache (no network call on the badge path).
 
 **Model-config consolidation (2026-09, follow-up to issue #98's touchpoint
 investigation above) — the "default chat model" literal, deduplicated where it
@@ -13580,6 +13583,8 @@ subscription.
   "Members" on `/admin/users`) and community-member wording (profile fields, "Member experience") are
   unchanged on purpose.
 
+- **`Library.get_article_by_url` normalizes (2026-10, Refs #665).** It tried only the exact stored string, so a pasted `http://` or `www.` variant missed: the two bulk-delete routes skipped the row and MCP `get_article` said not found. It now tries the exact string first, then `normalize_url(url)`, so a legacy un-normalized stored URL still matches and every caller agrees. `sync_original_content_article` keeps its own explicit normalize (harmless). Tests in `tests/test_library_bulk_delete.py` and `tests/test_mcp_library.py`.
+- **A failed Buddy turn is never a public question (2026-10, Refs the failed-turns issue Brian is filing).** The answer call raising used to return `Answer(text="(Answer call failed: <raw exception>)")`, which `run_ask` recorded as an ordinary question: it could reach the past-questions list, similar-question suggestions and `/ask/history`, and showed users the raw exception. Now `Answer` carries `failed`/`error` (text is `""`); the four non-answer states in `answer_question` (call raised, no `anthropic` SDK, no API key, voice prompt unset) are all failures, not answer text. `run_ask` records a `failed=1` row with the real spend, then raises `AskTurnFailed`; `POST /ask` returns 502 `{"detail": plain message, "failed": true, "usage"}` and the page puts the question back in the box, `ask_fpa_buddy` raises a tool error, `scripts/ask.py` exits 1. Spend still counts (cap and admin usage). `Library.ask_visibility_clause` hides failed rows from everyone but an admin, the asker included; suggestions never include them; the user's own history, Recent conversations and the follow-up history/cap (`list_conversation_turns`) skip them. An admin sees "Failed" and the raw error on the past-questions list and the admin report. The exception is logged with model and effort. Tests that relied on the no-key fallback being an answer now patch `tests/ask_stub.py`. **Not changed:** `linklib/matchmaker.py` still returns `"(Answer call failed: ...)"` as answer text to the asker (matchmaker questions are never shown to other users); flagged for its own decision. See ARCHITECTURE.md's `ask_questions` row and `tests/test_failed_buddy_turn.py`. An edge error page (Cloudflare, Railway; HTML, not our JSON) is handled in `doAsk`: the body parse is caught, a 5xx with no JSON detail shows the same failure line, and the question goes back in the box (a thrown network error restores it too). `tests/test_buddy_edge_error.py`.
 - **Open web (2026-10, behavior PR).** Corrects #687's chip mapping: Current feed is the RSS items plus a trusted-domain Exa search, Open web is the same single call with `includeDomains` omitted (both on is one unrestricted call; the native fallback follows the same rule). `ask_questions.web_scope` (`'open'`, `'trusted'`, `''`) records it; a legacy `''` row is read as RSS only for `use_feed` and trusted-only for `use_web` (`_ask_source_labels`), never as unrestricted. Chip keys are `library`, `feed`, `open_web`; the old `web` key still means trusted (stale tabs, MCP `sources`). Defaults: archive on, Current feed on, Open web off. MCP gets an explicit `open_web` parameter, default false. Citations from outside the trusted list carry `trusted: false` and show an "Open web" tag. No blocklist, no new caps. The copy sweep (docstrings, how-it-works, admin copy, `htib_after_copy` default, README, RUNBOOK) shipped as part 2. See ARCHITECTURE.md's matching paragraph.
 
 - **New-tool form shows its Sources list after Generate (2026-10, Refs #698).** `generateDescription` and `generateCommunityProfile` put `[n]` markers in the text and the citations in a hidden field only; the Sources list was server-rendered after Save, so it never appeared live on the new or edit form. Both now render the list into `#description-sources` (or the profile equivalent) with the edit page's existing `_citations_list_html` markup; hidden fields and `set_generated_entity_citations` are untouched. Tests: `tests/test_new_tool_sources_list.py`.

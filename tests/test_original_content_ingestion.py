@@ -188,6 +188,40 @@ def test_sync_adopts_a_stray_pre_existing_article_at_the_same_url(lib, https_pub
     assert article["is_own_content"] == 1
 
 
+@pytest.fixture
+def http_public_base(monkeypatch):
+    """Like https_public_base, but a NON-https base (local dev, a non-https
+    preview). Restores the module's default base afterwards."""
+    import importlib
+    import linklib.original_content_sync as ocs
+    monkeypatch.setenv("LINKLIB_PUBLIC_BASE", "http://preview.example.test")
+    importlib.reload(ocs)
+    try:
+        yield ocs
+    finally:
+        monkeypatch.undo()
+        importlib.reload(ocs)
+
+
+def test_sync_adopts_a_stray_stored_as_https_when_the_base_is_http(lib, http_public_base):
+    """Issue #665: every writer normalizes stored URLs to https, so with an
+    http base the raw mirrored URL misses a stray stored as https and the
+    insert collided on articles.url. The lookup must use the same
+    normalization the writers use."""
+    raw = http_public_base.mirrored_article_url("my-piece")
+    assert raw.startswith("http://")
+    stray_id = lib.upsert(Article(url=raw, title="Stray old save", content="stale stray content"))
+    assert lib.get_article(stray_id)["url"].startswith("https://")   # writers normalized it
+
+    item_id = lib.add_original_content(
+        "my-piece", "Real Title", "Teaser", "Guide", "Read it",
+        body_md="Real mirrored content.", status="live",
+    )
+    article_id = http_public_base.sync_original_content_article(lib, item_id)
+    assert article_id == stray_id   # adopted, no UNIQUE constraint failure
+    assert "Real mirrored content." in lib.get_article(article_id)["content"]
+
+
 # --- provenance flag: generic URL-match logic (future bookmarklet saves) ----
 
 def test_is_thought_leadership_url_matches_normalized(lib):

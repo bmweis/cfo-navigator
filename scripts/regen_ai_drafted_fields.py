@@ -197,8 +197,10 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from linklib.community_profile import cpe_for_generation_run  # noqa: E402
 from linklib.db import Library, resolve_db_path  # noqa: E402
+from linklib.citations import citation_problem
 from linklib.enrich import (
     COMMUNITY_PROFILE_FIELDS,
+    UncitedDraft,
     generate_tool_description,
     generate_tool_agent_taxonomy,
     generate_tool_differentiation,
@@ -292,6 +294,20 @@ def _log(log_file: str, entity_type: str, entity_id: int, name: str, field: str,
         f.write(json.dumps(row) + "\n")
 
 
+def _refuse_uncited(lib: Library, e: UncitedDraft, log_file: str, kind: str, item_id: int,
+                    name: str, field: str, status: str = "failure") -> None:
+    """An uncited draft (issue #642) is refused, never written: the previous
+    text and its citation set stay. Both model calls were paid for, so their
+    summed cost goes on the ledger before the refusal is logged."""
+    if e.cost_usd or e.input_tokens or e.output_tokens:
+        lib.record_enrichment_cost(None, e.model, e.input_tokens, e.output_tokens, e.cost_usd)
+    print(f"      REFUSED, nothing written (existing text and citations kept): "
+          f"citations {e.reason} after {e.attempts} attempts, cost=${e.cost_usd:.4f}")
+    _log(log_file, kind, item_id, name, field, status,
+         f"uncited draft refused: {e.reason} after {e.attempts} attempts",
+         input_tokens=e.input_tokens, output_tokens=e.output_tokens, cost_usd=e.cost_usd)
+
+
 def _call_with_retry(fn, *args, **kwargs):
     """Calls fn(*args, **kwargs); on what looks like a rate-limit error,
     sleeps RATE_LIMIT_BACKOFF once and retries exactly once more, then
@@ -334,6 +350,9 @@ def _regen_tool_description(lib: Library, tool: dict, model: str, voice_core: st
         return
     try:
         draft = _call_with_retry(generate_tool_description, name, url, model=model, voice_core=voice_core)
+    except UncitedDraft as e:
+        _refuse_uncited(lib, e, log_file, "tool", tool_id, name, "description")
+        return
     except Exception as e:
         print(f"      FAILED: {type(e).__name__}: {e}")
         _log(log_file, "tool", tool_id, name, "description", "failure", f"{type(e).__name__}: {e}")
@@ -363,6 +382,17 @@ def _regen_tool_description(lib: Library, tool: dict, model: str, voice_core: st
              "generate_tool_description returned an empty description", **log_kwargs)
         return
 
+    # Citations-validation parity (hardening item 6), checked BEFORE any write
+    # (issue #642): an uncited draft, or one whose markers lose their sources
+    # in validation, must not replace the stored text or its citation set.
+    validated_citations = _validated_citations(draft.citations)
+    problem = citation_problem([draft.description], validated_citations)
+    if problem:
+        print(f"      REFUSED, nothing written (existing text and citations kept): citations {problem}")
+        _log(log_file, "tool", tool_id, name, "description", "failure",
+             f"uncited draft refused: {problem}", **log_kwargs)
+        return
+
     current = lib.get_tool(tool_id)
     if current is None:
         print("      FAILED: tool vanished before save")
@@ -383,12 +413,7 @@ def _regen_tool_description(lib: Library, tool: dict, model: str, voice_core: st
         clear_description_verification_stamp=True,
         source="script",
     )
-    # Citations-validation parity (hardening item 6).
-    validated_citations = _validated_citations(draft.citations)
-    if validated_citations:
-        lib.set_entity_citations("tool", tool_id, "description", validated_citations, model=draft.model)
-    else:
-        lib.clear_entity_citations("tool", tool_id, "description")
+    lib.set_generated_entity_citations("tool", tool_id, "description", validated_citations, model=draft.model)
 
     # Compare against the NORMALIZED value, not the raw draft — Library.
     # update_tool() runs every prose field through normalize_voice_mechanics
@@ -424,6 +449,9 @@ def _regen_tool_agent_taxonomy(lib: Library, tool: dict, model: str, voice_core:
     try:
         result = _call_with_retry(generate_tool_agent_taxonomy, name, url, description=description,
                                    model=model, voice_core=voice_core)
+    except UncitedDraft as e:
+        _refuse_uncited(lib, e, log_file, "tool", tool_id, name, "agent_taxonomy")
+        return
     except Exception as e:
         print(f"      FAILED: {type(e).__name__}: {e}")
         _log(log_file, "tool", tool_id, name, "agent_taxonomy", "failure", f"{type(e).__name__}: {e}")
@@ -452,6 +480,13 @@ def _regen_tool_agent_taxonomy(lib: Library, tool: dict, model: str, voice_core:
              "generate_tool_agent_taxonomy returned an empty note", **log_kwargs)
         return
 
+    problem = citation_problem([result.agent_taxonomy_note], result.citations)
+    if problem:
+        print(f"      REFUSED, nothing written (existing text and citations kept): citations {problem}")
+        _log(log_file, "tool", tool_id, name, "agent_taxonomy", "failure",
+             f"uncited draft refused: {problem}", **log_kwargs)
+        return
+
     lib.set_tool_agent_taxonomy_draft(
         tool_id, result.agent_taxonomy_note,
         needs_verification=0, ai_confident=int(bool(result.confident)),
@@ -463,10 +498,7 @@ def _regen_tool_agent_taxonomy(lib: Library, tool: dict, model: str, voice_core:
     # round-tripped through a browser hidden input the way Description's
     # are, so there's no _validate_citations_payload call in ITS live path
     # either (hardening item 6's docstring note). Nothing to change here.
-    if result.citations:
-        lib.set_entity_citations("tool", tool_id, "agent_taxonomy", result.citations, model=result.model)
-    else:
-        lib.clear_entity_citations("tool", tool_id, "agent_taxonomy")
+    lib.set_generated_entity_citations("tool", tool_id, "agent_taxonomy", result.citations, model=result.model)
 
     # Same normalize-before-compare fix as description above —
     # set_tool_agent_taxonomy_draft also runs agent_taxonomy_note through
@@ -574,6 +606,9 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
     try:
         draft = _call_with_retry(generate_community_profile, name, url,
                                   existing=existing_profile, model=model, voice_core=voice_core)
+    except UncitedDraft as e:
+        _refuse_uncited(lib, e, log_file, "community", community_id, name, "community_profile")
+        return
     except Exception as e:
         print(f"      FAILED: {type(e).__name__}: {e}")
         _log(log_file, "community", community_id, name, "community_profile", "failure",
@@ -594,6 +629,14 @@ def _regen_community_profile(lib: Library, community: dict, model: str, voice_co
     # of the community-profile citation fix, and a partial draft (most
     # fields populated, a few genuinely blank) is still useful content,
     # unlike a single-field draft going empty.
+
+    problem = citation_problem([getattr(draft, f) for f in COMMUNITY_PROFILE_FIELDS],
+                               _validated_citations(draft.citations))
+    if problem:
+        print(f"      REFUSED, nothing written (existing profile and citations kept): citations {problem}")
+        _log(log_file, "community", community_id, name, "community_profile", "failure",
+             f"uncited draft refused: {problem}", **log_kwargs)
+        return
 
     cpe_value, cpe_kept = cpe_for_generation_run(
         (existing_profile or {}).get("cpe_eligible"), draft.cpe_eligible)
@@ -644,11 +687,8 @@ def _finish_community_regen(lib: Library, community_id: int, name: str, draft,
     # has well-typed citations, but runs them through the same validation
     # defensively.
     validated_citations = _validated_citations(draft.citations)
-    if validated_citations:
-        lib.set_entity_citations("community", community_id, "community_profile",
-                                  validated_citations, model=draft.model)
-    else:
-        lib.clear_entity_citations("community", community_id, "community_profile")
+    lib.set_generated_entity_citations("community", community_id, "community_profile",
+                                       validated_citations, model=draft.model)
 
     # Same normalize-before-compare fix as description above —
     # upsert_community_profile also runs every prose field (including these
@@ -738,6 +778,9 @@ def _run_sample(lib: Library, tools: list[dict], communities: list[dict], model:
                                           tool.get("description") or "",
                                           competitor_names=competitor_names,
                                           model=model, voice_core=voice_core)
+        except UncitedDraft as e:
+            _refuse_uncited(lib, e, log_file, "tool", tool_id, name, field, status="preview")
+            continue
         except Exception as e:
             print(f"  FAILED: {type(e).__name__}: {e}")
             _log(log_file, "tool", tool_id, name, field, "preview", f"{type(e).__name__}: {e}")
@@ -765,6 +808,10 @@ def _run_sample(lib: Library, tools: list[dict], communities: list[dict], model:
         try:
             draft = _call_with_retry(generate_community_profile, name, url,
                                       existing=existing_profile, model=model, voice_core=voice_core)
+        except UncitedDraft as e:
+            _refuse_uncited(lib, e, log_file, "community", community_id, name, "community_profile",
+                            status="preview")
+            continue
         except Exception as e:
             print(f"  FAILED: {type(e).__name__}: {e}")
             _log(log_file, "community", community_id, name, "community_profile", "preview",

@@ -80,7 +80,7 @@ class _FakeTaxonomyResult:
         self.agent_taxonomy_needs_verification = needs_verification
         self.confident = confident
         self.low_confidence = 0
-        self.citations = []
+        self.citations = [{"n": 1, "title": "T", "url": "https://x.example", "type": "tool_page"}]
         self.model = "test-model"
         self.cost_usd = 0.0
         self.input_tokens = 0
