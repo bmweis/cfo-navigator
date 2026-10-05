@@ -222,7 +222,7 @@ def test_admin_hide_is_visible_undoable_and_separate_from_private(site):
     sec = _section(boss.get("/tools/fpa-buddy").text)
     i = sec.index("Shared question from author")
     row = sec[i:]
-    assert "Hidden" in row and ">Unhide</button>" in row and "ask-ctl-admin" in row
+    assert "Hidden" in row and ">Unhide</button>" in row and "admin-only" in row
     # members never see a hidden row
     assert "Shared question from author" not in _section(client("reader").get("/tools/fpa-buddy").text)
     # the asker's Make private / Allow sharing never touches the admin's hide
@@ -282,7 +282,7 @@ def test_browser_hide_and_unhide_buttons_share_one_width_and_height(site):
             pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
             pg.goto("http://buddy.test/tools/fpa-buddy")
             pg.evaluate("document.querySelectorAll('details.ask-pq-row').forEach(d=>d.open=true)")
-            sizes = pg.evaluate("""()=>[...document.querySelectorAll('.ask-ctl-admin')].map(b=>{
+            sizes = pg.evaluate("""()=>[...document.querySelectorAll('.admin-only')].map(b=>{
                 const r=b.getBoundingClientRect(); return [b.textContent, Math.round(r.width*10)/10, Math.round(r.height*10)/10]})""")
             assert {t for t, _, _ in sizes} == {"Hide", "Unhide"}
             assert all(abs(wd - 128) < 0.6 and abs(h - 28) < 0.6 for _, wd, h in sizes), sizes
