@@ -215,7 +215,7 @@ def test_csv_export_stays_raw_with_citations_column(env):
     body = admin.get("/admin/fpa-buddy/report/export.csv").text
     rows = list(csv.reader(io.StringIO(body)))
     header = rows[0]
-    assert header[-1] == "citations"          # appended LAST, positions stable
+    assert header[-2:] == ["citations", "web_scope"]   # appended LAST, positions stable
     by_q = {r[header.index("question")]: r for r in rows[1:]}
     cited = by_q["What is CAC payback?"]
     # Markers stay literal — deliberately no link conversion in the CSV.
