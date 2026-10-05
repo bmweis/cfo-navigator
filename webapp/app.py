@@ -1887,7 +1887,7 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 
 /* Admin-only controls (BRAND.md, Admin-only controls): ONE class. Outlined, no fill, 1px
    deep-seafoam border and text, so it can't be mistaken for a seafoam category tag.
-   Two size tiers: card controls 28px/6px (default), page-level 42px/10px (.admin-only-page). */
+   Two size tiers: card controls 28px/6px as the base, page-level 42px/10px (.admin-only-page). */
 .admin-only{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:28px;padding:0 10px;border-radius:6px;background:transparent;color:var(--seafoam-deep);border:1px solid var(--seafoam-deep);font:600 12px var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;}
 .admin-only-page{height:42px;padding:0 22px;border-radius:10px;font-size:15px;gap:6px;}
 .admin-only:focus-visible{outline:2px solid var(--seafoam-deep);outline-offset:2px;}
