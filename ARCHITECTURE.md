@@ -1505,7 +1505,7 @@ points, both confirmed deliberately rather than picking one: (1)
 automatically, via `BackgroundTasks`, right after a tool is added —
 `webapp/app.py::_run_tool_research`, fired from both `/admin/tools/new` and
 the public `/tools/submit` form, so a slow/failed research call never
-blocks the add from completing; and (2) on demand, from a "Generate
+blocks the add from completing (the two background callers pass `on_add=True`, which saves the draft with `agent_taxonomy_needs_verification=1` whatever Claude's confidence, so a draft a visitor can already see is always under review until marked verified; confidence is still stored in `agent_taxonomy_ai_confident`, and the new-tool form lists what the job drafts in a note under its buttons, read from `_ON_ADD_DRAFTED_FIELDS`); and (2) on demand, from a "Generate
 summary" button (renamed from "Refresh AI research," moved next to the
 Agent taxonomy field in the Phase 4 edit-page button reorg, then
 standardized to the "Generate summary" label shared by every AI-draft-into-
