@@ -4657,10 +4657,17 @@ _hs_warn_style = ("background:#fef3c7;border:1px solid #fde68a;color:#92400e;bor
                   "padding:10px 14px;margin:12px 0 0;font-size:14px;line-height:1.5;")
 
 
-def _status_first_paragraph_text(text: str) -> str:
-    """First paragraph as plain text (tags stripped) for og:description."""
-    first = (text.strip().split("\n\n") or [""])[0]
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", first)).strip()
+def _hero_og_description(subhead: str, headline: str) -> str:
+    """og:description for the homepage: the hero subhead's first paragraph as
+    plain text (tags stripped), else the headline; "" when both are empty so
+    _page() falls back to _OG_DEFAULT_DESCRIPTION. Static on purpose: the
+    Status note never feeds it."""
+    for text in (subhead, headline):
+        first = (text.strip().split("\n\n") or [""])[0]
+        plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", first)).strip()
+        if plain:
+            return plain
+    return ""
 
 
 def _homepage_status_text(lib) -> str:
@@ -4883,7 +4890,7 @@ def homepage(request: Request):
 </div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request), request=request,
-                               og_description=_esc_attr_normalize(_status_first_paragraph_text(homepage_status))))
+                               og_description=_esc_attr_normalize(_hero_og_description(homepage_subhead, homepage_headline))))
 
 
 @app.get("/about", response_class=HTMLResponse)

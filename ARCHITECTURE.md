@@ -11479,7 +11479,7 @@ The "Status:" card under the homepage photo is one `settings` key,
 `homepage_teaser_copy` and `homepage_expanded_copy`, which are left in place
 and never deleted; until the first save the page and the admin box read them
 (or their code defaults) joined by a blank line (`_homepage_status_text`).
-`og:description` uses the first paragraph of the Status, tags stripped.
+`og:description` does not use the Status. It is the hero subhead's first paragraph (tags stripped), else the headline, else the site default (`_hero_og_description`).
 
 Staleness lives in `linklib/homepage_status.py` (`STATUS_STALE_DAYS = 14`).
 `settings.homepage_status_revised_at` is a UTC ISO stamp, written only by

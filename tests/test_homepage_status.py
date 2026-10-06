@@ -199,3 +199,30 @@ def test_startup_seed_starts_the_clock_once(env):
     assert first
     with TestClient(env.app):
         assert _get(env, "homepage_status_revised_at") == first
+
+
+# ---- og:description is static: hero subhead, never the Status ---------------
+
+def _og(appmod):
+    import re
+    m = re.search(r'<meta property="og:description" content="([^"]*)"', _client(appmod).get("/").text)
+    return m.group(1)
+
+
+def test_og_description_ignores_the_status_and_follows_the_subhead(env):
+    _set(env, "homepage_subhead_copy", "Subhead first <b>paragraph</b>.\n\nSecond paragraph.")
+    before = _og(env)
+    assert before == "Subhead first paragraph."
+    _client(env).post("/admin/copy/homepage", json={"homepage_status_copy": "A brand new status."})
+    assert _og(env) == before                                  # Status change: no effect
+    _set(env, "homepage_subhead_copy", "A different subhead.")
+    assert _og(env) == "A different subhead."                  # subhead change: follows
+
+
+def test_og_description_falls_back_to_headline_then_site_default(env):
+    _set(env, "homepage_subhead_copy", "  ")
+    _set(env, "homepage_headline_copy", "Just the headline.")
+    # blank stored subhead falls back to the code default subhead, so test the helper directly
+    assert env._hero_og_description("", "Just the headline.") == "Just the headline."
+    assert env._hero_og_description("", "") == ""
+    assert _og(env)                                            # page still renders a non-empty value
