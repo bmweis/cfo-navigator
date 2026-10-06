@@ -28094,6 +28094,11 @@ def admin_system_ai(request: Request):
         matchmaker_blocks = {m["id"]: lib.role_problems("matchmaker", m["id"]) for m in _REG}
         buddy_models = {t: lib.get_role_model(f"buddy_{t}") for t in ("quick", "standard", "deep")}
         buddy_blocks = {t: {m["id"]: lib.role_problems(f"buddy_{t}", m["id"]) for m in _REG} for t in buddy_models}
+        roles_editor = {m["id"]: {"allowed": lib.model_allowed_roles(m["id"]),
+                                  "status": lib.get_model_status(m["id"]) or "available",
+                                  "pricing": lib.pricing_problems(lib.get_model_pricing(m["id"])),
+                                  "assigned": lib.roles_using(m["id"])} for m in _REG}
+        roles_log = lib.list_model_role_log()
     finally:
         lib.close()
     has_exa_key = bool(os.environ.get("EXA_API_KEY"))
@@ -28181,6 +28186,7 @@ def admin_system_ai(request: Request):
 {_card("Matchmaker model", _matchmaker_model_html(matchmaker_model, matchmaker_blocks))}
 {_card("FP&amp;A Buddy tiers", _buddy_tiers_html(buddy_models, buddy_blocks))}
 {_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, enable_blocks, role_info))}
+{_card("Allowed roles", _allowed_roles_card_html(roles_editor, roles_log))}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
 
 <h2 style="margin:28px 0 4px;">Usage index</h2>
@@ -28382,6 +28388,120 @@ def admin_system_ai_reactivate(model_id: str, request: Request):
 _PRICE_COLS = (("input", "Input"), ("output", "Output"), ("cache_write", "Cache write"),
                ("cache_write_1h", "Cache write 1h"), ("cache_read", "Cache read"))
 _ANTHROPIC_PRICING_URL = "https://www.anthropic.com/pricing"
+
+
+def _allowed_roles_card_html(info: dict, log: list[dict]) -> str:
+    """Allowed-roles editor (PR 3c), collapsed on load: one row per model, one
+    cell per role, each saying in words whether it is allowed. The role check
+    reads only the stored value this edits. Hard blocks (always-on-thinking
+    models for Buddy and the Matchmaker) show their reason and no control;
+    enrichment for a model not yet tested goes through a confirm page."""
+    from linklib.models import (_REGISTRY, ROLES, ROLE_LABELS, hard_block_reason, needs_enrichment_confirm)
+    rows = []
+    for m in _REGISTRY:
+        mid, d = m["id"], info.get(m["id"])
+        if not d:
+            continue
+        cells = []
+        for role in ROLES:
+            allowed = role in d["allowed"]
+            hard = hard_block_reason(mid, role)
+            if allowed:
+                word = '<strong style="color:var(--navy);">Allowed</strong>'
+                ctl = ('<div style="font-size:12px;color:var(--muted);">In use now; assign another model to change it.</div>'
+                       if role in d["assigned"] else
+                       '<button class="btn btn-ghost" name="allow" value="0" style="font-size:12px;padding:4px 10px;">Stop allowing</button>')
+            elif hard:
+                word = '<strong>Not allowed</strong>'
+                ctl = f'<div style="font-size:12px;color:var(--muted);">Blocked in code: {_esc(hard)}.</div>'
+            elif needs_enrichment_confirm(mid, role):
+                word = '<strong>Not allowed</strong>'
+                ctl = (f'<a class="btn btn-ghost" href="/admin/system/ai/allowed-roles/confirm/{_esc(mid)}/{role}" '
+                       f'style="font-size:12px;padding:4px 10px;display:inline-block;">Allow after testing&hellip;</a>'
+                       f'<div style="font-size:12px;color:var(--muted);margin-top:2px;">Not yet tested for enrichment.</div>')
+            else:
+                word = '<strong>Not allowed</strong>'
+                ctl = ('<button class="btn btn-ghost" name="allow" value="1" '
+                       'style="font-size:12px;padding:4px 10px;">Allow</button>')
+            form = (f'<form method="post" action="/admin/system/ai/allowed-roles/set" style="margin:0;">'
+                    f'<input type="hidden" name="model_id" value="{_esc(mid)}"><input type="hidden" name="role" value="{role}">'
+                    f'{ctl}</form>' if ("<button" in ctl) else ctl)
+            cells.append(f'<td style="vertical-align:top;font-size:13px;">{word}<div style="margin-top:4px;">{form}</div></td>')
+        open_steps = []
+        if d["status"] == "not_using":
+            open_steps.append("Change its status from not using to available.")
+        if d["status"] == "deactivated":
+            open_steps.append("Reactivate it.")
+        if d["pricing"]:
+            open_steps.append("Verify its pricing row (" + ", ".join(d["pricing"]) + ").")
+        open_html = ("<ul style='margin:0;padding-left:16px;'>" + "".join(f"<li>{_esc(x)}</li>" for x in open_steps) + "</ul>"
+                     if open_steps else '<span style="color:var(--muted);">Nothing open.</span>')
+        rows.append(f'<tr><td style="font-weight:600;vertical-align:top;">{_esc(_enrich_model_label(mid))}'
+                    f'<div style="font-size:11.5px;color:var(--muted);font-weight:400;">{_esc(mid)}</div></td>'
+                    f'{"".join(cells)}<td style="vertical-align:top;font-size:13px;">{open_html}</td></tr>')
+    head = "".join(f"<th>{t}</th>" for t in ["Model", *[ROLE_LABELS[r] for r in ROLES], "Still open before it can be used"])
+    log_rows = "".join(
+        f'<tr><td style="white-space:nowrap;">{_esc(l["created_at"][:16].replace("T", " "))}</td>'
+        f'<td>{_esc(_enrich_model_label(l["model_id"]))}</td><td>{_esc(ROLE_LABELS.get(l["role"], l["role"]))}</td>'
+        f'<td>{_esc(l["action"])}</td><td>{_esc(l["detail"])}</td></tr>' for l in log)
+    log_html = (f'<h4 style="margin:16px 0 6px;font-size:13px;">Recent changes</h4><div class="table-frame" style="overflow-x:auto;">'
+                f'<table style="min-width:{_TABLE_FLOOR_MEDIUM}px;"><thead><tr><th>When (UTC)</th><th>Model</th><th>Role</th>'
+                f'<th>Change</th><th>Confirmation</th></tr></thead><tbody>{log_rows}</tbody></table></div>'
+                if log else '<p style="font-size:12.5px;color:var(--muted);margin:14px 0 0;">No changes recorded yet.</p>')
+    return (f'<details id="allowed-roles" style="scroll-margin-top:16px;"><summary style="cursor:pointer;color:var(--accent);'
+            f'font-size:13.5px;">Edit which roles each model is allowed for</summary>'
+            f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Allowing a role does not switch the model on. '
+            f'It still needs a verified pricing row and the status available (last column). Changes apply immediately, no redeploy.</p>'
+            f'<div class="table-frame" style="overflow-x:auto;"><table style="min-width:{_TABLE_FLOOR_XWIDE}px;"><thead><tr>{head}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>{log_html}</details>')
+
+
+def _roles_error_page(request: Request, msg: str):
+    return HTMLResponse(_page("Allowed roles", "Admin", f'''<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/system/ai#allowed-roles" style="font-size:13px;color:var(--muted);">&larr; AI configuration</a></p>
+<h1>Not changed</h1><p style="color:var(--ink-soft);">{_esc(msg)}</p></div>''', authed=True, request=request), status_code=400)
+
+
+@app.post("/admin/system/ai/allowed-roles/set")
+async def admin_system_ai_allowed_roles_set(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    model_id, role = (form.get("model_id") or "").strip(), (form.get("role") or "").strip()
+    lib = _lib()
+    try:
+        problems = lib.set_allowed_role(model_id, role, form.get("allow") == "1",
+                                        tested=form.get("tested") == "1")
+    finally:
+        lib.close()
+    if problems:
+        return _roles_error_page(request, "; ".join(problems).capitalize() + ".")
+    return RedirectResponse("/admin/system/ai#allowed-roles", status_code=303)
+
+
+@app.get("/admin/system/ai/allowed-roles/confirm/{model_id}/{role}", response_class=HTMLResponse)
+def admin_system_ai_allowed_roles_confirm(model_id: str, role: str, request: Request):
+    from linklib.models import ENRICHMENT_TEST_STEPS, ROLE_LABELS, needs_enrichment_confirm
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if not needs_enrichment_confirm(model_id, role):
+        raise HTTPException(status_code=404, detail="no confirm step for this role")
+    steps = "".join(f"<li>{_esc(x)}</li>" for x in ENRICHMENT_TEST_STEPS)
+    label = _enrich_model_label(model_id)
+    return HTMLResponse(_page("Allow enrichment", "Admin", f'''<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/system/ai#allowed-roles" style="font-size:13px;color:var(--muted);">&larr; AI configuration</a></p>
+<h1>Allow {_esc(label)} for {_esc(ROLE_LABELS[role])}</h1>
+<div style="max-width:900px;margin:0 auto;">
+<p style="color:var(--ink-soft);line-height:1.6;">This model has not been checked for enrichment. Several generate calls have a small answer budget that always-on thinking could use up, and a refusal comes back as empty text. Before allowing it, test it:</p>
+<ol style="line-height:1.7;color:var(--ink-soft);">{steps}</ol>
+<form method="post" action="/admin/system/ai/allowed-roles/set">
+<input type="hidden" name="model_id" value="{_esc(model_id)}"><input type="hidden" name="role" value="{_esc(role)}"><input type="hidden" name="allow" value="1">
+<label style="display:block;margin:14px 0;"><input type="checkbox" name="tested" value="1" required> I ran this test with {_esc(label)} and neither result was empty or cut off.</label>
+<p style="font-size:13px;color:var(--muted);">This is recorded on the page with the date. Allowing the role does not switch the model on: it still needs a verified pricing row and the status available.</p>
+<button class="btn" type="submit">Allow {_esc(ROLE_LABELS[role])}</button>
+<a href="/admin/system/ai#allowed-roles" class="btn btn-ghost" style="margin-left:8px;">Cancel</a>
+</form></div></div>''', authed=True, request=request))
+
 
 
 def _model_pricing_card_html(rows: list[dict], status: dict, enable_blocks: dict, role_info: dict) -> str:

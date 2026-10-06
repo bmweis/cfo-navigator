@@ -131,16 +131,37 @@ def default_allowed_roles(model_id: str) -> tuple[str, ...]:
     return _DEFAULT_ROLES_OVERRIDE.get(model_id, ROLES)
 
 
-def role_block_reason(model_id: str, role: str) -> str:
-    """Visible reason a model is not allowed for a role ('' when allowed by default)."""
-    if role == "enrichment" and model_id in _ENRICHMENT_UNCONFIRMED:
-        return ENRICHMENT_BLOCK_REASON
+def hard_block_reason(model_id: str, role: str) -> str:
+    """Why a model can never be allowed for a role from the admin page ('' when
+    it can). Code only, not editable: always-on-thinking models for the Buddy
+    tiers and the Matchmaker, until the ask() and Matchmaker work lands."""
     if model_id in _ALWAYS_ON_THINKING:
         if role in BUDDY_ROLES:
             return BUDDY_BLOCK_REASON
         if role == "matchmaker":
             return MATCHMAKER_BLOCK_REASON
     return ""
+
+
+def needs_enrichment_confirm(model_id: str, role: str) -> bool:
+    """True when allowing this role takes the confirm step (a live test the
+    admin ran), not just a click."""
+    return role == "enrichment" and model_id in _ENRICHMENT_UNCONFIRMED
+
+
+# The test the confirm step lists, in plain words.
+ENRICHMENT_TEST_STEPS = (
+    "Run Generate for Agent taxonomy or Description on one tool with this model.",
+    "Run a Bottom line generate on one tool with this model.",
+    "Check that neither comes back empty or cut off.",
+)
+
+
+def role_block_reason(model_id: str, role: str) -> str:
+    """Visible reason a model is not allowed for a role by default ('' when none)."""
+    if needs_enrichment_confirm(model_id, role):
+        return ENRICHMENT_BLOCK_REASON
+    return hard_block_reason(model_id, role)
 
 
 _API_TTL = 1800.0  # 30 min, matching the feed cache
