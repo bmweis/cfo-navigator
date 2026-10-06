@@ -29760,7 +29760,7 @@ def admin_checks(request: Request):
     _flip_input = "" if ci_quota_exhausted else _on_input
     _keep_input = _on_input if ci_quota_exhausted else ""
     _knob_x = "18px" if ci_quota_exhausted else "2px"
-    _track = "var(--navy)" if ci_quota_exhausted else "var(--line-strong)"
+    _track = "var(--seafoam-deep)" if ci_quota_exhausted else "var(--line-strong)"
     ci_quota_form = (
         f'<div id="ci-quota" style="margin:0 0 24px;scroll-margin-top:16px;">'
         f'<form method="post" action="/admin/checks/ci-quota" style="margin:0;display:flex;'
