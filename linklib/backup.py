@@ -255,6 +255,61 @@ def _list_backup_files(token: str, folder_id: str) -> list[dict]:
     return r.json().get("files", [])
 
 
+def list_snapshots(token: str, folder_id: str) -> list[dict]:
+    """Every non-trashed file in the backup folder with its size and md5,
+    newest first. Used by scripts/restore_from_drive.py. Under the
+    drive.file scope this only ever returns files the app itself created
+    (a file moved in by hand is invisible), the same view prune_old_backups
+    works from."""
+    r = requests.get(
+        _FILES_URL,
+        headers={"Authorization": f"Bearer {token}"},
+        params={"q": f"'{folder_id}' in parents and trashed=false",
+                "fields": "files(id,name,createdTime,size,md5Checksum)",
+                "orderBy": "createdTime desc",
+                "pageSize": 1000},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json().get("files", [])
+
+
+def find_backup_folders(token: str) -> list[dict]:
+    """Folders named FOLDER_NAME that the app can see. The disaster-recovery
+    fallback: the folder id normally lives in the settings table, which is
+    inside the database being restored."""
+    name = FOLDER_NAME.replace("\\", "\\\\").replace("'", "\\'")
+    r = requests.get(
+        _FILES_URL,
+        headers={"Authorization": f"Bearer {token}"},
+        params={"q": f"name='{name}' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+                "fields": "files(id,name,createdTime)",
+                "orderBy": "createdTime desc"},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json().get("files", [])
+
+
+def download_snapshot(token: str, file_id: str, dest_path: str, chunk: int = 1 << 20) -> tuple[int, str]:
+    """Stream a Drive file to dest_path without holding it in memory.
+    Returns (bytes_written, md5_hex)."""
+    import hashlib
+    md5 = hashlib.md5()
+    total = 0
+    with requests.get(f"{_FILES_URL}/{file_id}", params={"alt": "media"},
+                      headers={"Authorization": f"Bearer {token}"},
+                      stream=True, timeout=(30, 120)) as r:
+        r.raise_for_status()
+        with open(dest_path, "wb") as out:
+            for part in r.iter_content(chunk):
+                if part:
+                    out.write(part)
+                    md5.update(part)
+                    total += len(part)
+    return total, md5.hexdigest()
+
+
 def _select_backups_to_delete(files: list[dict], keep_daily: int = 14,
                                keep_weekly: int = 8) -> list[dict]:
     """`files` sorted newest-first (createdTime desc, matches

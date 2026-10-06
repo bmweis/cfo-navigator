@@ -46,6 +46,13 @@ effect on the very next attempt — no redeploy needed.
 
 ### Path A — the app is up (normal case)
 
+> **Path A cannot restore the production database any more.** bmweis.com is
+> behind Cloudflare, which rejects request bodies over 100 MB on the Free plan,
+> and `library.db` is about 254 MB. The 2026-10-06 rehearsal ran for about 55
+> minutes and the app never logged the POST (§4). Path A still works for a
+> database under 100 MB (a scratch rehearsal, a fresh start). For production,
+> use **Path C**.
+
 The app has a built-in restore endpoint: `POST /admin/library-backup/upload-db` validates
 the upload is a real library DB, then swaps it onto the volume atomically
 and clears stale WAL/SHM sidecars. **No restart or redeploy is needed** —
@@ -95,10 +102,50 @@ shell on the volume:
 3. On the volume (the directory `LINKLIB_DB` points at): move the broken
    file aside (`mv library.db library.db.broken`), don't delete it. Also
    move aside `library.db-wal` / `library.db-shm` if present.
-4. Get the snapshot onto the volume. Easiest: restart the service so the app
-   boots against the now-empty path (it creates a fresh schema), then run
-   Path A's upload. Transferring the file directly over the shell works too
-   but depends on what the CLI supports that month.
+4. Get the snapshot onto the volume with Path C's script (it works with the
+   destination missing, so no restart or empty schema is needed first). Path A's
+   upload does not work at production size.
+
+### Path C — restore from Drive on the container (works at any size)
+
+`scripts/restore_from_drive.py` runs on the Railway container, pulls the
+snapshot from Drive with the same OAuth variables the daily backup uses, checks
+it, and swaps it onto the volume. Nothing passes through Cloudflare or your
+home connection. It works whether the app is up or down.
+
+```bash
+railway ssh                      # then, inside the container:
+cd /app
+python -m scripts.restore_from_drive --db /data/library.db --list
+python -m scripts.restore_from_drive --db /data/library.db --dry-run
+python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
+```
+
+- `--list` prints each snapshot's name, size, date and, when the live database
+  still opens, its article count. Without `--snapshot NAME_OR_ID` the script
+  uses the newest.
+- `--dry-run` downloads and validates (size and md5 against Drive,
+  `PRAGMA integrity_check`, the FTS5 self-check, article count) and writes
+  nothing to the destination. Run it first.
+- Without `--yes-replace-live` it refuses to replace a destination that exists.
+  A destination that does not exist (a scratch path, or a lost volume) needs no
+  flag.
+- Before swapping it keeps the current file as
+  `/data/library.db.pre-restore-<timestamp>` (a hard link, so no extra space; a
+  full copy if the volume cannot link) and never deletes it. Delete it by hand
+  once the restore is confirmed.
+- **Free space needed:** the snapshot size plus 16 MB (about 270 MB today), in
+  the same directory as the destination. If links are unsupported, add the size
+  of the current database. The script refuses before downloading if it is short.
+- It validates before swapping, uses `os.replace`, and removes `-wal` and `-shm`,
+  the same as the old upload route. No restart is needed.
+- The script needs `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and
+  `GOOGLE_OAUTH_REFRESH_TOKEN` in the container's environment. Check with
+  `railway ssh` then `env | grep -c GOOGLE_OAUTH` (expect 3).
+- The Drive folder id normally lives in the database's `settings` table. If
+  the database is gone, the script finds the folder by name instead. If it
+  reports more than one match, pass `--folder-id`.
+- It does not run the post-restore checklist below. Do that by hand.
 
 ### Post-restore validation checklist
 
@@ -269,7 +316,7 @@ email-failure badges — outbound email during the outage will have landed in
 ## 4. Restore rehearsal — procedure and July 2026 record
 
 Rehearse the restore roughly yearly (or after any change to
-`linklib/backup.py` / `/admin/library-backup/upload-db`) so section 1 stays a checklist,
+`linklib/backup.py` / `scripts/restore_from_drive.py`), at production size, so section 1 stays a checklist,
 not a theory. The rehearsal never touches production — it's the same code
 paths against scratch files.
 
@@ -293,6 +340,32 @@ paths against scratch files.
    itself, `PRAGMA integrity_check` says `ok` and
    `INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')`
    doesn't raise; `/health` still 200s — all **without restarting the app**.
+
+### Record: rehearsal run 2026-10-06 ❌ (production size)
+
+- Restored through `/admin/library-backup` (Path A) with the real 253.8 MB
+  `library.db`. The spinner ran about 55 minutes. Railway logs for the whole
+  window showed the `GET /admin/library-backup/download-db` (200) and no
+  `POST /admin/library-backup/upload-db` line, no errors and no restarts. The
+  handler logs on completion, and the body is read in full before it runs, so
+  the upload never completed.
+- Cause: Cloudflare caps request bodies at 100 MB on Free and Pro (larger
+  requests return 413), so a 253.8 MB upload could not work however long it
+  ran. The July run below used a 5-article scratch database, so this was never
+  exercised at real size.
+- Fix: `scripts/restore_from_drive.py` (§1, Path C). Path A now states its
+  limit.
+- **Rehearsal procedure at production size** (the script's first run against
+  Drive is not yet recorded here; add the result when it has run):
+  1. `railway ssh`, `cd /app`, `env | grep -c GOOGLE_OAUTH` should print 3.
+  2. `python -m scripts.restore_from_drive --db /data/library.db --list`
+  3. `python -m scripts.restore_from_drive --db /data/restore-test.db`
+     restores the newest snapshot to a scratch path (no flag needed, the file
+     does not exist). Expect the article count it prints to match the `--list`
+     line. Check `df -h /data` first: it needs about 270 MB free.
+  4. Delete `/data/restore-test.db` when done. The live database is untouched.
+  5. Only then, for a real restore, step 3 with `--db /data/library.db
+     --yes-replace-live`.
 
 ### Record: rehearsal run 2026-07-11 ✅
 
