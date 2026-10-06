@@ -6930,6 +6930,14 @@ never reads as something to tap.
   nested case specifically; the mirrored count and its deliberate exclusion
   of the per-field flags).
 
+- **Admin badge counted no failing check until 2026-10.** `_compute_failing_checks_count`
+  filtered on `where == "In-app"`, a label `run_all()` stopped emitting on 2026-06-30
+  (`d3d44e0`); the badge shipped three days later (`ad416e8`) already using it, so it
+  was wrong from birth, and the 2026-09 page-speed move did not narrow it. It now
+  matches `"Live + CI"` with `ok is False`. Any earlier text here saying the badge
+  counted failing checks described intent, not behavior. Cache, sentinel, static-check
+  cache and refresher are unchanged. See `tests/test_task_badges.py`.
+
 - **Admin menu badge coverage, follow-up (2026-09) — the per-field
   `*_needs_verification` flags this PR left out are folded in after all,
   superseding that deliberate exclusion.** The earlier bullet's `count_
