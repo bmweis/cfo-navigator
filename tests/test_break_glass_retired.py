@@ -5,7 +5,6 @@ they see the real behavior: a password that matches LINKLIB_PASSWORD but has
 no `users` row must NOT log in.
 """
 import importlib
-import os
 import tempfile
 
 import pytest
