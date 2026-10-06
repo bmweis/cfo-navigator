@@ -53,6 +53,18 @@ class ForbiddenConversationError(Exception):
 # row for an admin only.
 FAILED_TURN_MESSAGE = "Couldn't answer that just now. Try again, or pick another depth."
 
+# Shown under an answer whose API stop_reason was "max_tokens" (cut off at the
+# length limit). Derived from the stored ask_questions.stop_reason at render
+# time, never appended to the stored answer text.
+ANSWER_CUTOFF_NOTICE = ("This answer was cut off at the length limit. "
+                        "Ask a narrower question, or ask a follow-up to continue.")
+
+
+def answer_cutoff_notice(stop_reason: str | None) -> str:
+    """The cut-off notice for a stored stop_reason, or "" when the answer
+    finished (end_turn) or the reason is unknown (rows that predate capture)."""
+    return ANSWER_CUTOFF_NOTICE if stop_reason == "max_tokens" else ""
+
 
 class AskTurnFailed(Exception):
     """The answer call did not produce an answer. The turn was recorded as a
@@ -250,4 +262,7 @@ def run_ask(
         "turn_id": turn_id,
         "usage": usage_line,
         "is_private": bool(is_private),
+        # "" unless the answer was cut off at the length limit; the web page
+        # and MCP callers show it under the answer.
+        "notice": answer_cutoff_notice(stop_reason_of(ans)),
     }

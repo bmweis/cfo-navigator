@@ -95,6 +95,7 @@ from webapp.ask_orchestrator import (
     UnknownConversationError as _AskUnknownConversationError,
     AskTurnFailed as _AskTurnFailed,
     FAILED_TURN_MESSAGE as _ASK_FAILED_TURN_MESSAGE,
+    answer_cutoff_notice as _answer_cutoff_notice,
     run_ask,
 )
 from webapp.matchmaker_orchestrator import (
@@ -24077,7 +24078,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         meta_html = f'<span class="ask-pq-ml">{"".join(segs)}</span>'
         q_txt = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
-                                                r.get("citations_json") or "[]")
+                                                r.get("citations_json") or "[]",
+                                                r.get("stop_reason") or "")
         if r.get("failed"):
             # Only an admin ever gets a failed row. No answer exists; show the
             # raw error text instead (admin only).
@@ -24150,10 +24152,17 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # card. It's now a hover tooltip on a compact button instead: the same
     # information, available on demand, without three cards' worth of vertical
     # space for what is a one-of-three choice.
+    # The token figure is the tier's own max_tokens, read from EFFORT_SETTINGS
+    # so the tooltip cannot drift from the real answer ceiling (Deep went from
+    # 2,500 to 4,000 in 2026-10 and this string still said 2,500).
+    def _tier_detail(tier: str) -> str:
+        s = EFFORT_SETTINGS[tier]
+        return (f'{s["max_library"]} archive sources &middot; {s["max_web"]} web results '
+                f'&middot; ~{s["max_tokens"]:,} tokens out')
     effort_details = [
-        ("quick",    "Quick",    "4 archive sources &middot; 2 web results &middot; ~700 tokens out"),
-        ("standard", "Standard", "8 archive sources &middot; 4 web results &middot; ~1,500 tokens out"),
-        ("deep",     "Deep",     "16 archive sources &middot; 6 web results &middot; ~2,500 tokens out"),
+        ("quick",    "Quick",    _tier_detail("quick")),
+        ("standard", "Standard", _tier_detail("standard")),
+        ("deep",     "Deep",     _tier_detail("deep")),
     ]
     RECOMMENDED_TIER = "standard"
     # Logged-in (Brian) gets the balanced default; anonymous users default to
@@ -24866,6 +24875,14 @@ function mdToHtml(raw) {{
 // citation-list label only, never an inline prose mention (flagged as a
 // real voice-integrity risk during design and deliberately left out; see
 // CLAUDE.md's Published-Content Ingestion entry).
+// The cut-off notice (stop_reason max_tokens), shown under the answer text.
+// The server sends it as d.notice; "" means nothing to show.
+function cutoffHtml(d) {{
+  if (!d || !d.notice) return '';
+  return '<p class="ask-cutoff" style="margin:8px 0 0;font-size:13px;color:var(--muted);">' +
+         escapeHtml(d.notice) + '</p>';
+}}
+
 function srcListHtml(d) {{
   var icons = {{library: '&#128218;', feed: '&#128240;', web: '&#127760;'}};
   var cites = d.citations || [];
@@ -25188,7 +25205,7 @@ async function resumeConvoById(cid) {{
       var turn = document.createElement('div');
       turn.style.marginTop = '18px';
       turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(t.question) + '</div>' +
-                       '<div class="ask-answer">' + mdToHtml(t.answer) + srcListHtml(t) + '</div>';
+                       '<div class="ask-answer">' + mdToHtml(t.answer) + cutoffHtml(t) + srcListHtml(t) + '</div>';
       var answerEl = turn.querySelector('.ask-answer');
       if (t.turn_id) {{
         answerEl.insertAdjacentHTML('beforeend', fbRowHtml(t.turn_id));
@@ -25329,7 +25346,7 @@ async function doAsk(followUp, skipSimilar) {{
     }}
 
     CITES = d.citations || [];
-    answerEl.innerHTML = mdToHtml(d.answer) + srcListHtml(d);
+    answerEl.innerHTML = mdToHtml(d.answer) + cutoffHtml(d) + srcListHtml(d);
     if (d.turn_id) answerEl.insertAdjacentHTML('beforeend', fbRowHtml(d.turn_id));
     updateUsage(d.usage);
 
@@ -25446,7 +25463,8 @@ async def ask_similar(request: Request):
         lib.close()
     out = []
     for r in rank_similar(question, cands):
-        a_html, src_html = _render_cited_answer(r.get("answer") or "", r.get("citations_json") or "[]")
+        a_html, src_html = _render_cited_answer(r.get("answer") or "", r.get("citations_json") or "[]",
+                                                r.get("stop_reason") or "")
         own = user_id is not None and r.get("user_id") == user_id and bool(r.get("conversation_id"))
         out.append({
             "id": r["id"],
@@ -25622,6 +25640,7 @@ def ask_conversation_transcript(conversation_id: str, request: Request):
                 "created_at": t["created_at"],
                 "effort": t.get("effort") or "",
                 "feedback": feedback,
+                "notice": _answer_cutoff_notice(t.get("stop_reason")),
             }
 
         followups_left = max(0, 1 + MAX_FOLLOWUPS - len(turns))
@@ -25703,7 +25722,8 @@ def ask_history(request: Request, page: int = 1):
         # A one-turn conversation — same card the flat list always showed.
         q = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
-                                                r.get("citations_json") or "[]")
+                                                r.get("citations_json") or "[]",
+                                                r.get("stop_reason") or "")
         return f"""<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div style="flex:1 1 280px;min-width:0;font-weight:600;color:var(--navy);font-size:14.5px;">{q}</div>
@@ -25720,7 +25740,8 @@ def ask_history(request: Request, page: int = 1):
         # citation rendering as the flat card.
         q = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
-                                                r.get("citations_json") or "[]")
+                                                r.get("citations_json") or "[]",
+                                                r.get("stop_reason") or "")
         return f"""<div style="padding:14px 0 4px;border-top:1px solid var(--line);">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div style="flex:1 1 280px;min-width:0;font-weight:600;color:var(--navy);font-size:14px;">{q}</div>
@@ -32539,7 +32560,8 @@ def _ask_settings_badge(row: dict) -> str:
     return f'{srcs} <span style="color:var(--muted);">{_esc(model_short)} &middot; {_esc(row.get("effort") or "")}</span>'
 
 
-def _render_cited_answer(answer: str, citations_json: str) -> tuple[str, str]:
+def _render_cited_answer(answer: str, citations_json: str,
+                         stop_reason: str = "") -> tuple[str, str]:
     """Citation rendering for the server-rendered ask surfaces — /ask/history,
     /questions, and /admin/fpa-buddy/feedback all call this one helper (never a
     per-surface reimplementation). Returns (answer_html, sources_html):
@@ -32554,6 +32576,10 @@ def _render_cited_answer(answer: str, citations_json: str) -> tuple[str, str]:
     Deliberately separate from /ask's client-side JS rendering (mdInline's
     marker pass + srcListHtml over live API responses) — different layer,
     kept unmerged on purpose. See ARCHITECTURE.md.
+
+    `stop_reason` is the turn's stored ask_questions.stop_reason: "max_tokens"
+    appends the cut-off notice under the answer (display only, never stored in
+    the answer text); anything else adds nothing.
     """
     try:
         cites = json.loads(citations_json or "[]")
@@ -32572,6 +32598,10 @@ def _render_cited_answer(answer: str, citations_json: str) -> tuple[str, str]:
     # turn's own persisted citation snapshot, a literal [2026] stays text.
     from webapp.answer_render import render_answer_markdown
     answer_html = render_answer_markdown(text, cites)
+    cutoff = _answer_cutoff_notice(stop_reason)
+    if cutoff:
+        answer_html += (f'<p class="ask-cutoff" style="margin:8px 0 0;font-size:13px;'
+                        f'color:var(--muted);">{_esc(cutoff)}</p>')
 
     if not cites:
         return answer_html, ""
@@ -33644,7 +33674,8 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
             comment = (f'<div style="margin:8px 0 0;padding:8px 12px;background:var(--coral-wash);'
                        f'border-radius:8px;font-size:13.5px;color:var(--ink);">&ldquo;{_esc(r["comment"])}&rdquo;</div>')
         answer = r.get("answer") or ""
-        a_html, src_html = _render_cited_answer(answer, r.get("citations_json") or "[]")
+        a_html, src_html = _render_cited_answer(answer, r.get("citations_json") or "[]",
+                                                r.get("stop_reason") or "")
         answer_html = (
             f'<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);display:flex;align-items:baseline;gap:5px;">'
             f'<span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Answer ({len(answer):,} chars)&mdash;expand</summary>'
