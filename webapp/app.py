@@ -19038,20 +19038,48 @@ def admin_communities_edit(request: Request, slug: str, screenshot_captured: str
 
 
 def _refusal_banner_html(refusal: list | None) -> str:
-    """The over-limit refusal banner shared by the Community and Software edit
-    and add pages: one box naming every field over its hard limit with its
-    length, limit and overage. `refusal` is a list of (label, length, limit)."""
+    """The refusal banner shared by the Community and Software edit and add
+    pages: one box naming every field that stopped the save. An item is either
+    (label, length, limit) for a field over its hard limit, or (label, message)
+    for any other reason (a Software name that is a web address). Nothing was
+    written in either case."""
     if not refusal:
         return ""
     items = "".join(
-        f'<li><strong>{_esc(lbl)}</strong>: {n:,} characters, limit {lim:,} ({n - lim:,} over)</li>'
-        for lbl, n, lim in refusal)
+        (f'<li><strong>{_esc(r[0])}</strong>: {r[1]:,} characters, limit {r[2]:,} ({r[1] - r[2]:,} over)</li>'
+         if len(r) == 3 else f'<li><strong>{_esc(r[0])}</strong>: {_esc(r[1])}</li>')
+        for r in refusal)
+    over_limit = any(len(r) == 3 for r in refusal)
+    lead = ("These fields are over their limit. Shorten each one, then save again. " if over_limit
+            else "Fix this, then save again. ")
     return (
         '<div role="alert" style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
         'padding:14px 18px;margin:0 0 20px;font-size:14px;">'
-        '<strong>Nothing was saved.</strong> These fields are over their limit. Shorten each one, then save again. '
+        f'<strong>Nothing was saved.</strong> {lead}'
         'Everything you typed or generated is still in the boxes below.'
         f'<ul style="margin:8px 0 0;padding-left:20px;">{items}</ul></div>')
+
+
+# A Software vendor's Name must be the vendor's name, never a pasted web
+# address. A bare domain-style name such as "cfo.ai" is a real product name and
+# is allowed; only a clear URL is refused (contains "://", or starts with
+# "www." or "http"). The check runs in the two save routes before any write,
+# so before add_tool/update_tool derive a slug (the name-based slug,
+# _slugify("https://cfo.ai") = "httpscfoai", is only the fallback when the URL
+# field has no parseable host).
+_TOOL_NAME_IS_URL_MESSAGE = "This looks like a web address. Enter the vendor's name."
+
+
+def _looks_like_web_address(name: str) -> bool:
+    n = (name or "").strip().lower()
+    return "://" in n or n.startswith("www.") or n.startswith("http")
+
+
+def _tool_name_refusals(form) -> list:
+    """[("Name", message)] when the submitted Software name is a web address."""
+    if _looks_like_web_address(form.get("name") or ""):
+        return [("Name", _TOOL_NAME_IS_URL_MESSAGE)]
+    return []
 
 
 def _tool_limit_refusals(form) -> list:
@@ -20340,7 +20368,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     vendor_name = (form.get("vendor_name") or "").strip()
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
-    over = _tool_limit_refusals(form)
+    over = _tool_name_refusals(form) + _tool_limit_refusals(form)
     if over:
         page = _tool_new_page(request, form=form, refusal=over)
         page.status_code = 400
@@ -21208,7 +21236,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     # a refused save never leaves the row half-saved (2a.2: update_tool used to
     # write Description and Short summary before the Bottom line and Agent
     # taxonomy limits were checked, then claimed "Nothing was saved").
-    over = _tool_limit_refusals(form)
+    over = _tool_name_refusals(form) + _tool_limit_refusals(form)
     if over:
         page = _tool_edit_page(request, slug, form=form, refusal=over)
         page.status_code = 400
