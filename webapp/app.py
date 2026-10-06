@@ -1953,7 +1953,7 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .admin-only:disabled{opacity:.5;cursor:not-allowed;}
 .admin-only[hidden]{display:none;}
 /* Shared on/off switch (role=switch button). Green on, grey off; a disabled one is always grey. */
-.sw{position:relative;width:38px;height:22px;border-radius:11px;border:none;padding:0;cursor:pointer;background:var(--line-strong);flex-shrink:0;}
+.sw{position:relative;width:38px;height:22px;border-radius:11px;border:0;padding:0;cursor:pointer;background:var(--line-strong);flex-shrink:0;}
 .sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;}
 .sw[aria-checked="true"]{background:var(--seafoam-deep);}
 .sw[aria-checked="true"]::after{left:18px;}
