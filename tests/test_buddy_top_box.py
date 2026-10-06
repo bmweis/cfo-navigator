@@ -162,7 +162,8 @@ def test_admin_sees_the_estimate_in_the_depth_options_and_on_the_button(admin_pg
     assert pg.locator(panel).count() == 1
     assert pg.locator(".ask-cost-note").count() == 1
     assert pg.locator("#ask-dd-top [data-dd='sources'].ask-dd-panel .ask-cost-note").count() == 0
-    assert pg.locator(panel).text_content().strip() == "Dollar amounts are estimates."
+    assert pg.locator(panel).text_content().strip() == (
+        "Dollar amounts are estimates. They cover the model only, not web search (about $0.007 a question) or thinking tokens.")
     pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
     assert pg.locator(panel).is_visible()
     pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
