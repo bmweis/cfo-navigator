@@ -1952,6 +1952,23 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .admin-only:focus-visible{outline:2px solid var(--seafoam-deep);outline-offset:2px;}
 .admin-only:disabled{opacity:.5;cursor:not-allowed;}
 .admin-only[hidden]{display:none;}
+/* Shared on/off switch (role=switch button). Green on, grey off; a disabled one is always grey. */
+.sw{position:relative;width:38px;height:22px;border-radius:11px;border:none;padding:0;cursor:pointer;background:var(--line-strong);flex-shrink:0;}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;}
+.sw[aria-checked="true"]{background:var(--seafoam-deep);}
+.sw[aria-checked="true"]::after{left:18px;}
+.sw:focus-visible{outline:2px solid var(--seafoam-deep);outline-offset:2px;}
+.sw:disabled{background:var(--line-strong);opacity:.6;cursor:not-allowed;}
+.sw-form{margin:0;display:inline-flex;}
+.sw-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:28px;}
+.sw-main{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;}
+.sw-word{font-size:13px;color:var(--ink-soft);}
+.sw-flag{display:inline-block;background:var(--coral-wash);color:var(--navy);border-radius:5px;padding:2px 8px;font-size:11.5px;font-weight:600;text-decoration:none;white-space:nowrap;}
+.sw-model .sw-id{font-size:11.5px;color:var(--muted);font-weight:400;}
+.sw-todo{margin:0;padding-left:16px;font-size:13px;}
+.sw-ready,.sw-note{font-size:13px;color:var(--muted);}
+.sw-notes{margin:14px 0 0;font-size:13px;color:var(--ink-soft);line-height:1.6;display:grid;gap:6px;}
+.sw-table td,.sw-table th,.sw-log td,.sw-log th{padding:10px 12px;vertical-align:top;}
 @media(hover:hover){.admin-only:hover{background:var(--seafoam-wash);color:var(--seafoam-deep);text-decoration:none;}.admin-only-del:hover{background:#fee2e2;color:#b91c1c;border-color:#b91c1c;}}
 
 /* Edit-page footer action row (primary save / stay-on-page save / cancel)—
@@ -28143,10 +28160,14 @@ def admin_system_ai(request: Request):
         matchmaker_blocks = {m["id"]: lib.role_problems("matchmaker", m["id"]) for m in _REG}
         buddy_models = {t: lib.get_role_model(f"buddy_{t}") for t in ("quick", "standard", "deep")}
         buddy_blocks = {t: {m["id"]: lib.role_problems(f"buddy_{t}", m["id"]) for m in _REG} for t in buddy_models}
-        roles_editor = {m["id"]: {"allowed": lib.model_allowed_roles(m["id"]),
-                                  "status": lib.get_model_status(m["id"]) or "available",
-                                  "pricing": lib.pricing_problems(lib.get_model_pricing(m["id"])),
-                                  "assigned": lib.roles_using(m["id"])} for m in _REG}
+        _ed_ids = [m["id"] for m in _REG]
+        _ed_ids += [r for role in ("enrichment", "matchmaker", "buddy_quick", "buddy_standard", "buddy_deep")
+                    for r in [lib.get_role_model(role)] if r not in _ed_ids]   # a model in use but not in the registry
+        roles_editor = {mid: {"allowed": lib.model_allowed_roles(mid),
+                              "status": lib.get_model_status(mid) or "available",
+                              "pricing": lib.pricing_problems(lib.get_model_pricing(mid)),
+                              "assigned": lib.roles_using(mid), "confirmed": lib.confirmed_roles(mid)}
+                        for mid in _ed_ids}
         roles_log = lib.list_model_role_log()
     finally:
         lib.close()
@@ -28439,70 +28460,91 @@ _PRICE_COLS = (("input", "Input"), ("output", "Output"), ("cache_write", "Cache 
 _ANTHROPIC_PRICING_URL = "https://www.anthropic.com/pricing"
 
 
+def _switch_html(on: bool, *, label: str, disabled: bool = False) -> str:
+    """The shared on/off switch (class .sw, defined once in the sitewide CSS):
+    a button with role=switch. Enabled, it submits its form; disabled, it is
+    grey and never submits. Same markup for every use, no inline style."""
+    return (f'<button type="submit" class="sw" role="switch" aria-checked="{"true" if on else "false"}" '
+            f'aria-label="{_esc(label)}"{" disabled" if disabled else ""}></button>')
+
+
+def _fmt_log_time(iso: str) -> str:
+    """'2026-10-06T10:54:12+00:00' -> 'Oct 6, 10:54 UTC'."""
+    from datetime import datetime
+    try:
+        d = datetime.fromisoformat(iso)
+        return f"{d.strftime('%b')} {d.day}, {d.strftime('%H:%M')} UTC"
+    except ValueError:
+        return iso
+
+
+def _pricing_todo(problems: list[str]) -> str:
+    names = [p.replace(" rate", "").replace("verified date", "date") for p in problems]
+    return "Verify pricing: " + ", ".join(names) + "."
+
+
 def _allowed_roles_card_html(info: dict, log: list[dict]) -> str:
     """Allowed-roles editor (PR 3c), collapsed on load: one row per model, one
-    cell per role, each saying in words whether it is allowed. The role check
-    reads only the stored value this edits. Hard blocks (always-on-thinking
-    models for Buddy and the Matchmaker) show their reason and no control;
-    enrichment for a model not yet tested goes through a confirm page."""
-    from linklib.models import (_REGISTRY, ROLES, ROLE_LABELS, hard_block_reason, needs_enrichment_confirm)
+    on/off switch per role. The role check reads only the stored value this
+    edits. Disabled switches say why in a short word beside them (In use,
+    Locked, or a Test first flag that links to the confirm page); the long
+    reasons sit in one note block below the table, never in a tooltip."""
+    from linklib.models import (ROLES, ROLE_LABELS, hard_block_reason, needs_enrichment_confirm,
+                                model_display_name, BUDDY_BLOCK_REASON, MATCHMAKER_BLOCK_REASON)
     rows = []
-    for m in _REGISTRY:
-        mid, d = m["id"], info.get(m["id"])
-        if not d:
-            continue
+    for mid, d in info.items():
         cells = []
         for role in ROLES:
-            allowed = role in d["allowed"]
-            hard = hard_block_reason(mid, role)
-            if allowed:
-                word = '<strong style="color:var(--navy);">Allowed</strong>'
-                ctl = ('<div style="font-size:12px;color:var(--muted);">In use now; assign another model to change it.</div>'
-                       if role in d["assigned"] else
-                       '<button class="btn btn-ghost" name="allow" value="0" style="font-size:12px;padding:4px 10px;">Stop allowing</button>')
-            elif hard:
-                word = '<strong>Not allowed</strong>'
-                ctl = f'<div style="font-size:12px;color:var(--muted);">Blocked in code: {_esc(hard)}.</div>'
-            elif needs_enrichment_confirm(mid, role):
-                word = '<strong>Not allowed</strong>'
-                ctl = (f'<a class="btn btn-ghost" href="/admin/system/ai/allowed-roles/confirm/{_esc(mid)}/{role}" '
-                       f'style="font-size:12px;padding:4px 10px;display:inline-block;">Allow after testing&hellip;</a>'
-                       f'<div style="font-size:12px;color:var(--muted);margin-top:2px;">Not yet tested for enrichment.</div>')
+            on = role in d["allowed"]
+            label = f"{model_display_name(mid)}, {ROLE_LABELS[role]}"
+            flag = ""
+            if on and role in d["assigned"]:
+                ctl, word = _switch_html(True, label=label, disabled=True), "In use"
+            elif not on and hard_block_reason(mid, role):
+                ctl, word = _switch_html(False, label=label, disabled=True), "Locked"
+            elif not on and needs_enrichment_confirm(mid, role) and role not in d["confirmed"]:
+                ctl, word = _switch_html(False, label=label, disabled=True), "Off"
+                flag = (f'<a class="sw-flag" href="/admin/system/ai/allowed-roles/confirm/{_esc(mid)}/{role}">'
+                        f'&#9888; Test first</a>')
             else:
-                word = '<strong>Not allowed</strong>'
-                ctl = ('<button class="btn btn-ghost" name="allow" value="1" '
-                       'style="font-size:12px;padding:4px 10px;">Allow</button>')
-            form = (f'<form method="post" action="/admin/system/ai/allowed-roles/set" style="margin:0;">'
-                    f'<input type="hidden" name="model_id" value="{_esc(mid)}"><input type="hidden" name="role" value="{role}">'
-                    f'{ctl}</form>' if ("<button" in ctl) else ctl)
-            cells.append(f'<td style="vertical-align:top;font-size:13px;">{word}<div style="margin-top:4px;">{form}</div></td>')
-        open_steps = []
+                nxt = "0" if on else "1"
+                ctl = (f'<form method="post" action="/admin/system/ai/allowed-roles/set" class="sw-form">'
+                       f'<input type="hidden" name="model_id" value="{_esc(mid)}">'
+                       f'<input type="hidden" name="role" value="{role}">'
+                       f'<input type="hidden" name="allow" value="{nxt}">{_switch_html(on, label=label)}</form>')
+                word = "On" if on else "Off"
+            cells.append(f'<td><div class="sw-cell"><span class="sw-main">{ctl}<span class="sw-word">{word}</span></span>{flag}</div></td>')
+        todo = []
         if d["status"] == "not_using":
-            open_steps.append("Change its status from not using to available.")
+            todo.append("Set status to available")
         if d["status"] == "deactivated":
-            open_steps.append("Reactivate it.")
+            todo.append("Reactivate")
         if d["pricing"]:
-            open_steps.append("Verify its pricing row (" + ", ".join(d["pricing"]) + ").")
-        open_html = ("<ul style='margin:0;padding-left:16px;'>" + "".join(f"<li>{_esc(x)}</li>" for x in open_steps) + "</ul>"
-                     if open_steps else '<span style="color:var(--muted);">Nothing open.</span>')
-        rows.append(f'<tr><td style="font-weight:600;vertical-align:top;">{_esc(_enrich_model_label(mid))}'
-                    f'<div style="font-size:11.5px;color:var(--muted);font-weight:400;">{_esc(mid)}</div></td>'
-                    f'{"".join(cells)}<td style="vertical-align:top;font-size:13px;">{open_html}</td></tr>')
-    head = "".join(f"<th>{t}</th>" for t in ["Model", *[ROLE_LABELS[r] for r in ROLES], "Still open before it can be used"])
+            todo.append(_pricing_todo(d["pricing"]).rstrip("."))
+        todo_html = ("<ul class=\"sw-todo\">" + "".join(f"<li>{_esc(x)}.</li>" for x in todo) + "</ul>"
+                     if todo else '<span class="sw-ready">Ready</span>')
+        rows.append(f'<tr><td class="sw-model"><strong>{_esc(model_display_name(mid))}</strong>'
+                    f'<div class="sw-id">{_esc(mid)}</div></td>{"".join(cells)}<td>{todo_html}</td></tr>')
+    head = "".join(f"<th>{t}</th>" for t in ["Model", *[ROLE_LABELS[r] for r in ROLES], "To do"])
     log_rows = "".join(
-        f'<tr><td style="white-space:nowrap;">{_esc(l["created_at"][:16].replace("T", " "))}</td>'
-        f'<td>{_esc(_enrich_model_label(l["model_id"]))}</td><td>{_esc(ROLE_LABELS.get(l["role"], l["role"]))}</td>'
-        f'<td>{_esc(l["action"])}</td><td>{_esc(l["detail"])}</td></tr>' for l in log)
-    log_html = (f'<h4 style="margin:16px 0 6px;font-size:13px;">Recent changes</h4><div class="table-frame" style="overflow-x:auto;">'
-                f'<table style="min-width:{_TABLE_FLOOR_MEDIUM}px;"><thead><tr><th>When (UTC)</th><th>Model</th><th>Role</th>'
-                f'<th>Change</th><th>Confirmation</th></tr></thead><tbody>{log_rows}</tbody></table></div>'
-                if log else '<p style="font-size:12.5px;color:var(--muted);margin:14px 0 0;">No changes recorded yet.</p>')
+        f'<tr><td style="white-space:nowrap;">{_esc(_fmt_log_time(l["created_at"]))}</td>'
+        f'<td>{_esc(model_display_name(l["model_id"]))}</td><td>{_esc(ROLE_LABELS.get(l["role"], l["role"]))}</td>'
+        f'<td>{"Turned on" if l["action"] == "allowed" else "Turned off"}</td>'
+        f'<td>{"Test confirmed" if l["confirmed_tested"] else ""}</td></tr>' for l in log)
+    log_html = (f'<h4 style="margin:18px 0 6px;font-size:13px;">Recent changes</h4><div class="table-frame" style="overflow-x:auto;">'
+                f'<table class="sw-log" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;"><thead><tr><th>When</th><th>Model</th><th>Role</th>'
+                f'<th>Change</th><th>Note</th></tr></thead><tbody>{log_rows}</tbody></table></div>'
+                if log else '<p class="sw-note">No changes recorded yet.</p>')
+    notes = (f'<div class="sw-notes"><div><strong>Locked.</strong> {_esc(BUDDY_BLOCK_REASON)} for Opus 5.5, Sonnet 5.5 and the '
+             f'Fable models. {_esc(MATCHMAKER_BLOCK_REASON)}. Both stay off until <code>ask()</code> is checked for always-on thinking.</div>'
+             f'<div><strong>In use.</strong> A model assigned to a role can&rsquo;t be switched off for it. Assign another model first.</div>'
+             f'<div><strong>Test first.</strong> Enrichment for this model needs the test on the confirm step before it can be switched on.</div></div>')
     return (f'<details id="allowed-roles" style="scroll-margin-top:16px;"><summary style="cursor:pointer;color:var(--accent);'
-            f'font-size:13.5px;">Edit which roles each model is allowed for</summary>'
-            f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Allowing a role does not switch the model on. '
-            f'It still needs a verified pricing row and the status available (last column). Changes apply immediately, no redeploy.</p>'
-            f'<div class="table-frame" style="overflow-x:auto;"><table style="min-width:{_TABLE_FLOOR_XWIDE}px;"><thead><tr>{head}</tr></thead>'
-            f'<tbody>{"".join(rows)}</tbody></table></div>{log_html}</details>')
+            f'font-size:13.5px;">Edit allowed roles</summary>'
+            f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Turning a role on doesn&rsquo;t enable the model. '
+            f'It also needs verified pricing and status available. Changes apply immediately.</p>'
+            f'<div class="table-frame" style="overflow-x:auto;"><table class="sw-table" style="min-width:{_TABLE_FLOOR_XWIDE}px;"><thead><tr>{head}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>{notes}{log_html}</details>')
 
 
 def _roles_error_page(request: Request, msg: str):
@@ -28537,17 +28579,17 @@ def admin_system_ai_allowed_roles_confirm(model_id: str, role: str, request: Req
         raise HTTPException(status_code=404, detail="no confirm step for this role")
     steps = "".join(f"<li>{_esc(x)}</li>" for x in ENRICHMENT_TEST_STEPS)
     label = _enrich_model_label(model_id)
-    return HTMLResponse(_page("Allow enrichment", "Admin", f'''<div class="page page-standard">
+    return HTMLResponse(_page("Turn on enrichment", "Admin", f'''<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/system/ai#allowed-roles" style="font-size:13px;color:var(--muted);">&larr; AI configuration</a></p>
-<h1>Allow {_esc(label)} for {_esc(ROLE_LABELS[role])}</h1>
+<h1>Turn on {_esc(label)} for {_esc(ROLE_LABELS[role])}</h1>
 <div style="max-width:900px;margin:0 auto;">
 <p style="color:var(--ink-soft);line-height:1.6;">This model has not been checked for enrichment. Several generate calls have a small answer budget that always-on thinking could use up, and a refusal comes back as empty text. Before allowing it, test it:</p>
 <ol style="line-height:1.7;color:var(--ink-soft);">{steps}</ol>
 <form method="post" action="/admin/system/ai/allowed-roles/set">
 <input type="hidden" name="model_id" value="{_esc(model_id)}"><input type="hidden" name="role" value="{_esc(role)}"><input type="hidden" name="allow" value="1">
 <label style="display:block;margin:14px 0;"><input type="checkbox" name="tested" value="1" required> I ran this test with {_esc(label)} and neither result was empty or cut off.</label>
-<p style="font-size:13px;color:var(--muted);">This is recorded on the page with the date. Allowing the role does not switch the model on: it still needs a verified pricing row and the status available.</p>
-<button class="btn" type="submit">Allow {_esc(ROLE_LABELS[role])}</button>
+<p style="font-size:13px;color:var(--muted);">This is recorded on the page with the date. Turning the role on doesn&rsquo;t enable the model. It also needs verified pricing and status available.</p>
+<button class="btn" type="submit">Turn on {_esc(ROLE_LABELS[role])}</button>
 <a href="/admin/system/ai#allowed-roles" class="btn btn-ghost" style="margin-left:8px;">Cancel</a>
 </form></div></div>''', authed=True, request=request))
 

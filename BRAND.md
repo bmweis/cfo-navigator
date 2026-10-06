@@ -73,6 +73,7 @@ measured on the `#F5F4EF` canvas.
    `.tool-admin-btn` class was retired, so they now share this one look.)
    The Reader box (`_reader_access_card_html`) is a surface, not a control: it keeps a seafoam
    fill with a 1px `--seafoam-deep` border.
+   **On/off switch** (`.sw`, one class in the sitewide stylesheet, built by `_switch_html`): a 38x22 `role="switch"` button, `--seafoam-deep` track with a white knob when on, `--line-strong` grey when off. A disabled switch is always grey and says why in a short word beside it (In use, Locked, or a "Test first" flag), never in a tooltip. First used on the Allowed roles card of `/admin/system/ai`. The CI-quota switch on `/admin/checks` is separate markup and is still navy when on.
    **Admin-only status:** "⊘ Hidden" on a past-question row is a status chip, not a control; see Status chips in section 5.
 
 Seafoam uses that fit none of the above, noted so they are not mistaken for admin-only: the

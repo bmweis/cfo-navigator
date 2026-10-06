@@ -131,6 +131,17 @@ def default_allowed_roles(model_id: str) -> tuple[str, ...]:
     return _DEFAULT_ROLES_OVERRIDE.get(model_id, ROLES)
 
 
+def model_display_name(model_id: str) -> str:
+    """Label for a model id: the registry label, else a readable form of the id
+    (claude-opus-4-8 -> Opus 4.8), else the id itself."""
+    for m in _REGISTRY:
+        if m["id"] == model_id:
+            return m["label"]
+    import re
+    hit = re.fullmatch(r"claude-([a-z]+)-(\d+(?:-\d+)?)(?:-\d{8})?", model_id or "")
+    return f"{hit.group(1).capitalize()} {hit.group(2).replace('-', '.')}" if hit else model_id
+
+
 def hard_block_reason(model_id: str, role: str) -> str:
     """Why a model can never be allowed for a role from the admin page ('' when
     it can). Code only, not editable: always-on-thinking models for the Buddy

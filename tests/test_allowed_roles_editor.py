@@ -169,15 +169,100 @@ def _stored(model, db=None):
         l.close()
 
 
-def test_editor_section_shows_state_in_words_and_is_collapsed(env):
+def _card(env, c=None):
+    html = (c or _admin(env)).get("/admin/system/ai").text
+    i = html.index('id="allowed-roles"')
+    return html[i:html.index("</details>", i)]
+
+
+def _switches(card):
+    import re
+    return re.findall(r'<button type="submit" class="sw"[^>]*>', card)
+
+
+def _cell(card, model, role_index):
+    """The <td> of one role cell in a model's row."""
+    import re
+    row = re.search(r'<tr><td class="sw-model"><strong>[^<]*</strong><div class="sw-id">%s</div></td>(.*?)</tr>' % re.escape(model), card, re.S).group(1)
+    return re.findall(r"<td>(.*?)</td>", row, re.S)[role_index]
+
+
+def test_editor_section_is_collapsed_and_uses_switches_with_short_words(env):
     html = _admin(env).get("/admin/system/ai").text
     i = html.index('id="allowed-roles"')
     assert html[i - 10:i + 200].count("<details") == 1 and " open" not in html[i:i + 60]
-    assert "Not allowed" in html and "Allowed" in html
-    assert BUDDY_BLOCK_REASON in html and "Blocked in code" in html
-    assert "Not yet tested for enrichment" in html
-    assert "Still open before it can be used" in html
-    assert "Verify its pricing row" in html          # the three unverified models
+    card = _card(env)
+    assert "To do" in card and "Still open before it can be used" not in card
+    assert "Ready" in card and "Nothing open" not in card
+    assert "Verify pricing: cache write, cache write 1h, date." in card
+    assert "Verify its pricing row" not in card
+    assert "Allow after testing" not in card and ">Stop allowing<" not in card
+    assert "Turning a role on doesn&rsquo;t enable the model. It also needs verified pricing and status available. Changes apply immediately." in card
+
+
+def test_switch_markup_per_state(env):
+    card = _card(env)
+    # on (Haiku 4.5 Enrichment is allowed, not in use): enabled, checked, flips to off
+    on = _cell(card, "claude-haiku-4-5-20251001", 0)
+    assert 'aria-checked="true"' in on and "disabled" not in on and 'name="allow" value="0"' in on and ">On<" in on
+    # off but allowed to be on (Opus 4.8 Matchmaker, switched off first)
+    # in use: the enrichment default model, checked and disabled, word In use
+    inuse = _cell(card, "claude-opus-5", 0)
+    assert 'aria-checked="true"' in inuse and " disabled" in inuse and ">In use<" in inuse and "<form" not in inuse
+    # locked: Opus 5.5 Buddy Deep, unchecked, disabled, word Locked, no form
+    locked = _cell(card, "claude-opus-5-5", 4)
+    assert 'aria-checked="false"' in locked and " disabled" in locked and ">Locked<" in locked and "<form" not in locked
+    # untested: Fable 5.1 Enrichment, unchecked, disabled, Test first flag links to the confirm page
+    untested = _cell(card, "claude-fable-5-1", 0)
+    assert 'aria-checked="false"' in untested and " disabled" in untested and "<form" not in untested
+    assert 'href="/admin/system/ai/allowed-roles/confirm/claude-fable-5-1/enrichment"' in untested and "Test first" in untested
+
+
+def test_every_switch_shares_one_class_and_no_inline_style(env):
+    card = _card(env)
+    sw = _switches(card)
+    assert len(sw) >= 40
+    assert all('class="sw"' in x and "style=" not in x and 'role="switch"' in x and "aria-checked=" in x for x in sw)
+    assert card.count("sw-flag") >= 3
+    # no other control stands in for a switch
+    assert "Stop allowing" not in card and "btn-ghost" not in card
+
+
+def test_notes_block_sits_below_the_table_and_log_shows_labels(env):
+    c = _admin(env)
+    c.post("/admin/system/ai/allowed-roles/set", data={"model_id": "claude-opus-4-8", "role": "matchmaker", "allow": "0"})
+    c.post("/admin/system/ai/allowed-roles/set",
+           data={"model_id": "claude-sonnet-5-5", "role": "enrichment", "allow": "1", "tested": "1"})
+    card = _card(env, c)
+    assert card.index("</table>") < card.index('class="sw-notes"') < card.index("Recent changes")
+    notes = card[card.index('class="sw-notes"'):card.index("Recent changes")]
+    assert BUDDY_BLOCK_REASON in notes and "900 tokens" in notes and "can&rsquo;t be switched off" in notes and "Test first." in notes
+    log = card[card.index("Recent changes"):]
+    assert "Opus 4.8" in log and "Sonnet 5.5" in log and "claude-opus-4-8" not in log
+    assert "Turned off" in log and "Turned on" in log and "Test confirmed" in log
+    assert "<th>When</th>" in log and "<th>Change</th>" in log and "<th>Note</th>" in log
+    import re
+    assert re.search(r"Oct \d+, \d\d:\d\d UTC|[A-Z][a-z]{2} \d+, \d\d:\d\d UTC", log)
+
+
+def test_a_model_in_use_but_not_in_the_registry_still_gets_a_row(env):
+    card = _card(env)
+    assert 'class="sw-id">claude-opus-4-8<' in card and "<strong>Opus 4.8</strong>" in card
+
+
+def test_turning_an_untested_role_off_and_on_again_does_not_ask_twice(lib):
+    assert lib.set_allowed_role("claude-sonnet-5-5", "enrichment", True, tested=True) == []
+    assert lib.set_allowed_role("claude-sonnet-5-5", "enrichment", False) == []
+    assert "enrichment" in lib.confirmed_roles("claude-sonnet-5-5")
+    assert lib.set_allowed_role("claude-sonnet-5-5", "enrichment", True) == []
+    # a different untested model still asks
+    assert lib.set_allowed_role("claude-fable-5", "enrichment", True)
+
+
+def test_format_of_log_time():
+    import webapp.app as a
+    assert a._fmt_log_time("2026-10-06T10:54:12+00:00") == "Oct 6, 10:54 UTC"
+    assert a._fmt_log_time("garbage") == "garbage"
 
 
 def test_set_route_allows_and_stops_allowing_a_plain_role(env):
@@ -211,7 +296,7 @@ def test_unconfirmed_enrichment_route_needs_the_tested_box(env):
                data={"model_id": "claude-fable-5", "role": "enrichment", "allow": "1", "tested": "1"}, follow_redirects=False)
     assert r.status_code == 303 and _stored("claude-fable-5") == ["enrichment"]
     html = c.get("/admin/system/ai").text
-    assert "Recent changes" in html and "Confirmed the enrichment test was run" in html
+    assert "Recent changes" in html and "Test confirmed" in html
 
 
 def test_confirm_page_is_404_where_there_is_no_confirm_step(env):

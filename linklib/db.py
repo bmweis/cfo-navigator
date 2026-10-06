@@ -9295,7 +9295,8 @@ class Library:
         if allow:
             if hard_block_reason(model_id, role):
                 return [f"{ROLE_LABELS[role]} is blocked in code: {hard_block_reason(model_id, role)}"]
-            if needs_enrichment_confirm(model_id, role) and not tested:
+            if (needs_enrichment_confirm(model_id, role) and not tested
+                    and role not in self.confirmed_roles(model_id)):
                 return ["this model has not been tested for enrichment; confirm that you ran the test"]
         elif model_id == self.get_role_model(role):
             return [f"it is the current {ROLE_LABELS[role]} model; assign another model first"]
@@ -9308,6 +9309,13 @@ class Library:
              "Confirmed the enrichment test was run" if confirmed else "", _now()))
         self.conn.commit()
         return []
+
+    def confirmed_roles(self, model_id: str) -> set[str]:
+        """Roles whose test confirmation is already recorded for this model, so
+        switching one off and on again does not ask for the test twice."""
+        return {r["role"] for r in self.conn.execute(
+            "SELECT DISTINCT role FROM model_role_log WHERE model_id=? AND action='allowed' AND confirmed_tested=1",
+            (model_id,)).fetchall()}
 
     def list_model_role_log(self, limit: int = 20) -> list[dict]:
         return [dict(r) for r in self.conn.execute(
