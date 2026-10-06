@@ -9640,13 +9640,15 @@ Implemented with the stdlib only (`hmac`/`hashlib`/scrypt) — deliberately no
 `itsdangerous`/SessionMiddleware dependency.
 
 - **Login** (`POST /login`): username + password verified against `users`
-  (scrypt). One **break-glass** path: the host password
-  (`LINKLIB_PASSWORD`, falling back to `LINKLIB_SAVE_TOKEN`) with a reserved
-  admin username works even with an empty `users` table, so a lost password
-  can't lock the owner out. Success sets `cfo_session`: an HMAC-SHA256-signed
+  (scrypt). There is no shared-secret login any more: the host-password
+  "break-glass" path was retired (issue #627). A lost admin password is
+  recovered on the container with `scripts/reset_user_password.py`
+  (RUNBOOK §9). `LINKLIB_PASSWORD`/`LINKLIB_SAVE_TOKEN` still turn auth on
+  (both empty means the site is open) and still authorize the token routes.
+  Success sets `cfo_session`: an HMAC-SHA256-signed
   value `exp|role|username` (key: `LINKLIB_SECRET_KEY`, falling back to the
   password — unset means restarts invalidate sessions), HttpOnly,
-  SameSite=Lax, 30-day TTL.
+  SameSite=Lax, 30-day TTL. Rotating the key signs everyone out (RUNBOOK §9).
 - **Post-login/logout redirect**: `GET/POST /login` carries an optional
   `next` query param/hidden field, validated by `_safe_next` (must be a
   same-app relative path — rejects absolute URLs, `//host` scheme-relative,

@@ -11228,10 +11228,20 @@ The site is one app with a **public face** and a **private back office**. Auth i
 single shared secret with a session-cookie login on top — no user accounts, no DB
 tables, no third-party dependency.
 
-- **One secret, two front doors.** `LINKLIB_PASSWORD` is the login password; if unset it
-  **falls back to `LINKLIB_SAVE_TOKEN`**, so by default the same string unlocks both the
-  login screen and the token API. If *neither* is set, the private routes are open
-  (local-dev convenience).
+- **One secret authorizes the token routes; it no longer logs anyone in.**
+  `LINKLIB_PASSWORD` (falling back to `LINKLIB_SAVE_TOKEN`) turns auth on, and
+  `LINKLIB_SAVE_TOKEN` authorizes the token routes (`/save`, `/api/search`,
+  `/admin/backup-now`, ...). If *neither* is set, the private routes are open
+  (local-dev convenience). **The shared-secret "break-glass" login was
+  retired (2026-10, issue #627):** `login_submit()` accepts only a `users`
+  row, so every session is attributed and metered. A lost admin password is
+  recovered with `scripts/reset_user_password.py` on the container
+  (RUNBOOK §9, preview by default, password via hidden prompt or generated,
+  never an argument). Old fallback-era sessions end when
+  `LINKLIB_SECRET_KEY` is rotated (RUNBOOK §9); the session format is
+  unchanged. Test suite: `tests/conftest.py` lazily creates the `admin`
+  users row when a test logs in as admin/<LINKLIB_PASSWORD>;
+  `@pytest.mark.no_admin_seed` opts out (`tests/test_break_glass_retired.py`).
 - **Login = signed session cookie.** `POST /login` checks the password and sets an
   HMAC-signed, HttpOnly, SameSite=Lax cookie (`cfo_session`, 30-day TTL). Signing uses
   `LINKLIB_SECRET_KEY`, falling back to the password. Implemented with the stdlib
