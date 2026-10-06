@@ -89,8 +89,9 @@ def test_every_registry_model_has_a_pricing_row():
     MODEL_PRICING row made this fail, as expected — not shipped as a
     permanent broken-state test, per the task brief.)"""
     registry_ids = {m["id"] for m in _REGISTRY}
-    missing = registry_ids - set(MODEL_PRICING.keys())
-    assert not missing, f"registered model(s) with no MODEL_PRICING row: {sorted(missing)}"
+    from linklib.pricing import SEED_ONLY_PRICING
+    missing = registry_ids - set(MODEL_PRICING.keys()) - set(SEED_ONLY_PRICING)
+    assert not missing, f"registered model(s) with no pricing seed row: {sorted(missing)}"
 
 
 def test_every_effort_tier_model_has_a_pricing_row():

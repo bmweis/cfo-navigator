@@ -386,14 +386,19 @@ def test_freshness_dot_shows_never_reviewed_by_default(env):
     assert "never reviewed" in body.lower()
 
 
-def test_freshness_dot_reflects_a_recent_mark_reviewed(env):
+def test_freshness_dot_reflects_per_row_pricing_dates(env):
     client = _admin_client(env)
     before = client.get("/admin/system/ai").text
     assert "Pricing: never reviewed" in before
-    client.post("/admin/checks/mark-pricing-reviewed", follow_redirects=False)
+    lib = Library(os.environ["LINKLIB_DB"])
+    try:
+        lib.seed_model_catalog()
+        lib.conn.execute("UPDATE model_pricing SET verified_on=date('now') WHERE verified_on<>''")
+        lib.conn.commit()
+    finally:
+        lib.close()
     after = client.get("/admin/system/ai").text
     assert "Pricing: never reviewed" not in after
-    assert "reviewed just now" in after.lower()
 
 
 # -- the three old pages are fully retired -----------------------------------
@@ -486,3 +491,33 @@ def test_ai_config_guard_wired_into_checks(env):
 
 def test_hub_nav_orphans_clean_after_the_merge(env):
     assert env.hub_nav_orphans() == []
+
+
+def test_model_save_refuses_a_model_with_incomplete_unverified_pricing(env):
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    lib_.seed_model_catalog()
+    lib_.close()
+    client = _admin_client(env)
+    r = client.post("/admin/system/ai/model/save", json={"model": "claude-fable-5-1"})
+    assert r.status_code == 400
+    err = r.json()["error"]
+    assert "Fable 5.1" in err and "cache write rate" in err and "verified date" in err
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    assert lib_.get_enrich_model() != "claude-fable-5-1"
+    lib_.close()
+
+
+def test_pricing_save_route_verifies_and_unblocks(env):
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    lib_.seed_model_catalog()
+    lib_.close()
+    client = _admin_client(env)
+    r = client.post("/admin/system/ai/pricing/save", data={
+        "model_id": "claude-fable-5-1", "input": "10", "output": "50", "cache_write": "12.5",
+        "cache_write_1h": "20", "cache_read": "0.25", "source_note": "checked", "verified": "1"},
+        follow_redirects=False)
+    assert r.status_code == 303
+    assert client.post("/admin/system/ai/model/save", json={"model": "claude-fable-5-1"}).status_code == 200
+    html = client.get("/admin/system/ai").text
+    assert 'id="model-pricing"' in html and "Open Anthropic&rsquo;s pricing" in html
+    assert 'target="_blank" rel="noopener"' in html

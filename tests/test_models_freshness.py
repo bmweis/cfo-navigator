@@ -61,16 +61,15 @@ def test_banner_defaults_to_stale_when_never_reviewed(admin_client):
     r = client.get("/admin/checks")
     assert r.status_code == 200
     assert "Anthropic models" in r.text
-    assert "never been marked reviewed" in r.text
-    # Both banners share this button text — the never-reviewed pricing
-    # copy and the never-reviewed models copy both render, so at least 2.
-    assert r.text.count("Mark reviewed") >= 2
+    assert "You have not yet skimmed" in r.text
+    assert "Backstop: the list above only catches models that are new or missing." in r.text
+    assert "Mark reviewed" in r.text
 
 
-def test_banner_links_to_the_touchpoint_doc_and_model_overview(admin_client):
+def test_banner_links_to_the_model_overview_and_drops_the_touchpoint_link(admin_client):
     client, appmod, db = admin_client
     r = client.get("/admin/checks")
-    assert "adding-a-new-claude-model--every-touchpoint" in r.text
+    assert "adding-a-new-claude-model--every-touchpoint" not in r.text
     assert "platform.claude.com/docs/en/about-claude/models/overview" in r.text
 
 
@@ -89,9 +88,9 @@ def test_mark_reviewed_clears_the_stale_banner(admin_client):
     assert stored  # a real ISO timestamp was recorded
 
     r2 = _models_section(client.get("/admin/checks").text)
-    assert "never been marked reviewed" not in r2
-    assert "past the 180-day review window" not in r2
-    assert "manually checked" in r2
+    assert "You have not yet skimmed" not in r2
+    assert "since you last skimmed" not in r2
+    assert "Last skimmed" in r2 and "Next reminder in 180 days." in r2
 
 
 def test_mark_reviewed_does_not_touch_the_pricing_reminder(admin_client):
@@ -101,7 +100,7 @@ def test_mark_reviewed_does_not_touch_the_pricing_reminder(admin_client):
     client, appmod, db = admin_client
     client.post("/admin/checks/mark-models-reviewed", follow_redirects=False)
     r = client.get("/admin/checks")
-    assert "Pricing has" in r.text and "never been marked reviewed" in r.text
+    assert "No pricing row has been verified" in r.text
 
 
 def test_banner_goes_stale_again_past_the_threshold(admin_client):
@@ -116,7 +115,7 @@ def test_banner_goes_stale_again_past_the_threshold(admin_client):
         lib.close()
 
     r = client.get("/admin/checks")
-    assert "past the 180-day review window" in r.text
+    assert "since you last skimmed" in r.text and "for retirement dates" in r.text
     assert "Mark reviewed" in r.text
 
 
@@ -132,9 +131,9 @@ def test_banner_stays_fresh_within_the_threshold(admin_client):
         lib.close()
 
     r = _models_section(client.get("/admin/checks").text)
-    assert "past the 180-day review window" not in r
-    assert "never been marked reviewed" not in r
-    assert "manually checked" in r
+    assert "since you last skimmed" not in r
+    assert "You have not yet skimmed" not in r
+    assert "Last skimmed" in r
 
 
 def test_mark_reviewed_requires_auth(monkeypatch):
