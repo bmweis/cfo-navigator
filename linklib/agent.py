@@ -24,6 +24,7 @@ Source types, model, and effort level are all configurable at call time.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -383,12 +384,19 @@ class Answer:
     stop_reason: str = ""
     # 'open' | 'trusted' | '' — see web_scope_for. Recorded on ask_questions.
     web_scope: str = ""
+    # A failed turn (the answer call raised, the SDK or key is missing, or the
+    # voice prompt is unset) is a structured failure, never answer text: `text`
+    # is "" and `error` holds the raw detail, for the server log and the admin
+    # view only. Cost already spent (rewrite/embedding/Exa) stays on the Answer.
+    failed: bool = False
+    error: str = ""
 
 
 # Reuse one client across requests so its httpx connection pool stays warm —
 # sequential questions skip the TLS handshake to the API. The SDK client is
 # thread-safe, so sharing it across FastAPI's request threads is fine.
 _client = None
+_log = logging.getLogger(__name__)
 
 
 def _get_client():
@@ -907,7 +915,7 @@ def answer_question(
 
     import importlib.util
     if importlib.util.find_spec("anthropic") is None:
-        return Answer(text="(Install `anthropic` to enable answers.)",
+        return Answer(text="", failed=True, error="Install `anthropic` to enable answers.",
                       sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
                       cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
                       rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
@@ -915,7 +923,7 @@ def answer_question(
                       exa_result_count=exa_results, exa_cost_usd=exa_cost,
                       web_scope=web_scope)
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        return Answer(text="(Set ANTHROPIC_API_KEY to enable answers.)",
+        return Answer(text="", failed=True, error="ANTHROPIC_API_KEY is not set.",
                       sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
                       cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
                       rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
@@ -936,7 +944,7 @@ def answer_question(
     try:
         system = _build_system(use_library, use_feed, use_web, lib)
     except VoicePromptMissing as e:
-        return Answer(text=f"(Voice prompt not configured: {e})",
+        return Answer(text="", failed=True, error=f"Voice prompt not configured: {e}",
                       sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
                       cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
                       rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
@@ -1009,7 +1017,10 @@ def answer_question(
         # The rewrite/embedding/Exa calls already spent real money even
         # though the answer call failed — keep their cost on the Answer so
         # it's still recorded.
-        return Answer(text=f"(Answer call failed: {e})",
+        # Raw detail goes to the log (with model and effort) and to the
+        # admin-only `error` field, never to the user or the answer text.
+        _log.exception("FP&A Buddy answer call failed (model=%s effort=%s)", model, effort)
+        return Answer(text="", failed=True, error=f"Answer call failed: {e}",
                       sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
                       cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
                       rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
