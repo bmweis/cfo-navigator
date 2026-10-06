@@ -183,11 +183,15 @@ def test_badge_moves_once_and_only_when_stale(env):
     lib = env._lib()
     try:
         _mark_all_freshness_reviewed(os.environ["LINKLIB_DB"])
-        base = tasks._stale_admin_checks_reminders(lib)
-        lib.set_setting("homepage_status_revised_at", _ago(20))
-        assert tasks._stale_admin_checks_reminders(lib) == base + 1
         lib.set_setting("homepage_status_revised_at", _ago(1))
-        assert tasks._stale_admin_checks_reminders(lib) == base
+        tasks._checks_cache = None
+        base = tasks._failing_checks_count() + tasks._stale_admin_checks_reminders(lib)
+        lib.set_setting("homepage_status_revised_at", _ago(20))
+        tasks._checks_cache = None
+        assert tasks._failing_checks_count() + tasks._stale_admin_checks_reminders(lib) == base + 1
+        lib.set_setting("homepage_status_revised_at", _ago(1))
+        tasks._checks_cache = None
+        assert tasks._failing_checks_count() + tasks._stale_admin_checks_reminders(lib) == base
     finally:
         lib.close()
 

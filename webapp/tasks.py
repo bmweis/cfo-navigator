@@ -19,7 +19,8 @@ PR 28 (2026-09) already applied to every admin-page badge below.
 
 2026-09 coverage pass: three sources that were computed live on /admin/checks
 but never reached ANY badge are folded in here — the failing "Live + CI"
-run_all() rows already did (`_failing_checks_count()`), but the three dated
+run_all() rows were meant to already count (`_failing_checks_count()`, but its
+filter said "In-app" until the 2026-10 fix, so they never did), and the three dated
 freshness reminders (Pricing, New-model awareness, Exa pricing) and backup
 staleness did not. The "Database-backed copy" scan on /admin/checks
 deliberately does NOT get its own separate count here — see
@@ -139,7 +140,10 @@ def _compute_failing_checks_count() -> int:
     """The actual run_all() pass + count. Pulled out of _failing_checks_count()
     so the background refresher (below) and the synchronous fallback path
     share one implementation rather than two copies that could drift."""
-    return sum(1 for r in _checks.run_all() if r["where"] == "In-app" and r["ok"] is False)
+    # "Live + CI" is the only label a failing row can carry (CI-only rows are
+    # ok=None). This filter said "In-app" from the badge's first commit, three
+    # days after that label was renamed, so no failing check ever counted.
+    return sum(1 for r in _checks.run_all() if r["where"] == "Live + CI" and r["ok"] is False)
 
 
 def _failing_checks_count() -> int:
@@ -550,10 +554,10 @@ def refresher_status() -> dict:
 
 
 def _stale_admin_checks_reminders(lib: Library) -> int:
-    """0-4 — the homepage Status staleness plus how many of /admin/checks' three dated manual-attestation
+    """0-3 — how many of /admin/checks' three dated manual-attestation
     banners (Pricing freshness, New-model awareness, Exa pricing freshness)
     currently read stale/never-reviewed. These are computed live in the
-    admin_checks() route but never fed into run_all()'s "In-app" list (they
+    admin_checks() route but never fed into run_all()'s "Live + CI" rows (they
     aren't pass/fail checks — see webapp.checks.run_all's own comment above
     the three banners), which is exactly why _failing_checks_count() above
     has never counted them: nothing in run_all()'s return value represents
@@ -570,12 +574,7 @@ def _stale_admin_checks_reminders(lib: Library) -> int:
     section), so adding a second count for the identical violations under
     the /admin/checks href would double the total past what's actually
     pending, which is precisely what was flagged as a real risk here."""
-    from linklib import homepage_status as hs
     return sum([
-        # Homepage Status note past its window: counted here, once, from a
-        # live settings read. Its /admin/checks row is a "Live + CI" row, which
-        # _compute_failing_checks_count() does not count, so there is no double count.
-        hs.status_age(lib.get_setting(hs.STATUS_REVISED_KEY))["stale"],
         bool(lib.pricing_freshness()["stale_ids"]),
         models_review_is_stale(lib.get_setting("models_last_reviewed")) or _lineup_has_findings(lib),
         exa_pricing_review_is_stale(lib.get_setting("exa_pricing_last_verified")),

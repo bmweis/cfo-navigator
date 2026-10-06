@@ -3333,8 +3333,10 @@ anchor site-wide complies:
 ### `_failing_checks_count()` re-entrancy fix (2026-09, coral-PR follow-up)
 
 `webapp.tasks._failing_checks_count()` badges `/admin`'s nav dot and the
-"/admin/checks" href with the same in-app check results `run_all()`
-computes live, cached for `_CHECKS_CACHE_TTL` (120s) so an ordinary page
+"/admin/checks" href with the failing `where == "Live + CI"` rows
+`run_all()` computes live (the filter said `"In-app"` until the 2026-10
+fix, a label renamed away three days before the badge was written, so no
+failing check ever reached the badge before then), cached for `_CHECKS_CACHE_TTL` (120s) so an ordinary page
 render doesn't pay the ~3.5-9s `run_all()` cost (pyflakes over the whole
 tree, a `node --check` per shared `<script>` block) on every load. The
 original cache-check-then-compute had no de-dup between the two steps, so
@@ -11470,6 +11472,17 @@ are removed. The Drive folder id comes from `--folder-id`, `GOOGLE_DRIVE_FOLDER_
 the `settings` row (`backup_drive_folder_id`) if the old file still opens, or a
 search by folder name. See RUNBOOK.md §1 Path C and §4.
 
+
+### Admin badge counts failing checks (2026-10)
+
+`webapp.tasks._compute_failing_checks_count()` filtered `run_all()` rows on
+`where == "In-app"`. That label was renamed to `"Live + CI"` on 2026-06-30
+(`d3d44e0`); the badge was written on 2026-07-03 (`ad416e8`) with the old
+label, so the failing-checks term of the `/admin/checks` badge was always 0.
+It now matches `"Live + CI"` with `ok is False`; `ok=None` rows and CI-only
+rows stay uncounted. The cache, the `_checks_computing` sentinel, the
+static-check cache and the background refresher are unchanged.
+
 ### Homepage Status note (2026-10)
 
 The "Status:" card under the homepage photo is one `settings` key,
@@ -11491,7 +11504,4 @@ it is missing, so the first deploy counts as confirmed today. The
 a "Live + CI" row in the Voice and copy theme) reads that one settings row, is
 not behind `cached_static_check`, and renders no routes. The Admin badge counts it
 once, through `tasks._stale_admin_checks_reminders` (a live settings read).
-`_compute_failing_checks_count` compares `where == "In-app"`, which no
-`run_all()` row carries, so failing "Live + CI" rows do not reach the badge;
-that is a separate, pre-existing gap, and it is why this check is counted in the
-reminders function instead.
+The row is a "Live + CI" row, so the failing-checks count (`_compute_failing_checks_count`) already counts it; it is deliberately not also in `_stale_admin_checks_reminders`, or it would count twice.
