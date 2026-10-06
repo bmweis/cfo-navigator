@@ -1959,16 +1959,6 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .sw[aria-checked="true"]::after{left:18px;}
 .sw:focus-visible{outline:2px solid var(--seafoam-deep);outline-offset:2px;}
 .sw:disabled{background:var(--line-strong);opacity:.6;cursor:not-allowed;}
-.sw-form{margin:0;display:inline-flex;}
-.sw-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:28px;}
-.sw-main{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;}
-.sw-word{font-size:13px;color:var(--ink-soft);}
-.sw-flag{display:inline-block;background:var(--coral-wash);color:var(--navy);border-radius:5px;padding:2px 8px;font-size:11.5px;font-weight:600;text-decoration:none;white-space:nowrap;}
-.sw-model .sw-id{font-size:11.5px;color:var(--muted);font-weight:400;}
-.sw-todo{margin:0;padding-left:16px;font-size:13px;}
-.sw-ready,.sw-note{font-size:13px;color:var(--muted);}
-.sw-notes{margin:14px 0 0;font-size:13px;color:var(--ink-soft);line-height:1.6;display:grid;gap:6px;}
-.sw-table td,.sw-table th,.sw-log td,.sw-log th{padding:10px 12px;vertical-align:top;}
 @media(hover:hover){.admin-only:hover{background:var(--seafoam-wash);color:var(--seafoam-deep);text-decoration:none;}.admin-only-del:hover{background:#fee2e2;color:#b91c1c;border-color:#b91c1c;}}
 
 /* Edit-page footer action row (primary save / stay-on-page save / cancel)—
@@ -28460,6 +28450,18 @@ _PRICE_COLS = (("input", "Input"), ("output", "Output"), ("cache_write", "Cache 
 _ANTHROPIC_PRICING_URL = "https://www.anthropic.com/pricing"
 
 
+_SW_CARD_CSS = '''.sw-form{margin:0;display:inline-flex;}
+.sw-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:28px;}
+.sw-main{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;}
+.sw-word{font-size:13px;color:var(--ink-soft);}
+.sw-flag{display:inline-block;background:var(--coral-wash);color:var(--navy);border-radius:5px;padding:2px 8px;font-size:11.5px;font-weight:600;text-decoration:none;white-space:nowrap;}
+.sw-model .sw-id{font-size:11.5px;color:var(--muted);font-weight:400;}
+.sw-todo{margin:0;padding-left:16px;font-size:13px;}
+.sw-ready,.sw-note{font-size:13px;color:var(--muted);}
+.sw-notes{margin:14px 0 0;font-size:13px;color:var(--ink-soft);line-height:1.6;display:grid;gap:6px;}
+.sw-table td,.sw-table th,.sw-log td,.sw-log th{padding:10px 12px;vertical-align:top;}'''
+
+
 def _switch_html(on: bool, *, label: str, disabled: bool = False) -> str:
     """The shared on/off switch (class .sw, defined once in the sitewide CSS):
     a button with role=switch. Enabled, it submits its form; disabled, it is
@@ -28539,7 +28541,7 @@ def _allowed_roles_card_html(info: dict, log: list[dict]) -> str:
              f'Fable models. {_esc(MATCHMAKER_BLOCK_REASON)}. Both stay off until <code>ask()</code> is checked for always-on thinking.</div>'
              f'<div><strong>In use.</strong> A model assigned to a role can&rsquo;t be switched off for it. Assign another model first.</div>'
              f'<div><strong>Test first.</strong> Enrichment for this model needs the test on the confirm step before it can be switched on.</div></div>')
-    return (f'<details id="allowed-roles" style="scroll-margin-top:16px;"><summary style="cursor:pointer;color:var(--accent);'
+    return (f'<style>{_SW_CARD_CSS}</style><details id="allowed-roles" style="scroll-margin-top:16px;"><summary style="cursor:pointer;color:var(--accent);'
             f'font-size:13.5px;">Edit allowed roles</summary>'
             f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Turning a role on doesn&rsquo;t enable the model. '
             f'It also needs verified pricing and status available. Changes apply immediately.</p>'
