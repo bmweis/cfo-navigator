@@ -7,6 +7,8 @@ Sonnet 5 to the once-planned $3/$15) would go uncaught.
 """
 from __future__ import annotations
 
+import pytest
+
 from linklib.agent import EFFORT_SETTINGS
 from linklib.models import _REGISTRY
 from linklib.pricing import (
@@ -115,19 +117,20 @@ def test_every_effort_tier_model_has_a_pricing_row():
     assert not missing, f"EFFORT_SETTINGS model(s) with no MODEL_PRICING row: {sorted(missing)}"
 
 
-def test_every_effort_tier_model_has_a_cost_estimate_row():
-    """Same gap as above, for linklib.agent.COST_ESTIMATES — the rough
-    pre-call estimate shown on /tools/fpa-buddy before a question is asked.
-    COST_ESTIMATES.get(model, {}).get(tier) degrades silently to None (a
-    blank cost estimate in the UI) rather than raising, so nothing else
-    would ever catch a tier pointed at a model missing from this table."""
-    from linklib.agent import COST_ESTIMATES
-    for tier, settings in EFFORT_SETTINGS.items():
-        model = settings["model"]
-        assert model in COST_ESTIMATES, f"EFFORT_SETTINGS['{tier}'] model {model!r} has no COST_ESTIMATES row"
-        assert tier in COST_ESTIMATES[model], (
-            f"COST_ESTIMATES[{model!r}] has no '{tier}' entry"
-        )
+def test_tier_cost_estimate_is_derived_from_pricing_and_follows_the_model():
+    from linklib.agent import EFFORT_SETTINGS, tier_cost_estimate
+    # production-profile figures (see test_token_profile_reproduces_production_rows...)
+    assert tier_cost_estimate("claude-haiku-4-5-20251001", "quick") == pytest.approx(0.0039, abs=0.0002)
+    assert tier_cost_estimate("claude-sonnet-4-6", "standard") == pytest.approx(0.028, abs=0.0005)
+    assert tier_cost_estimate("claude-opus-4-8", "deep") == pytest.approx(0.1575, abs=0.002)
+    for tier, st in EFFORT_SETTINGS.items():
+        assert tier_cost_estimate(st["model"], tier) > 0
+    assert tier_cost_estimate("claude-opus-5-5", "deep") < tier_cost_estimate("claude-opus-5", "deep")
+
+
+def test_the_wrong_cost_estimates_dict_is_gone():
+    import linklib.agent as agent
+    assert not hasattr(agent, "COST_ESTIMATES")
 
 
 def test_pricing_review_is_stale_thresholds():
@@ -171,3 +174,24 @@ def test_opus_5_5_has_registry_and_pricing_rows_with_its_own_cache_read_rate():
     assert rates["cache_read"] == 0.20
     # Real, hand-checked call: 1M each of input/output/cache-read/5m-write.
     assert compute_cost("claude-opus-5-5", 1_000_000, 1_000_000, 1_000_000, 1_000_000) == 4.00 + 20.00 + 5.00 + 0.20
+
+
+# Production ask_questions rows, read 2026-10-05: (input_tokens, output_tokens).
+# Model cost is recomputed from tokens at the row's model rates, so search
+# (Exa) and embeddings are excluded, the same scope as the displayed estimate.
+_PROD_ROWS = {
+    "deep": ("claude-opus-4-8", [(20870, 2500), (20495, 2500), (21396, 1271), (21689, 2074)]),
+    "standard": ("claude-sonnet-4-6", [(8064, 673), (6697, 1125), (2384, 556), (4103, 645)]),
+    "quick": ("claude-haiku-4-5-20251001", [(2897, 157), (2293, 368)]),
+}
+
+
+@pytest.mark.parametrize("tier", ["quick", "standard", "deep"])
+def test_token_profile_reproduces_production_rows_within_15_percent(tier):
+    from linklib.agent import tier_cost_estimate
+    from linklib.pricing import MODEL_PRICING
+    model, rows = _PROD_ROWS[tier]
+    r = MODEL_PRICING[model]
+    actual = sum((i * r["input"] + o * r["output"]) / 1_000_000 for i, o in rows) / len(rows)
+    est = tier_cost_estimate(model, tier)
+    assert abs(est - actual) / actual <= 0.15, (tier, est, actual)

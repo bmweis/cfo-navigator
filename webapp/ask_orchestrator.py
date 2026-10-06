@@ -157,6 +157,9 @@ def run_ask(
                 "sources": [], "feed_sources": [], "web_sources": [],
             }
 
+    from linklib.agent import EFFORT_SETTINGS as _TIERS
+    if not model and effort in _TIERS:
+        model = lib.get_role_model(f"buddy_{effort}")   # the tier's admin-chosen model; same as EFFORT_SETTINGS until changed
     ans = answer_question(
         lib, question,
         model=model,

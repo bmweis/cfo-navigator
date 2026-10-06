@@ -3,7 +3,7 @@
 Used to record actual spend per Ask question (see `agent.answer_question`) so
 per-user dollar caps and the admin/user usage reports are built on real
 billing figures, not a token-count proxy. This is separate from
-`agent.COST_ESTIMATES`, which is a rough *pre-call* estimate shown in the UI
+`agent.tier_cost_estimate`, which is a rough *pre-call* estimate shown in the UI
 before a question is asked (we don't know real usage until the call returns).
 
 Pricing seed (PR 3a: the live source is the model_pricing table; these dicts are the seed and last-resort fallback). Checked 2026-07-02 against Anthropic's published rates, re-verified
