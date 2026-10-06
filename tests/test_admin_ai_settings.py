@@ -521,8 +521,8 @@ def test_pricing_save_route_verifies_and_unblocks(env):
     assert r.status_code == 400 and "verified date" not in r.json()["error"]   # pricing no longer blocks; the role does
     assert "Enrichment not yet checked" in r.json()["error"]
     html = client.get("/admin/system/ai").text
-    assert 'id="model-pricing"' in html and "Open Anthropic&rsquo;s pricing" in html
-    assert 'target="_blank" rel="noopener"' in html
+    assert 'id="model-pricing"' in html and "Anthropic&rsquo;s pricing page &#8599;" in html   # one link in the intro, not one per row
+    assert 'href="https://www.anthropic.com/pricing" target="_blank" rel="noopener"' in html
 
 
 def test_matchmaker_role_save_route_enforces_allowed_roles(env):

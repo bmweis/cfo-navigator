@@ -353,3 +353,55 @@ def test_model_label_falls_back_to_a_readable_name_not_the_raw_id(env):
     assert env._enrich_model_label("not-a-model") == "not-a-model"
     html = _admin(env).get("/admin/system/ai").text
     assert "Opus 4.8" in html
+
+
+# --- Model pricing table, one table with a Notes disclosure ------------------
+
+def _pricing_html(env):
+    html = _admin(env).get("/admin/system/ai").text
+    i = html.index('id="model-pricing"')
+    return html[i:html.index("</table>", i)]
+
+
+def test_pricing_table_drops_per_role_reasons_and_the_duplicate_note(env):
+    seg = _pricing_html(env)
+    assert "not allowed." not in seg and "Can&rsquo;t be enabled" not in seg and "Can't be enabled" not in seg
+    assert "Open Anthropic&rsquo;s pricing" not in seg
+    note = "Requires 30-day data retention; not available under zero data retention. Source: cached API reference 2026-09-25, not confirmed against the live page."
+    # per Fable model: once as text in the row's Notes disclosure, once as the Edit form's input value
+    assert seg.count(note) == 4
+    assert seg.count(f'value="{note}"') == 2
+
+
+def test_pricing_row_keeps_id_status_chip_used_by_and_notes_disclosure(env):
+    seg = _pricing_html(env)
+    assert "claude-fable-5 &middot; available" in seg
+    assert ">Notes <span class=\"disclosure-caret\"" in seg
+    assert "Unverified</span>" in seg and "Verified 2026-09-28" in seg
+    assert "from cached API reference 2026-09-25, not confirmed against the live page" in seg   # source text
+    assert "<em style=\"color:var(--muted);\">empty</em>" in seg   # empty rates stay empty, not zero
+    assert ">Opus 4.8</div>" in seg and ">claude-opus-4-8 &middot; available" in seg
+    # a model in use but not in the picker registry still shows what uses it
+    row = seg[seg.index(">Opus 4.8</div>"):]
+    row = row[:row.index("</tr>")]
+    assert "Buddy Deep" in row
+
+
+def test_retention_chip_follows_the_note_text(env):
+    seg = _pricing_html(env)
+    assert seg.count("30-day data retention</span>") == 2        # Fable 5 and Fable 5.1
+    l = Library(os.environ["LINKLIB_DB"])
+    try:
+        l.set_model_note("claude-fable-5", "Needs a longer retention window. Source: cached API reference.")
+    finally:
+        l.close()
+    seg2 = _pricing_html(env)
+    assert seg2.count("30-day data retention</span>") == 1        # a reworded note loses the chip
+
+
+def test_pricing_intro_link_matches_the_old_row_links_and_the_checks_row(env):
+    seg = _pricing_html(env)
+    assert 'href="https://www.anthropic.com/pricing"' in seg
+    assert env._ANTHROPIC_PRICING_URL == "https://www.anthropic.com/pricing"
+    checks = _admin(env).get("/admin/checks").text
+    assert 'href="https://www.anthropic.com/pricing"' in checks and "/admin/system/ai#model-pricing" in checks
