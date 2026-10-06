@@ -18,11 +18,9 @@ from dataclasses import dataclass
 from .db import Library
 from .enrich import NEEDS_VERIFICATION
 from .gates import MATCHMAKER_COMMUNITY_NOTE, MATCHMAKER_DISCLAIMER, MATCHMAKER_FIELD_SUFFIX
-from .models import DEFAULT_CHAT_MODEL
 from .stop_reason import stop_reason_of
 from .voice_settings import VoicePromptMissing, require_voice_setting
 
-DEFAULT_MODEL = os.environ.get("LINKLIB_CHAT_MODEL", DEFAULT_CHAT_MODEL)
 MAX_TOKENS = 900
 
 # Conversation cost guard — a matching conversation is naturally more
@@ -35,7 +33,7 @@ MAX_FOLLOWUPS = 10
 MAX_HISTORY_CHARS = 6000
 
 # Rough per-turn cost estimate (USD), shown nowhere in the UI today (matching
-# FP&A Buddy's own COST_ESTIMATES intent) but kept here for admin-facing use
+# FP&A Buddy's own tier_cost_estimate intent) but kept here for admin-facing use
 # if that becomes useful later. Based on the ~38-community dataset's system
 # prompt size with prompt caching in effect after the first turn of a
 # conversation (see _client_kwargs's cache_control).
@@ -297,7 +295,7 @@ def _answer(lib: Library, kind: str, question: str,
     (cache_control on the system block) so a multi-turn conversation only
     pays full price for that system prompt once.
     """
-    model = DEFAULT_MODEL
+    model = lib.get_role_model("matchmaker")
     trimmed_history = _trim_history(history)
 
     import importlib.util

@@ -332,7 +332,7 @@ def test_claude_section_shows_all_three_surfaces_and_their_current_models(env):
     assert EFFORT_SETTINGS["deep"]["model"] in body
     assert DEFAULT_CHAT_MODEL in body
     assert "Live" in body
-    assert "Code-only" in body
+    assert "Code-only" not in body   # every Claude surface is live-configurable now (PR 3b)
 
 
 def test_enrichment_model_in_usage_index_reflects_a_changed_setting(env):
@@ -517,7 +517,25 @@ def test_pricing_save_route_verifies_and_unblocks(env):
         "cache_write_1h": "20", "cache_read": "0.25", "source_note": "checked", "verified": "1"},
         follow_redirects=False)
     assert r.status_code == 303
-    assert client.post("/admin/system/ai/model/save", json={"model": "claude-fable-5-1"}).status_code == 200
+    r = client.post("/admin/system/ai/model/save", json={"model": "claude-fable-5-1"})
+    assert r.status_code == 400 and "verified date" not in r.json()["error"]   # pricing no longer blocks; the role does
+    assert "Enrichment not yet checked" in r.json()["error"]
     html = client.get("/admin/system/ai").text
     assert 'id="model-pricing"' in html and "Open Anthropic&rsquo;s pricing" in html
     assert 'target="_blank" rel="noopener"' in html
+
+
+def test_matchmaker_role_save_route_enforces_allowed_roles(env):
+    lib_ = Library(os.environ["LINKLIB_DB"])
+    lib_.seed_model_catalog(); lib_.seed_model_roles()
+    lib_.close()
+    client = _admin_client(env)
+    r = client.post("/admin/system/ai/model/save", json={"role": "matchmaker", "model": "claude-fable-5-1"})
+    assert r.status_code == 400 and "not allowed for Matchmaker" in r.json()["error"]
+    r = client.post("/admin/system/ai/model/save", json={"role": "matchmaker", "model": "claude-sonnet-5"})
+    assert r.status_code == 200 and r.json()["role"] == "matchmaker"
+    html = client.get("/admin/system/ai").text
+    assert 'id="mm-select"' in html and "seeded this once" in html
+    assert "Buddy not yet checked for always-on thinking" in html
+    assert "Requires 30-day data retention" in html
+    assert "/tools/software/&lt;slug&gt;" in html and "Matchmaker not yet checked for always-on thinking" in html

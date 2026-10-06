@@ -76,14 +76,32 @@ def count_prior_questions(history) -> int:
     return sum(1 for m in (history or [])
                if isinstance(m, dict) and m.get("role") == "user")
 
-# Rough per-query cost estimates (USD) keyed by canonical model ID then effort.
-# Based on typical token counts at each effort level; actual billing may differ.
-COST_ESTIMATES: dict[str, dict[str, float]] = {
-    "claude-haiku-4-5-20251001": {"quick": 0.004,  "standard": 0.008,  "deep": 0.013},
-    "claude-sonnet-4-6":         {"quick": 0.014,  "standard": 0.028,  "deep": 0.048},
-    "claude-sonnet-5":           {"quick": 0.014,  "standard": 0.028,  "deep": 0.048},
-    "claude-opus-4-8":           {"quick": 0.069,  "standard": 0.141,  "deep": 0.240},
+# Typical token counts per effort tier, the fallback profile behind the
+# pre-call cost estimate. Set from production ask_questions rows read
+# 2026-10-05: Deep (4 Opus 4.8 turns) averaged about 21,000 input and 2,100
+# output tokens, Quick (2 first turns) about 2,600 and 260, Standard (4 first
+# turns) about 5,300 and 750. The estimate is model cost only: it excludes web
+# search (about $0.007 a question when Exa runs) and any thinking tokens.
+# Real averages from ask_questions replace these once a tier has enough
+# history (Library.typical_tier_tokens).
+TIER_TOKEN_PROFILE: dict[str, tuple[int, int]] = {
+    "quick": (2600, 260), "standard": (5600, 750), "deep": (21000, 2100),
 }
+
+
+def tier_cost_estimate(model: str, tier: str, tokens: tuple[int, int] | None = None) -> float | None:
+    """Rough per-query cost (USD) of a Buddy tier on a model, derived from the
+    model_pricing rates and typical token counts (history else the profile).
+    Replaces the hand-typed COST_ESTIMATES dict, whose rows drifted from real
+    pricing (its Opus 4.8 row assumed old rates, and its claude-sonnet-5 row
+    simply copied Sonnet 4.6's). Display only, never a charge."""
+    if tier not in TIER_TOKEN_PROFILE:
+        return None
+    from .pricing import rates_for
+    in_tok, out_tok = tokens or TIER_TOKEN_PROFILE[tier]
+    r = rates_for(model)
+    return round((in_tok * r["input"] + out_tok * r["output"]) / 1_000_000, 4)
+
 
 _STOP = {
     "the", "a", "an", "and", "or", "but", "for", "with", "how", "what", "why",
@@ -330,7 +348,7 @@ class Answer:
     # Real usage from the API response (0 when the call never ran, e.g. no key).
     # cost_usd is the authoritative per-TURN dollar figure — the answer call
     # plus the follow-up rewrite call, query embedding, and Exa web retrieval
-    # (whichever ran) — as opposed to the pre-call COST_ESTIMATES, which does
+    # (whichever ran) — as opposed to the pre-call tier_cost_estimate, which does
     # not (yet) add an Exa allowance; see the Phase 2 PR description. The
     # token fields below cover the answer call only; the rewrite/embed/Exa
     # calls' shares are broken out in their own *_cost_usd fields.

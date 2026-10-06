@@ -161,6 +161,15 @@ CREATE TABLE IF NOT EXISTS model_pricing (
 -- sets status: seeding, the lineup check and background passes never do.
 -- Status 'not_using' replaces the old models_not_using settings list;
 -- 'deactivated' is a flag, never a delete (pricing and cost history stay).
+-- model_roles (PR 3b): which model each non-enrichment role uses. Enrichment
+-- stays in the enrich_model setting. A role with no row falls back to its code
+-- default (Matchmaker: DEFAULT_CHAT_MODEL; Buddy tiers: EFFORT_SETTINGS).
+CREATE TABLE IF NOT EXISTS model_roles (
+    role       TEXT PRIMARY KEY,
+    model_id   TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS model_catalog (
     model_id          TEXT PRIMARY KEY,
     status            TEXT NOT NULL DEFAULT 'available'
@@ -1847,6 +1856,7 @@ class Library:
         self.conn.commit()
         # Migrate: add columns that were added after initial schema
         for _col_sql in [
+            "ALTER TABLE model_catalog ADD COLUMN allowed_roles TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tools ADD COLUMN vendor_email TEXT NOT NULL DEFAULT ''",
@@ -9220,6 +9230,144 @@ class Library:
         self.conn.commit()
         self.set_setting("model_catalog_seeded", "1")
         return {"seeded": True, "not_using_carried": carried}
+
+    def seed_model_roles(self) -> dict:
+        """One-time (own flag) seed of allowed roles, the Matchmaker role and
+        the Fable notes. The Matchmaker role is seeded from LINKLIB_CHAT_MODEL
+        once, then that variable is ignored. Never overwrites an existing row,
+        allowed_roles or note."""
+        import json
+        from .models import DEFAULT_CHAT_MODEL, SEED_NOTES, default_allowed_roles
+        if self.get_setting("model_roles_seeded") == "1":
+            return {"seeded": False}
+        for r in self.list_model_catalog():
+            if not r["allowed_roles"]:
+                self.conn.execute("UPDATE model_catalog SET allowed_roles=? WHERE model_id=?",
+                                  (json.dumps(list(default_allowed_roles(r["model_id"]))), r["model_id"]))
+        for mid, note in SEED_NOTES.items():
+            self.conn.execute("UPDATE model_catalog SET note=? WHERE model_id=? AND note=''", (note, mid))
+        chat = (os.environ.get("LINKLIB_CHAT_MODEL") or DEFAULT_CHAT_MODEL).strip()
+        self.conn.execute("INSERT OR IGNORE INTO model_roles(role, model_id, updated_at) VALUES ('matchmaker', ?, ?)",
+                          (chat, _now()))
+        self.conn.commit()
+        self.set_setting("model_roles_seeded", "1")
+        return {"seeded": True, "matchmaker": chat}
+
+    def model_allowed_roles(self, model_id: str) -> list[str]:
+        import json
+        from .models import default_allowed_roles
+        r = self.conn.execute("SELECT allowed_roles FROM model_catalog WHERE model_id=?", (model_id,)).fetchone()
+        if r and r["allowed_roles"]:
+            try:
+                return list(json.loads(r["allowed_roles"]))
+            except ValueError:
+                pass
+        return list(default_allowed_roles(model_id))
+
+    def get_role_model(self, role: str) -> str:
+        """The model a role uses right now. Enrichment is the enrich_model
+        setting; Matchmaker and the Buddy tiers read model_roles, then fall
+        back to their code defaults."""
+        if role == "enrichment":
+            return self.get_enrich_model()
+        r = self.conn.execute("SELECT model_id FROM model_roles WHERE role=?", (role,)).fetchone()
+        if r:
+            return r["model_id"]
+        from .models import DEFAULT_CHAT_MODEL
+        if role == "matchmaker":
+            return DEFAULT_CHAT_MODEL
+        from .agent import EFFORT_SETTINGS
+        return EFFORT_SETTINGS[role.removeprefix("buddy_")]["model"]
+
+    def roles_using(self, model_id: str) -> list[str]:
+        """Roles currently assigned to this model (derived, never stored)."""
+        from .models import ROLES
+        return [r for r in ROLES if self.get_role_model(r) == model_id]
+
+    def role_problems(self, role: str, model_id: str) -> list[str]:
+        """Why a model can't be assigned to a role right now (empty = it can):
+        not allowed for the role, marked not using, deactivated, or incomplete
+        or unverified pricing."""
+        from .models import ROLES, ROLE_LABELS, role_block_reason
+        if role not in ROLES:
+            return [f"unknown role {role}"]
+        problems = self.model_enable_problems(model_id)
+        if self.get_model_status(model_id) == "not_using":
+            problems.append("it is marked not using")
+        if role not in self.model_allowed_roles(model_id):
+            why = role_block_reason(model_id, role)
+            problems.append(f"not allowed for {ROLE_LABELS[role]}" + (f" ({why})" if why else ""))
+        return problems
+
+    def set_role_model(self, role: str, model_id: str) -> list[str]:
+        """Assign a model to a role. Returns the problems that refused it (empty
+        list = saved); saves nothing when refused."""
+        problems = self.role_problems(role, model_id)
+        if problems:
+            return problems
+        if role == "enrichment":
+            self.set_enrich_model(model_id)
+        else:
+            self.conn.execute(
+                "INSERT INTO model_roles(role, model_id, updated_at) VALUES (?,?,?) "
+                "ON CONFLICT(role) DO UPDATE SET model_id=excluded.model_id, updated_at=excluded.updated_at",
+                (role, model_id, _now()))
+            self.conn.commit()
+        return []
+
+    def typical_tier_tokens(self, tier: str, *, min_rows: int = 10) -> tuple[int, int] | None:
+        """Average (input, output) tokens of the last 50 first-turn answers at
+        this tier, or None when there are fewer than min_rows. Feeds the
+        pre-call cost estimate; the fixed profile is the fallback."""
+        rows = self.conn.execute(
+            "SELECT input_tokens + cache_creation_tokens + cache_read_tokens AS i, output_tokens AS o "
+            "FROM ask_questions WHERE effort=? AND turn_index=0 AND output_tokens>0 "
+            "ORDER BY id DESC LIMIT 50", (tier,)).fetchall()
+        if len(rows) < min_rows:
+            return None
+        return (round(sum(r["i"] for r in rows) / len(rows)), round(sum(r["o"] for r in rows) / len(rows)))
+
+    def deactivate_model(self, model_id: str, replacements: dict[str, str]) -> list[str]:
+        """Deactivate a model in one transaction. Every role using it needs a
+        replacement that passes role_problems; with any role missing or any
+        replacement refused, nothing is written and the problems are returned.
+        A flag, never a delete: pricing rows and cost history stay."""
+        if self.get_model_status(model_id) is None:
+            return ["unknown model"]
+        problems: list[str] = []
+        from .models import ROLE_LABELS
+        for role in self.roles_using(model_id):
+            rep = (replacements.get(role) or "").strip()
+            if not rep:
+                problems.append(f"{ROLE_LABELS[role]} needs a replacement")
+            elif rep == model_id:
+                problems.append(f"{ROLE_LABELS[role]} replacement can't be the model being deactivated")
+            else:
+                problems += [f"{ROLE_LABELS[role]}: {p}" for p in self.role_problems(role, rep)]
+        if problems:
+            return problems
+        try:
+            for role in self.roles_using(model_id):
+                rep = replacements[role].strip()
+                if role == "enrichment":
+                    self.conn.execute("INSERT INTO settings(key, value) VALUES ('enrich_model', ?) "
+                                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (rep,))
+                else:
+                    self.conn.execute(
+                        "INSERT INTO model_roles(role, model_id, updated_at) VALUES (?,?,?) "
+                        "ON CONFLICT(role) DO UPDATE SET model_id=excluded.model_id, updated_at=excluded.updated_at",
+                        (role, rep, _now()))
+            self.conn.execute("UPDATE model_catalog SET status='deactivated', reason='', status_changed_at=? "
+                              "WHERE model_id=?", (_now(), model_id))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return []
+
+    def set_model_note(self, model_id: str, note: str) -> None:
+        self.conn.execute("UPDATE model_catalog SET note=? WHERE model_id=?", ((note or "").strip(), model_id))
+        self.conn.commit()
 
     def list_model_catalog(self) -> list[dict]:
         return [dict(r) for r in self.conn.execute(
