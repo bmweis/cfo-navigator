@@ -13308,7 +13308,7 @@ async def tools_submit(request: Request, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         lib.close()
-    background_tasks.add_task(_run_tool_research, tool_id)
+    background_tasks.add_task(_run_tool_research, tool_id, True)
     return RedirectResponse("/tools/submit?submitted=1", status_code=303)
 
 
@@ -20198,6 +20198,7 @@ def _tool_new_page(request: Request, form=None, refusal: list | None = None):
     <button type="submit" class="btn">Add to directory</button>
     <a href="/admin/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
     <span class="char-budget-reason" data-char-reason-for="tool-new-form" role="status" hidden style="margin-left:10px;">Saving is off while a field is over its limit. Shorten {_esc(tool_labels.DESCRIPTION)} or {_esc(tool_labels.SHORT_SUMMARY)}, then save.</span>
+    {_on_add_note_html()}
   </div>
 </form>
 </div>
@@ -20205,7 +20206,26 @@ def _tool_new_page(request: Request, form=None, refusal: list | None = None):
     return HTMLResponse(_page("Add software—CFO Toolbox", "", body, authed=True))
 
 
-def _run_tool_research(tool_id: int) -> tuple[bool, str, str]:
+# The fields the on-add background job drafts. This list is the single source
+# for the note under "Add to directory" on /admin/tools/software/new, and
+# tests/test_on_add_note.py fails if the job writes a field that is not here.
+# Entries are (stored field key, visitor-facing label).
+_ON_ADD_DRAFTED_FIELDS = (("agent_taxonomy", tool_labels.AGENT),)
+
+
+def _on_add_note_html() -> str:
+    """The muted note under the Add and Cancel buttons on the new-tool form."""
+    labels = ", ".join(f"&ldquo;{_esc(label)}&rdquo;" for _, label in _ON_ADD_DRAFTED_FIELDS)
+    return (
+        '<p id="on-add-note" style="font-size:12px;color:var(--muted);margin:12px 0 0;max-width:640px;">'
+        f"After you add it, a background job drafts {labels} from the vendor&rsquo;s site, with citations. "
+        f"It shows on the tool&rsquo;s edit page with the badge &ldquo;{_esc(gates.BADGE_TEXT_ADMIN)}&rdquo;, "
+        f"and visitors see &ldquo;{_esc(gates.BADGE_TEXT_VISITOR)}&rdquo; until you mark it verified. "
+        "Nothing else is drafted automatically.</p>"
+    )
+
+
+def _run_tool_research(tool_id: int, on_add: bool = False) -> tuple[bool, str, str]:
     """Automated agent-taxonomy research for one Software entry — the shared
     drafting logic behind both trigger points confirmed for the
     search-overhaul automation follow-up: fired off-request via
@@ -20217,6 +20237,13 @@ def _run_tool_research(tool_id: int) -> tuple[bool, str, str]:
     — a slow or failed research call never blocks the tool from going live.
     The field it writes lands via the needs_verification-flagged draft path
     (set_tool_agent_taxonomy_draft), never auto-confirmed.
+
+    `on_add=True` (the two background callers) always saves the draft under
+    review, whatever Claude's own confidence: a tool added by an admin is
+    public at once, so a confident draft must not go live as verified with no
+    human look (2026-10, issue #698). Confidence is still stored, as the
+    separate Yes/No line. The "Refresh AI research" button keeps its
+    existing rule (needs_verification = not confident).
 
     Returns (ok, reason, url) — reason/url are only ever populated when ok is
     False AND the failure was a GroundingUnavailable refusal (2026-09
@@ -20262,10 +20289,11 @@ def _run_tool_research(tool_id: int) -> tuple[bool, str, str]:
                                        result.output_tokens, result.cost_usd)
             return False, _UNCITED_PREFIX + problem, tool["url"]
         wrote_anything = False
+        needs_verification = 1 if on_add else int(result.agent_taxonomy_needs_verification)
         if result.agent_taxonomy_note.strip():
             lib.set_tool_agent_taxonomy_draft(
                 tool_id, result.agent_taxonomy_note,
-                needs_verification=int(result.agent_taxonomy_needs_verification),
+                needs_verification=needs_verification,
                 ai_confident=int(result.confident),
                 low_confidence=int(result.low_confidence),
                 source="admin-edit",
@@ -20279,7 +20307,7 @@ def _run_tool_research(tool_id: int) -> tuple[bool, str, str]:
             # in admin_tools_edit_submit but applied here since this call has
             # no checkbox/request of its own to OR against — never forces to
             # 0, only ever adds the flag, same as Communities' own pattern.
-            if result.agent_taxonomy_needs_verification:
+            if needs_verification:
                 lib.set_tool_needs_review(tool_id, 1)
             wrote_anything = True
         if wrote_anything or result.cost_usd:
@@ -20360,7 +20388,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
         raise HTTPException(status_code=400, detail=str(e))
     finally:
         lib.close()
-    background_tasks.add_task(_run_tool_research, tool_id)
+    background_tasks.add_task(_run_tool_research, tool_id, True)
     redirect_url = "/tools/software"
     if name_dup:
         redirect_url += f"?warn={quote(_name_duplicate_warning(name_dup))}"
