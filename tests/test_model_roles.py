@@ -44,9 +44,10 @@ def test_unseeded_matchmaker_falls_back_to_the_code_default(lib):
 
 def test_allowed_roles_defaults_per_brief(lib):
     lib.seed_model_catalog(); lib.seed_model_roles()
-    assert lib.model_allowed_roles("claude-fable-5-1") == ["enrichment"]
-    assert lib.model_allowed_roles("claude-fable-5") == ["enrichment"]
-    assert lib.model_allowed_roles("claude-sonnet-5-5") == ["enrichment"]
+    assert lib.model_allowed_roles("claude-fable-5-1") == []
+    assert lib.model_allowed_roles("claude-fable-5") == []
+    assert lib.model_allowed_roles("claude-sonnet-5-5") == []
+    assert lib.model_allowed_roles("claude-opus-5-5") == ["enrichment"]
     assert lib.model_allowed_roles("claude-opus-5-5") == ["enrichment"]
     assert "buddy_quick" not in lib.model_allowed_roles("claude-opus-5-5")
     assert "buddy_deep" in lib.model_allowed_roles("claude-sonnet-4-6")
@@ -58,8 +59,10 @@ def test_role_refused_when_not_allowed_even_with_verified_pricing(lib):
     problems = lib.set_role_model("matchmaker", "claude-fable-5-1")
     assert any("not allowed for Matchmaker" in p for p in problems)
     assert lib.get_role_model("matchmaker") != "claude-fable-5-1"
-    assert lib.set_role_model("enrichment", "claude-fable-5-1") == []
-    assert lib.get_enrich_model() == "claude-fable-5-1"
+    from linklib.models import ENRICHMENT_BLOCK_REASON
+    problems = lib.set_role_model("enrichment", "claude-fable-5-1")
+    assert any(ENRICHMENT_BLOCK_REASON in p for p in problems)
+    assert lib.get_enrich_model() != "claude-fable-5-1"
 
 
 def test_buddy_tiers_refuse_opus_5_5_with_the_visible_reason(lib):
@@ -77,12 +80,16 @@ def test_matchmaker_refuses_always_on_thinking_models_with_a_visible_reason(lib)
         problems = lib.set_role_model("matchmaker", mid)
         assert any(MATCHMAKER_BLOCK_REASON in p for p in problems), mid
     assert lib.get_role_model("matchmaker") == DEFAULT_CHAT_MODEL
-    assert lib.set_role_model("enrichment", "claude-sonnet-5-5") == []   # still fine for enrichment
+    _verify(lib, "claude-opus-5-5")
+    assert lib.set_role_model("enrichment", "claude-opus-5-5") == []     # Opus 5.5 stays allowed for enrichment
 
 
 def test_unverified_pricing_still_refuses_an_allowed_model(lib):
     lib.seed_model_catalog(); lib.seed_model_roles()
-    assert any("verified date" in p for p in lib.set_role_model("enrichment", "claude-sonnet-5-5"))
+    problems = lib.set_role_model("enrichment", "claude-sonnet-5-5")
+    assert any("verified date" in p for p in problems)           # pricing is still reported
+    from linklib.models import ENRICHMENT_BLOCK_REASON
+    assert any(ENRICHMENT_BLOCK_REASON in p for p in problems)   # alongside the role block
 
 
 def test_not_using_and_deactivated_models_cannot_take_a_role(lib):

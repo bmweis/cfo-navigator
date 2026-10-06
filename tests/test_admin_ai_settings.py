@@ -517,7 +517,9 @@ def test_pricing_save_route_verifies_and_unblocks(env):
         "cache_write_1h": "20", "cache_read": "0.25", "source_note": "checked", "verified": "1"},
         follow_redirects=False)
     assert r.status_code == 303
-    assert client.post("/admin/system/ai/model/save", json={"model": "claude-fable-5-1"}).status_code == 200
+    r = client.post("/admin/system/ai/model/save", json={"model": "claude-fable-5-1"})
+    assert r.status_code == 400 and "verified date" not in r.json()["error"]   # pricing no longer blocks; the role does
+    assert "Enrichment not yet checked" in r.json()["error"]
     html = client.get("/admin/system/ai").text
     assert 'id="model-pricing"' in html and "Open Anthropic&rsquo;s pricing" in html
     assert 'target="_blank" rel="noopener"' in html

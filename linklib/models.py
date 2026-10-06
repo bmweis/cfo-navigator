@@ -105,10 +105,15 @@ MATCHMAKER_LINK_NOTE = ("After any model change, test a Matchmaker answer: linkl
 # until that is fixed in its own PR. The Matchmaker has the same shape: its
 # messages.create sets no thinking parameter and max_tokens is 900.
 _ALWAYS_ON_THINKING = ("claude-opus-5-5", "claude-fable-5", "claude-fable-5-1", "claude-sonnet-5-5")
+# Enrichment is blocked for the two Fable models and Sonnet 5.5 until a live test
+# confirms them (see ENRICHMENT_BLOCK_REASON). Opus 5.5 stays allowed there.
+ENRICHMENT_BLOCK_REASON = ("Enrichment not yet checked: several generate calls have a 1,200-token budget "
+                           "that always-on thinking could use up, and a refusal comes back as empty text")
+_ENRICHMENT_UNCONFIRMED = ("claude-fable-5", "claude-fable-5-1", "claude-sonnet-5-5")
 _DEFAULT_ROLES_OVERRIDE = {
-    "claude-fable-5": ("enrichment",),
-    "claude-fable-5-1": ("enrichment",),
-    "claude-sonnet-5-5": ("enrichment",),
+    "claude-fable-5": (),
+    "claude-fable-5-1": (),
+    "claude-sonnet-5-5": (),
     "claude-opus-5-5": ("enrichment",),
 }
 # Per-model notes seeded once where the note is empty. Source: the cached API
@@ -128,6 +133,8 @@ def default_allowed_roles(model_id: str) -> tuple[str, ...]:
 
 def role_block_reason(model_id: str, role: str) -> str:
     """Visible reason a model is not allowed for a role ('' when allowed by default)."""
+    if role == "enrichment" and model_id in _ENRICHMENT_UNCONFIRMED:
+        return ENRICHMENT_BLOCK_REASON
     if model_id in _ALWAYS_ON_THINKING:
         if role in BUDDY_ROLES:
             return BUDDY_BLOCK_REASON
