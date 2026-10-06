@@ -225,8 +225,8 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   were `git mv`'d into `scripts/archive/` in this same PR, per the standing
   "archive a one-time script once its run is confirmed" rule —
   `migrate_growth_engine_ratio_content.py` stays in `scripts/`, unconfirmed
-  as run against production, same as before. `scripts/refetch_lopsided_
-  logos.py` was investigated as a possible rider and found to already
+  as run against production, same as before. `scripts/archive/refetch_lopsided_
+  logos.py` (archived 2026-10-06, #619) was investigated as a possible rider and found to already
   import `linklib.logodev`, not `linklib.brandfetch` — its own docstring
   says so — with no repo evidence its `--apply` run has ever been
   confirmed, so it was left alone rather than archived on a premise that
@@ -1362,7 +1362,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   value, `asset_type` (`"icon"`/`"symbol"`/`"logo"`/`""`), so a caller can
   tell "found a real square mark" from "fell back to the wordmark" without
   a second API call — both existing call sites' unpacking updated in the
-  same PR. **New run-once script, `scripts/refetch_lopsided_logos.py`**,
+  same PR. **New run-once script, `scripts/refetch_lopsided_logos.py` (archived 2026-10-06 to `scripts/archive/`, see the Logo.dev bullet below)**,
   re-fetches the historical backlog: deliberately does NOT read
   `/data/logo_audit.csv` (a point-in-time snapshot this session had no
   filesystem access to anyway — same Railway-volume limitation as the
@@ -1406,7 +1406,12 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   confirm the candidate list, and holds `--apply` until quota resets, per
   his own explicit call. See ARCHITECTURE.md's matching bullet and
   `tests/test_brandfetch.py`/`tests/test_refetch_lopsided_logos.py` for
-  the full write-up and regression coverage.
+  the full write-up and regression coverage. **Archived 2026-10-06, issue #619**:
+  a preview run on production (`python -m scripts.archive.refetch_lopsided_logos
+  --db /data/library.db`) reported no lopsided logos on the volume, so there is
+  nothing left for `--apply` to do; superseded by Logo.dev's symbol-only
+  endpoint, which doesn't need wordmark-vs-icon ranking. `git mv`'d into
+  `scripts/archive/`; its test stays, importing from `scripts.archive`.
 - **Logo.dev replaces Brandfetch as the CFO Toolbox logo source (2026-09) —
   Brandfetch's one-time 100-credit free tier confirmed permanently
   exhausted (non-resetting, not a monthly cap), affecting not just the

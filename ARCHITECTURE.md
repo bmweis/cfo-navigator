@@ -5016,7 +5016,7 @@ Details worth knowing:
   third return value, `asset_type`, so a caller can distinguish "found a
   square mark" from "fell back to the wordmark" without a second API call;
   both existing call sites' tuple-unpacking updated. New run-once
-  `scripts/refetch_lopsided_logos.py` re-fetches the historical backlog —
+  `scripts/archive/refetch_lopsided_logos.py` (archived 2026-10-06, #619: preview found no lopsided logos left) re-fetches the historical backlog —
   re-deriving its "lopsided" candidate set LIVE from what's actually on disk
   (reusing `audit_tool_logo_dimensions.py`'s own probe) rather than a stale
   CSV snapshot, which also structurally excludes Cube/Kintsugi (flagged

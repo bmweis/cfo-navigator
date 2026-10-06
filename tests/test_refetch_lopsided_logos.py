@@ -1,4 +1,4 @@
-"""Unit coverage for scripts/refetch_lopsided_logos.py — the Logo Tile Fit
+"""Unit coverage for scripts/archive/refetch_lopsided_logos.py — the Logo Tile Fit
 fix's run-once re-fetch script. Covers selection logic (lopsided-only,
 excludes manual overrides, excludes the Cube/Kintsugi defensive skip list)
 against a temp DB + hand-built sample PNGs, and the preview/apply flow
@@ -20,7 +20,7 @@ import zlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib.db import Library
-from scripts import refetch_lopsided_logos as script
+from scripts.archive import refetch_lopsided_logos as script
 
 
 def _make_png(w, h):
