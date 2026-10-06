@@ -472,10 +472,10 @@ def og_url_threading_problems() -> list[str]:
 # both the login screen and the bookmarklet/token API. If neither is set, the
 # private routes are open (convenient for local-only use).
 AUTH_PASSWORD = os.environ.get("LINKLIB_PASSWORD") or SAVE_TOKEN
-# Everyone signs in with a username. The host password (AUTH_PASSWORD) is the
-# lockout-proof break-glass admin — it works with this reserved username (default
-# "admin", overridable) rather than a blank one.
-ADMIN_USERNAME = (os.environ.get("LINKLIB_ADMIN_USERNAME") or "admin").strip().lower()
+# Everyone signs in with a `users` row. AUTH_PASSWORD no longer logs anyone in
+# (the shared-secret break-glass login was retired, issue #627); it only turns
+# auth on (empty means open) and is the fallback cookie-signing key. A lost
+# admin password is recovered with scripts/reset_user_password.py (RUNBOOK §8).
 SECRET_KEY = os.environ.get("LINKLIB_SECRET_KEY") or AUTH_PASSWORD or "dev-insecure-key"
 COOKIE_NAME = "cfo_session"
 SESSION_TTL = 30 * 24 * 3600  # 30 days
@@ -4462,10 +4462,6 @@ async def login_submit(request: Request):
             lib.close()
         if user:
             role, username_for_cookie = user["role"], user["username"]
-        elif (AUTH_PASSWORD and username.lower() == ADMIN_USERNAME
-              and hmac.compare_digest(password, AUTH_PASSWORD)):
-            # break-glass: the host password, used with the reserved admin username
-            role, username_for_cookie = "admin", ADMIN_USERNAME
 
     if role:
         # An explicit, validated `next` wins regardless of role. Otherwise,
@@ -26359,6 +26355,17 @@ def admin_open_source(request: Request):
 # Each entry: (name, module path, bucket, purpose, cadence, env vars, invocation lines).
 # bucket is "Recurring & actively useful" or "Reusable diagnostic".
 _SCRIPT_REGISTRY = [
+    ("reset_user_password.py", "scripts.reset_user_password", "Recurring and actively useful",
+     "Recovery: resets a user's password, or creates an admin account, on the container. The "
+     "shared-secret login fallback is retired (issue #627), so this is the way back in when an "
+     "admin password is lost and email reset isn't available. Preview by default; the password "
+     "is typed at a hidden prompt or generated and printed once, never taken as an argument; "
+     "the write is read back and verified.",
+     "Disaster-only (lost admin password).",
+     ["None beyond the database path"],
+     ["python -m scripts.reset_user_password --db /data/library.db --username <username>                 # preview",
+      "python -m scripts.reset_user_password --db /data/library.db --username <username> --apply         # reset (hidden prompt)",
+      "python -m scripts.reset_user_password --db /data/library.db --username <username> --create-admin --apply --generate"]),
     ("backfill_logos.py", "scripts.backfill_logos", "Recurring and actively useful",
      "Fetches a company logo for every Software tool/community still missing one, via "
      "Logo.dev's free image endpoint (500K requests/month, no credit card). Replaced "

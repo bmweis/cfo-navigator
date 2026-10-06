@@ -189,7 +189,7 @@ bookmarklet's secret; two other env vars *fall back to it* when unset:
 
 | If this is unset in Railway… | …then rotating the save token also |
 |---|---|
-| `LINKLIB_PASSWORD` | **changes the break-glass admin login password** (it *is* the save token) |
+| `LINKLIB_PASSWORD` | nothing about login (the shared-secret login was retired, issue #627); it still turns auth on and is the fallback cookie-signing key |
 | `LINKLIB_SECRET_KEY` (when `LINKLIB_PASSWORD` is also unset) | **invalidates every member session** (cookie-signing key falls back to the password) — everyone just logs in again, no data impact |
 
 Member accounts in the `users` table are unaffected either way — their
@@ -802,3 +802,62 @@ key that might not be good.
    replacement key), just delete the variable—every call site already
    treats a missing `EXA_API_KEY` as a normal, best-effort "not available"
    condition (never raises), so there's nothing else to change.
+
+---
+
+## 9. Locked out of admin, and rotating `LINKLIB_SECRET_KEY`
+
+**Background.** The shared-secret "break-glass" login was retired (issue #627).
+Logging in now needs a row in `users`. If the admin password is lost and the
+emailed reset (`/forgot-password`, which needs an email on the user row and
+working Gmail) can't help, reset it on the container.
+
+### Recover access
+
+1. Open a shell in the service:
+
+   ```bash
+   railway ssh
+   ```
+
+2. Preview (writes nothing, asks for no password). Always pass the absolute DB path:
+
+   ```bash
+   python -m scripts.reset_user_password --db /data/library.db --username <username>
+   ```
+
+3. Reset an existing user. It prompts twice, hidden. The password is never an
+   argument and never logged:
+
+   ```bash
+   python -m scripts.reset_user_password --db /data/library.db --username <username> --apply
+   ```
+
+   Or generate one (printed once, copy it now):
+
+   ```bash
+   python -m scripts.reset_user_password --db /data/library.db --username <username> --apply --generate
+   ```
+
+4. If no admin account exists at all, create one:
+
+   ```bash
+   python -m scripts.reset_user_password --db /data/library.db --username <username> --create-admin --apply --generate
+   ```
+
+5. The script reads the row back and prints `verified by read-back`. Then sign in at `/login`
+   and change the password at `/change-password`.
+
+### Rotate `LINKLIB_SECRET_KEY` (signs out every session)
+
+Do this once after the shared-secret login is retired, so any session issued
+through the old fallback, and any legacy role-less cookie, stops working.
+
+1. Generate a value: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+2. Railway dashboard, service, **Variables**: set `LINKLIB_SECRET_KEY` to it. Saving redeploys.
+3. Everyone, you included, signs in again. Nothing stored depends on this key, so
+   MCP tokens, password-reset links, the bookmarklet and the database are unaffected.
+4. Confirm it took: an old browser session lands on `/login`.
+
+Only session cookies are signed with this key (`webapp/app.py` `_sign`/`_session_claims`).
+MCP tokens and reset tokens are plain sha256 hashes in the database, not keyed to it.

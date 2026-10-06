@@ -743,7 +743,7 @@ def test_concurrent_cache_miss_computes_run_all_only_once(monkeypatch):
             # in against the real ~3.5-9s run_all() pass.
             a_started.set()
             a_may_finish.wait(timeout=5)
-        return [{"where": "In-app", "ok": True}]
+        return [{"where": "Live + CI", "ok": False}]
 
     monkeypatch.setattr(taskmod._checks, "run_all", fake_run_all)
 
@@ -774,6 +774,7 @@ def test_concurrent_cache_miss_computes_run_all_only_once(monkeypatch):
     # exception, never a wait that never resolves) rather than being made to
     # redundantly recompute.
     assert results.get("b") == 0
+    assert results.get("a") == 1   # the one failing "Live + CI" row is counted
 
 
 def test_reentrant_failing_checks_count_does_not_hang(no_password_env):
@@ -884,7 +885,7 @@ def refresher_state_reset():
 def test_run_one_refresh_iteration_updates_cache_on_success(refresher_state_reset, monkeypatch):
     taskmod = refresher_state_reset
     monkeypatch.setattr(taskmod._checks, "run_all", lambda: [
-        {"where": "In-app", "ok": False}, {"where": "In-app", "ok": True},
+        {"where": "Live + CI", "ok": False}, {"where": "Live + CI", "ok": True},
     ])
 
     assert taskmod._checks_cache is None
@@ -893,7 +894,7 @@ def test_run_one_refresh_iteration_updates_cache_on_success(refresher_state_rese
     taskmod._run_one_refresh_iteration()
 
     assert taskmod._checks_cache is not None
-    assert taskmod._checks_cache[1] == 1   # one failing In-app row
+    assert taskmod._checks_cache[1] == 1   # one failing "Live + CI" row
     status = taskmod.refresher_status()
     assert status["last_success_at"] is not None
     assert status["last_attempt_at"] is not None
@@ -928,10 +929,10 @@ def test_run_one_refresh_iteration_catches_and_records_exceptions(refresher_stat
 
     # And the loop keeps working on the next call — one bad pass doesn't
     # wedge the refresher permanently.
-    monkeypatch.setattr(taskmod._checks, "run_all", lambda: [{"where": "In-app", "ok": True}])
+    monkeypatch.setattr(taskmod._checks, "run_all", lambda: [{"where": "Live + CI", "ok": False}])
     taskmod._run_one_refresh_iteration()
     assert taskmod._checks_cache is not None
-    assert taskmod._checks_cache[1] == 0
+    assert taskmod._checks_cache[1] == 1
     assert taskmod.refresher_status()["last_error"] is None   # a later success clears the error
 
 
@@ -1081,3 +1082,22 @@ def test_checks_refresher_banner_renders_all_three_states(refresher_state_reset)
     assert "failing" in failing
     assert "boom" in failing
     assert "var(--alert)" in failing
+
+
+@pytest.mark.parametrize("rows,expected", [
+    ([{"where": "Live + CI", "ok": False}], 1),
+    ([{"where": "Live + CI", "ok": True}], 0),
+    ([{"where": "Live + CI", "ok": None}], 0),
+    ([{"where": "CI", "ok": None}], 0),
+    ([{"where": "CI", "ok": False}], 0),
+    ([{"where": "In-app", "ok": False}], 0),   # a label run_all() never produces
+    ([{"where": "Live + CI", "ok": False}, {"where": "Live + CI", "ok": False},
+      {"where": "Live + CI", "ok": True}, {"where": "CI", "ok": None}], 2),
+])
+def test_failing_checks_count_counts_only_failing_live_ci_rows(monkeypatch, rows, expected):
+    """The badge filter matches the label run_all() really emits. It was
+    "In-app" from the badge's first commit (three days after that label was
+    renamed to "Live + CI"), so no failing check ever reached the badge."""
+    from webapp import tasks as taskmod
+    monkeypatch.setattr(taskmod._checks, "run_all", lambda: rows)
+    assert taskmod._compute_failing_checks_count() == expected
