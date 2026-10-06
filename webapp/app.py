@@ -26370,6 +26370,17 @@ _SCRIPT_REGISTRY = [
      ["python -m scripts.backfill_logos --db /data/library.db                 # preview (default limit 500)",
       "python -m scripts.backfill_logos --db /data/library.db --apply          # fetch + save for real",
       "python -m scripts.backfill_logos --db /data/library.db --status         # coverage report only"]),
+    ("restore_from_drive.py", "scripts.restore_from_drive", "Recurring and actively useful",
+     "Disaster-recovery restore: downloads a Drive snapshot straight onto the volume, validates it "
+     "(integrity check, FTS5 check, article count), keeps the current database as a "
+     "pre-restore copy, and swaps the snapshot in atomically. Exists because the UI upload cannot "
+     "pass Cloudflare's 100 MB request limit at the current database size. Refuses to replace an "
+     "existing file without --yes-replace-live; --dry-run downloads and validates only.",
+     "Disaster-only, plus a yearly rehearsal against a scratch path (RUNBOOK.md section 4).",
+     ["GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN (same as the daily backup)"],
+     ["python -m scripts.restore_from_drive --db /data/library.db --list",
+      "python -m scripts.restore_from_drive --db /data/restore-test.db --dry-run",
+      "python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live"]),
     ("audit_tool_logo_dimensions.py", "scripts.audit_tool_logo_dimensions", "Reusable diagnostic",
      "Read-only: reads every already-downloaded tool/community logo file on disk (PNG/JPEG/GIF/"
      "WEBP/ICO/SVG, parsed by hand—no Pillow) and flags ones that are undersized or have a "
@@ -36962,6 +36973,7 @@ def admin_backup(request: Request, uploaded: str = ""):
     <div class="backup-action-divider">
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately—no restart needed.</p>
+      {_upload_limit_note_html()}
       <form method="post" action="/admin/library-backup/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
         <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
           style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
@@ -39545,6 +39557,24 @@ async def admin_emails_save(section_id: str, request: Request):
     finally:
         lib.close()
     return JSONResponse({"ok": True})
+
+
+_UPLOAD_LIMIT_BYTES = 100_000_000  # Cloudflare Free/Pro request-body cap (100 MB)
+
+
+def _upload_limit_note_html(db_path: str | None = None) -> str:
+    """Visible warning beside the upload form once the live database is too
+    big for any browser upload to get through Cloudflare. Empty at or below
+    the limit. See RUNBOOK.md section 1, Path C."""
+    try:
+        size = os.path.getsize(db_path or DB_PATH)
+    except OSError:
+        return ""
+    if size <= _UPLOAD_LIMIT_BYTES:
+        return ""
+    return (f'<p class="upload-limit-note" style="font-size:13px;color:var(--alert);font-weight:600;margin:0 0 14px;">'
+            f'The live database is {size / 1_000_000:,.1f} MB. Uploading through this page fails above 100 MB. '
+            f'See RUNBOOK §1 for the restore script.</p>')
 
 
 @app.post("/admin/library-backup/upload-db", response_class=HTMLResponse)

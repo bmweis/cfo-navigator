@@ -11200,6 +11200,28 @@ it supersedes the old "`/save` is token-gated" note.
   and table on the pre-fix `/tools/fpa-buddy/how-it-works`. See BRAND.md section 8 and
   ARCHITECTURE.md's "Layout hardening batch".
 
+- **Restore at production size (2026-10, Refs #637) — the UI upload cannot work, so
+  restore runs on the container.** The 2026-10-06 rehearsal uploaded the real
+  253.8 MB `library.db` through `/admin/library-backup`: about 55 minutes of
+  spinner and no `POST /admin/library-backup/upload-db` line in Railway logs, because
+  Cloudflare Free rejects request bodies over 100 MB (the July rehearsal used a
+  5-article database, so size was never exercised). `scripts/restore_from_drive.py`
+  (RUNBOOK §1 Path C) downloads a Drive snapshot straight to the volume with the
+  daily backup's own OAuth client, checks size/md5/`integrity_check`/FTS5/article
+  count, keeps the current file as `<db>.pre-restore-<timestamp>` (hard link, copy
+  fallback, never deleted), `os.replace`s it in and clears `-wal`/`-shm`. It refuses
+  to replace an existing destination without `--yes-replace-live`; `--dry-run`
+  writes nothing to the destination. New helpers in `linklib/backup.py`:
+  `list_snapshots`, `find_backup_folders`, `download_snapshot`. The folder id
+  normally lives in the `settings` table, which is inside the database being
+  restored, so the script falls back to finding the folder by name (visible under
+  `drive.file` because the app created it). `/admin/library-backup` shows a visible
+  sentence beside the upload form when the live database is over 100 MB. Not built,
+  by decision: a restore picker in the UI (it would need a status record stored
+  outside the database being replaced) and chunked upload. Not verified from the
+  sandbox: Drive access, the container's environment variables, Railway's request
+  duration cap. See `tests/test_restore_from_drive.py`.
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a

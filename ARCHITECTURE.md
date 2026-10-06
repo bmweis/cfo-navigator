@@ -11456,3 +11456,16 @@ follow-up textarea (`.fu textarea`) is a separate rule. See `tests/test_buddy_re
 
 **Open web (2026-10): Current feed and Open web are one web search, scoped.** Current feed (`use_feed`, chip key `feed`) is the RSS items plus an Exa search restricted to the trusted domains; Open web (`use_web`, chip key `open_web`) is the same single Exa call with `includeDomains` omitted. Both on is still one unrestricted call (`linklib.agent.web_scope_for`, `retrieve_exa(restrict=)`); the native `web_search_20250305` fallback follows the same rule (`allowed_domains` only when Open web is off). Web hits and web citations carry `trusted` (domain match against `preferred_domains()`, subdomains count); the citation list tags only an explicit `trusted: false` as "Open web". Defaults: Curated archive on, Current feed on, Open web off. `POST /ask` accepts the old `web` source key as Current feed, so a stale tab never becomes unrestricted; only `open_web` turns it on. The MCP tool `ask_fpa_buddy` maps `feed` and `web` in `sources` to Current feed and adds an `open_web` boolean (default false). The system prompt tells the model that source text is untrusted data, never instructions. Cost: one Exa call per turn whenever either is on, about $0.007 at any depth (admin estimates add it when Current feed or Open web is on). The native fallback's searches are not metered. Adding `excludeDomains` later would be one more key on the same payload in `retrieve_exa` plus a settings row for the list.
 - **Software Name refuses a web address (2026-10, Refs #698).** `_tool_name_refusals(form)` runs ahead of `_tool_limit_refusals` in `admin_tools_new_submit` and `admin_tools_edit_submit`, so a Name that contains `://` or starts with `www.`, `http:` or `https:` (case-insensitive, trimmed) returns the same 400 "Nothing was saved" re-render, with "This looks like a web address. Enter the vendor's name." and the typed values kept. It runs before `add_tool`/`update_tool`, so before any slug: the name slug of `https://cfo.ai` would be `httpscfoai` (only the fallback when the URL field has no host). A bare domain-style name such as `cfo.ai` saves. A real name such as HTTPie saves (only the `http:` and `https:` prefixes are refused). `_refusal_banner_html` items are now `(label, length, limit)` or `(label, message)`. Tests: `tests/test_tool_name_url_check.py`.
+
+### Restore from Drive on the container (2026-10)
+
+`scripts/restore_from_drive.py` is the disaster-recovery path. The browser path
+(`POST /admin/library-backup/upload-db`) is capped by Cloudflare's 100 MB request
+body limit and cannot carry the roughly 254 MB database. Flow: Drive
+(`linklib.backup.list_snapshots`/`download_snapshot`, same OAuth client as the
+daily backup) streams to a temp file beside the destination, is validated
+(size, md5, `check_integrity`, article count), the current file is hard-linked
+to `<db>.pre-restore-<timestamp>`, then `os.replace` swaps it in and `-wal`/`-shm`
+are removed. The Drive folder id comes from `--folder-id`, `GOOGLE_DRIVE_FOLDER_ID`,
+the `settings` row (`backup_drive_folder_id`) if the old file still opens, or a
+search by folder name. See RUNBOOK.md §1 Path C and §4.
