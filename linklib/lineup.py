@@ -79,13 +79,14 @@ def check_lineup(lib, *, fetch: bool = True) -> dict:
     from .agent import DEFAULT_MODEL, EFFORT_SETTINGS
     from .pricing import MODEL_PRICING
     live = _models._live_models() if fetch else _models.cached_live_models()
-    ignored = {e["id"] for e in lib.list_models_not_using()}
+    ignored = lib.list_ignored_model_ids()
     extra = {DEFAULT_MODEL, _models.DEFAULT_CHAT_MODEL, lib.get_enrich_model()}
     return lineup_findings(
         live,
         registry_ids={m["id"] for m in _models._REGISTRY},
         tier_ids={s["model"] for s in EFFORT_SETTINGS.values()},
-        priced_ids=set(MODEL_PRICING),
+        priced_ids=set(MODEL_PRICING) | {r['model_id'] for r in lib.list_model_pricing()
+                                         if not lib.pricing_problems(r)},
         extra_in_use=extra,
         ignored_ids=ignored,
     )

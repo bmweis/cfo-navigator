@@ -67,7 +67,7 @@ import time
 from linklib import backup as _backup
 from linklib.db import Library
 from linklib.models import models_review_is_stale
-from linklib.pricing import exa_pricing_review_is_stale, pricing_review_is_stale
+from linklib.pricing import exa_pricing_review_is_stale
 from webapp import checks as _checks
 
 _logger = logging.getLogger(__name__)
@@ -571,7 +571,7 @@ def _stale_admin_checks_reminders(lib: Library) -> int:
     the /admin/checks href would double the total past what's actually
     pending, which is precisely what was flagged as a real risk here."""
     return sum([
-        pricing_review_is_stale(lib.get_setting("pricing_last_verified")),
+        bool(lib.pricing_freshness()["stale_ids"]),
         models_review_is_stale(lib.get_setting("models_last_reviewed")) or _lineup_has_findings(lib),
         exa_pricing_review_is_stale(lib.get_setting("exa_pricing_last_verified")),
     ])

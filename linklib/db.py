@@ -138,6 +138,38 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL DEFAULT ''
 );
 
+-- Model pricing (PR 3a, 2026-10): USD per million tokens, one row per model,
+-- edited on /admin/system/ai. A NULL rate means "not confirmed" and is never
+-- guessed from a multiplier. verified_on is the date a person checked the row
+-- against Anthropic's pricing page ('' = never verified). A model whose row
+-- has a NULL rate or no verified_on cannot be enabled for any role. The
+-- linklib.pricing dicts are only the seed source and last-resort fallback.
+CREATE TABLE IF NOT EXISTS model_pricing (
+    model_id       TEXT PRIMARY KEY,
+    input          REAL,
+    output         REAL,
+    cache_write    REAL,
+    cache_write_1h REAL,
+    cache_read     REAL,
+    verified_on    TEXT NOT NULL DEFAULT '',
+    source_note    TEXT NOT NULL DEFAULT '',
+    updated_at     TEXT NOT NULL DEFAULT ''
+);
+
+-- Model catalog (PR 3a): one row per model with a stored status. "In use" is
+-- derived from role assignments (PR 3b), never stored. Only an admin action
+-- sets status: seeding, the lineup check and background passes never do.
+-- Status 'not_using' replaces the old models_not_using settings list;
+-- 'deactivated' is a flag, never a delete (pricing and cost history stay).
+CREATE TABLE IF NOT EXISTS model_catalog (
+    model_id          TEXT PRIMARY KEY,
+    status            TEXT NOT NULL DEFAULT 'available'
+                      CHECK (status IN ('available','not_using','deactivated')),
+    reason            TEXT NOT NULL DEFAULT '',
+    note              TEXT NOT NULL DEFAULT '',
+    status_changed_at TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT NOT NULL UNIQUE,
@@ -9138,34 +9170,173 @@ class Library:
     def set_enrich_model(self, model_id: str) -> None:
         self.set_setting("enrich_model", model_id.strip())
 
-    # The "not using" list for the /admin/checks models diff: live Anthropic
-    # models the app deliberately doesn't use, each with a reason. A JSON list in
-    # one settings row, so it needs no table. A decision is only ever removed by
-    # a person (remove_model_not_using); the check never deletes an entry.
-    def list_models_not_using(self) -> list[dict]:
-        import json
-        try:
-            raw = json.loads(self.get_setting("models_not_using") or "[]")
-        except ValueError:
-            return []
-        return [e for e in raw if isinstance(e, dict) and e.get("id")]
+    # ------------------------------------------------------------------
+    # Model catalog and pricing (PR 3a). Status is only ever set by an admin
+    # action (set_model_status and its wrappers below); seeding never
+    # overwrites it and nothing in a background pass calls these.
+    # ------------------------------------------------------------------
+    MODEL_STATUSES = ("available", "not_using", "deactivated")
+    _PRICE_FIELDS = ("input", "output", "cache_write", "cache_write_1h", "cache_read")
 
-    def add_model_not_using(self, model_id: str, reason: str) -> bool:
-        """Record a model as deliberately unused. Refuses a blank id or reason
-        (a decision with no reason is not a record). Returns False if refused."""
+    def seed_model_catalog(self) -> dict:
+        """One-time seed of model_catalog and model_pricing, guarded by a
+        settings flag (never an emptiness check, so a deliberately removed
+        row is not resurrected). Registry and Buddy-tier models become
+        'available'; every entry in the legacy models_not_using setting is
+        carried across as 'not_using' with its reason. INSERT OR IGNORE means
+        a row that already exists (edited or not) is never overwritten."""
         import json
+        from .agent import EFFORT_SETTINGS
+        from .models import _REGISTRY
+        from .pricing import seed_pricing_rows
+        if self.get_setting("model_catalog_seeded") == "1":
+            return {"seeded": False}
+        now = _now()
+        ids = [m["id"] for m in _REGISTRY] + [t["model"] for t in EFFORT_SETTINGS.values()]
+        for mid in dict.fromkeys(ids):
+            self.conn.execute(
+                "INSERT OR IGNORE INTO model_catalog(model_id, status, status_changed_at) VALUES (?, 'available', ?)",
+                (mid, now))
+        try:
+            legacy = json.loads(self.get_setting("models_not_using") or "[]")
+        except ValueError:
+            legacy = []
+        carried = 0
+        for e in legacy:
+            if not (isinstance(e, dict) and e.get("id")):
+                continue
+            self.conn.execute(
+                "INSERT INTO model_catalog(model_id, status, reason, status_changed_at) "
+                "VALUES (?, 'not_using', ?, ?) ON CONFLICT(model_id) DO UPDATE SET "
+                "status='not_using', reason=excluded.reason, status_changed_at=excluded.status_changed_at",
+                (e["id"], e.get("reason", ""), e.get("added_at") or now))
+            carried += 1
+        for mid, row in seed_pricing_rows().items():
+            self.conn.execute(
+                "INSERT OR IGNORE INTO model_pricing(model_id, input, output, cache_write, cache_write_1h, "
+                "cache_read, verified_on, source_note, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (mid, row["input"], row["output"], row["cache_write"], row["cache_write_1h"],
+                 row["cache_read"], row["verified_on"], row["source_note"], now))
+        self.conn.commit()
+        self.set_setting("model_catalog_seeded", "1")
+        return {"seeded": True, "not_using_carried": carried}
+
+    def list_model_catalog(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM model_catalog ORDER BY model_id").fetchall()]
+
+    def get_model_status(self, model_id: str) -> str | None:
+        r = self.conn.execute("SELECT status FROM model_catalog WHERE model_id=?", (model_id,)).fetchone()
+        return r["status"] if r else None
+
+    def set_model_status(self, model_id: str, status: str, reason: str = "") -> bool:
+        """Admin action only. 'not_using' requires a reason (a decision with no
+        reason is not a record). Creates the catalog row if the id is new."""
         model_id, reason = (model_id or "").strip(), (reason or "").strip()
-        if not model_id or not reason:
+        if not model_id or status not in self.MODEL_STATUSES:
             return False
-        entries = [e for e in self.list_models_not_using() if e["id"] != model_id]
-        entries.append({"id": model_id, "reason": reason, "added_at": _now()})
-        self.set_setting("models_not_using", json.dumps(entries))
+        if status == "not_using" and not reason:
+            return False
+        self.conn.execute(
+            "INSERT INTO model_catalog(model_id, status, reason, status_changed_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(model_id) DO UPDATE SET status=excluded.status, reason=excluded.reason, "
+            "status_changed_at=excluded.status_changed_at",
+            (model_id, status, reason, _now()))
+        self.conn.commit()
         return True
 
+    # The "not using" list for the /admin/checks models diff, now backed by
+    # model_catalog.status. A decision is only ever removed by a person.
+    def list_models_not_using(self) -> list[dict]:
+        return [{"id": r["model_id"], "reason": r["reason"], "added_at": r["status_changed_at"]}
+                for r in self.conn.execute(
+                    "SELECT * FROM model_catalog WHERE status='not_using' ORDER BY model_id").fetchall()]
+
+    def list_ignored_model_ids(self) -> set[str]:
+        """Models the lineup check should not flag as unknown: a person has
+        marked them not_using or deactivated."""
+        return {r["model_id"] for r in self.conn.execute(
+            "SELECT model_id FROM model_catalog WHERE status IN ('not_using','deactivated')").fetchall()}
+
+    def add_model_not_using(self, model_id: str, reason: str) -> bool:
+        return self.set_model_status(model_id, "not_using", reason)
+
     def remove_model_not_using(self, model_id: str) -> None:
-        import json
-        entries = [e for e in self.list_models_not_using() if e["id"] != (model_id or "").strip()]
-        self.set_setting("models_not_using", json.dumps(entries))
+        if self.get_model_status((model_id or "").strip()) == "not_using":
+            self.set_model_status(model_id, "available")
+
+    def list_model_pricing(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM model_pricing ORDER BY model_id").fetchall()]
+
+    def get_model_pricing(self, model_id: str) -> dict | None:
+        r = self.conn.execute("SELECT * FROM model_pricing WHERE model_id=?", (model_id,)).fetchone()
+        return dict(r) if r else None
+
+    @staticmethod
+    def pricing_problems(row: dict | None) -> list[str]:
+        """What is missing before a model may be enabled: every rate set and a
+        verified_on date. Empty list means complete and verified."""
+        if not row:
+            return ["no pricing row"]
+        out = [f"{f.replace('_', ' ')} rate" for f in Library._PRICE_FIELDS if row.get(f) is None]
+        if not (row.get("verified_on") or "").strip():
+            out.append("verified date")
+        return out
+
+    def model_enable_problems(self, model_id: str) -> list[str]:
+        """Reasons a model cannot be switched on for any role (save-time refusal)."""
+        status = self.get_model_status(model_id)
+        if status == "deactivated":
+            return ["it is deactivated"]
+        row = self.get_model_pricing(model_id)
+        from .pricing import MODEL_PRICING
+        if row is None and model_id in MODEL_PRICING:
+            return []   # not seeded yet: the verified code dict is the seed source
+        missing = self.pricing_problems(row)
+        return [f"missing {m}" if m != "no pricing row" else m for m in missing]
+
+    def pricing_freshness(self) -> dict:
+        """Per-row 90-day freshness for models a person has not marked
+        not_using or deactivated. stale_ids: verified but 90+ days old.
+        unverified_ids: no verified date (listed, but not counted as due:
+        such a model cannot be enabled, so no spend rides on the rate)."""
+        from .pricing import row_pricing_state
+        ignored = self.list_ignored_model_ids()
+        stale, unverified, dates = [], [], []
+        for r in self.list_model_pricing():
+            if r["model_id"] in ignored:
+                continue
+            st = row_pricing_state(r["verified_on"])
+            if st == "unverified":
+                unverified.append(r["model_id"])
+                continue
+            dates.append(r["verified_on"])
+            if st == "stale":
+                stale.append(r["model_id"])
+        return {"oldest": min(dates) if dates else "", "stale_ids": stale, "unverified_ids": unverified}
+
+    def set_model_pricing(self, model_id: str, rates: dict, *, verified: bool,
+                          source_note: str = "") -> None:
+        """Admin edit. Rates are floats or None (blank). verified=True stamps
+        today's date; otherwise any earlier verified_on is cleared, because
+        changed rates have not been checked against the page."""
+        vals = []
+        for f in self._PRICE_FIELDS:
+            v = rates.get(f)
+            vals.append(None if v is None else float(v))
+        today = datetime.now(timezone.utc).date().isoformat() if verified else ""
+        self.conn.execute(
+            "INSERT INTO model_pricing(model_id, input, output, cache_write, cache_write_1h, cache_read, "
+            "verified_on, source_note, updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(model_id) DO UPDATE SET input=excluded.input, output=excluded.output, "
+            "cache_write=excluded.cache_write, cache_write_1h=excluded.cache_write_1h, "
+            "cache_read=excluded.cache_read, verified_on=excluded.verified_on, "
+            "source_note=excluded.source_note, updated_at=excluded.updated_at",
+            (model_id, *vals, today, (source_note or "").strip(), _now()))
+        self.conn.commit()
+        from .pricing import reset_price_cache
+        reset_price_cache()
 
     def get_effective_ask_cap(self, user_id: int) -> float:
         """The dollar cap that actually applies to this user this month —

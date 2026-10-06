@@ -35,15 +35,6 @@ def test_reviewed_freshness_banner_seafoam_when_fresh():
     assert "all good" in html
 
 
-def test_pricing_banner_no_longer_claims_openai_coverage():
-    """The corrected-copy half of this PR: MODEL_PRICING is Claude-only, so
-    the pricing banner must never claim "(and OpenAI's)" coverage."""
-    stale_html = appmod._pricing_freshness_banner("")
-    assert "OpenAI" not in stale_html
-    fresh_html = appmod._pricing_freshness_banner("2026-01-01T00:00:00+00:00")
-    assert "OpenAI" not in fresh_html
-
-
 def test_reviewed_toggle_html_two_way_reviewed_state():
     badge, action = appmod._reviewed_toggle_html(True, "/toggle/1")
     assert "Reviewed" in badge

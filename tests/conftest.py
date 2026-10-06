@@ -11,6 +11,7 @@ Two autouse behaviors, both kept deliberately small and explicit:
      - linklib.feed   : the per-feed 30-minute cache
      - linklib.models : the live Models API cache
      - linklib.sources: preferred_domains()'s lru_cache
+     - linklib.pricing: the model_pricing price cache and its warned-once set
    NOT reset, on purpose: webapp.tasks._static_check_cache. That one is a
    pure function of on-disk source and is meant to live for the whole process
    (see the long comment above it in webapp/tasks.py; resetting it per test
@@ -54,6 +55,8 @@ def _reset_module_globals() -> None:
     models._cache["data"] = None
     models._cache["at"] = 0.0
     sources.preferred_domains.cache_clear()
+    from linklib import pricing
+    pricing.reset_price_cache()
 
 
 def _wants_real_coral(request) -> bool:

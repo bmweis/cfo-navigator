@@ -6,7 +6,7 @@ billing figures, not a token-count proxy. This is separate from
 `agent.COST_ESTIMATES`, which is a rough *pre-call* estimate shown in the UI
 before a question is asked (we don't know real usage until the call returns).
 
-Pricing checked 2026-07-02 against Anthropic's published rates, re-verified
+Pricing seed (PR 3a: the live source is the model_pricing table; these dicts are the seed and last-resort fallback). Checked 2026-07-02 against Anthropic's published rates, re-verified
 2026-09-07 (issue #98). Sonnet 5's introductory rate ($2/$10 per MTok,
 instead of the originally-planned standard $3/$15) is now permanent — the
 planned September 1 increase to $3/$15 was cancelled by Anthropic, so no
@@ -33,6 +33,14 @@ from datetime import datetime, timezone
 # /admin/checks banner it backs used to say "(and OpenAI's)," asserting
 # coverage this table doesn't actually have).
 PRICING_REVIEW_STALE_DAYS = 90
+
+
+def row_pricing_state(verified_on: str, *, now: datetime | None = None) -> str:
+    """'unverified' (no date), 'stale' (90+ days) or 'fresh', for one pricing
+    row. Replaces the single global timestamp: each row ages on its own."""
+    if not (verified_on or "").strip():
+        return "unverified"
+    return "stale" if pricing_review_is_stale(verified_on, now=now) else "fresh"
 
 
 def pricing_review_is_stale(last_verified_iso: str, *, now: datetime | None = None) -> bool:
@@ -74,14 +82,113 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 
 _FALLBACK = MODEL_PRICING["claude-sonnet-4-6"]
 
+# The five rows above were checked against Anthropic's pricing page on this
+# date (PR 3a seed). Rows added below are NOT verified.
+SEED_PRICING_VERIFIED_ON = "2026-09-28"
+
+# Models added to the catalog before their pricing is confirmed. A None rate
+# means "not confirmed": it is never filled from a multiplier. Source: the
+# cached API reference of 2026-09-25, not confirmed against the live page.
+# Fable 5's cache read is left empty too: the reference's $1.00 is exactly 0.1x
+# input, the multiplier guess this table avoids, and Fable 5.1 does not follow it.
+# Cache-write rates are unconfirmed for all three, so every row here is
+# incomplete and the model cannot be enabled for any role until a person
+# fills the gaps and verifies the row on /admin/system/ai.
+_UNVERIFIED_NOTE = "from cached API reference 2026-09-25, not confirmed against the live page"
+SEED_ONLY_PRICING: dict[str, dict] = {
+    "claude-fable-5":   {"input": 10.0, "output": 50.0, "cache_write": None, "cache_write_1h": None, "cache_read": None},
+    "claude-fable-5-1": {"input": 10.0, "output": 50.0, "cache_write": None, "cache_write_1h": None, "cache_read": 0.25},
+    "claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_write": None, "cache_write_1h": None, "cache_read": 0.20},
+}
+
+
+def seed_pricing_rows() -> dict[str, dict]:
+    """Rows for the one-time model_pricing seed: the verified code dict plus
+    the unverified, deliberately incomplete additions."""
+    rows = {mid: {**r, "verified_on": SEED_PRICING_VERIFIED_ON, "source_note": ""}
+            for mid, r in MODEL_PRICING.items()}
+    for mid, r in SEED_ONLY_PRICING.items():
+        rows[mid] = {**r, "verified_on": "", "source_note": _UNVERIFIED_NOTE}
+    return rows
+
+
+import logging
+import os
+import sqlite3
+import threading
+import time
+
+_logger = logging.getLogger(__name__)
+
+# Price cache. compute_cost has no Library handle (a dozen call sites), so it
+# reads model_pricing straight from LINKLIB_DB and caches per db path. An
+# admin edit calls reset_price_cache() in its own process; another uvicorn
+# worker would only see the change when its entry expires, so entries live
+# _PRICE_TTL seconds (the app runs one worker today; a second would be stale
+# for at most this long). Tests reset it in tests/conftest.py.
+_PRICE_TTL = 60.0
+_price_cache: dict = {}
+_price_lock = threading.Lock()
+_warned: set = set()
+
+
+def reset_price_cache() -> None:
+    with _price_lock:
+        _price_cache.clear()
+        _warned.clear()
+
+
+def _db_rates() -> dict[str, dict]:
+    """Complete model_pricing rows from the DB, {} when unavailable."""
+    path = os.environ.get("LINKLIB_DB", "")
+    if not path or not os.path.exists(path):
+        return {}
+    now = time.time()
+    with _price_lock:
+        hit = _price_cache.get(path)
+        if hit and now - hit[0] < _PRICE_TTL:
+            return hit[1]
+    rates: dict[str, dict] = {}
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2.0)
+        try:
+            conn.row_factory = sqlite3.Row
+            for r in conn.execute("SELECT * FROM model_pricing").fetchall():
+                row = {k: r[k] for k in ("input", "output", "cache_write", "cache_write_1h", "cache_read")}
+                if all(v is not None for v in row.values()):
+                    rates[r["model_id"]] = row
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return {}
+    with _price_lock:
+        _price_cache[path] = (now, rates)
+    return rates
+
+
+def rates_for(model: str) -> dict[str, float]:
+    """DB row if complete, else the code dict (last resort), else the Sonnet
+    4.6 fallback with a warning (once per model per process)."""
+    rates = _db_rates().get(model) or MODEL_PRICING.get(model)
+    if rates is None:
+        with _price_lock:
+            first = model not in _warned
+            _warned.add(model)
+        if first:
+            _logger.warning("compute_cost: no complete pricing for model %r; billing at Sonnet 4.6 "
+                            "rates. Fix it on /admin/system/ai.", model)
+        return _FALLBACK
+    return rates
+
 
 def compute_cost(model: str, input_tokens: int = 0, output_tokens: int = 0,
                  cache_creation_tokens: int = 0, cache_read_tokens: int = 0,
                  cache_creation_1h_tokens: int = 0) -> float:
     """Exact USD cost for one API call from its real token usage.
 
-    Falls back to Sonnet 4.6 rates for a model not in `MODEL_PRICING` so an
-    unrecognized model ID never silently records a $0 cost.
+    Rates come from the model_pricing table (see rates_for). A model with no
+    complete row anywhere falls back to Sonnet 4.6 rates, never $0, and logs
+    a warning.
 
     `cache_creation_tokens` are priced at the 5-minute-TTL write rate;
     `cache_creation_1h_tokens` (the 1-hour-TTL share of cache writes, a
@@ -89,7 +196,7 @@ def compute_cost(model: str, input_tokens: int = 0, output_tokens: int = 0,
     Pass each bucket once: a 1-hour token must not also be counted in
     `cache_creation_tokens`.
     """
-    rates = MODEL_PRICING.get(model, _FALLBACK)
+    rates = rates_for(model)
     return (
         input_tokens * rates["input"]
         + output_tokens * rates["output"]

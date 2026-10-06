@@ -75,6 +75,15 @@ _REGISTRY: list[dict] = [
     # default effort of medium; no call in this repo sets thinking or effort.
     {"id": "claude-opus-5-5", "label": "Opus 5.5", "short": "Best quality · newest",
      "enrich": "Deepest summaries, and cheaper than Opus 5. The one to standardize the archive on."},
+    # Added to the catalog before their pricing is verified (PR 3a). They are
+    # listed so an admin can see them, but cannot be enabled for any role until
+    # their model_pricing row is complete and verified (Library.model_enable_problems).
+    {"id": "claude-sonnet-5-5", "label": "Sonnet 5.5", "short": "Balanced · newest",
+     "enrich": "Newest balanced model. Pricing not yet verified, so it cannot be switched on."},
+    {"id": "claude-fable-5", "label": "Fable 5", "short": "Frontier · previous generation",
+     "enrich": "Previous Fable release. Pricing not yet verified, so it cannot be switched on."},
+    {"id": "claude-fable-5-1", "label": "Fable 5.1", "short": "Frontier · newest",
+     "enrich": "Most capable model. Requires 30-day data retention. Pricing not yet verified, so it cannot be switched on."},
 ]
 
 _API_TTL = 1800.0  # 30 min, matching the feed cache
