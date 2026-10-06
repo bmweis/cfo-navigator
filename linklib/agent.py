@@ -62,7 +62,7 @@ EFFORT_SETTINGS: dict[str, dict] = {
     #   retrieves many long articles can't balloon the prompt (cost guard).
     "quick":    {"model": "claude-haiku-4-5-20251001", "max_library": 4,  "max_feed": 3,  "max_web": 2, "max_tokens": 700,  "source_chars": 900,  "global_chars": 6000},
     "standard": {"model": "claude-sonnet-4-6",         "max_library": 8,  "max_feed": 5,  "max_web": 4, "max_tokens": 1500, "source_chars": 1800, "global_chars": 16000},
-    "deep":     {"model": "claude-opus-4-8",           "max_library": 16, "max_feed": 8,  "max_web": 6, "max_tokens": 2500, "source_chars": 3500, "global_chars": 40000},
+    "deep":     {"model": "claude-opus-4-8",           "max_library": 16, "max_feed": 8,  "max_web": 6, "max_tokens": 4000, "source_chars": 3500, "global_chars": 40000},
 }
 
 # Conversation cost guards — invisible and server-enforced, so a monetized user
