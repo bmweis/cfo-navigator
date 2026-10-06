@@ -26176,7 +26176,7 @@ _ADMIN_GROUPS = [
     # groups side by side read the same and cost nothing.
     ("Configuration", "Accounts, AI settings, and the site's open-source credits.", [
         ("/admin/users",           "Users",               "Create and manage user accounts for the gated sections."),
-        ("/admin/system/ai",       "AI configuration and usage", "The enrichment model, the Exa web-search toggle, and a map of every AI surface in the app."),
+        ("/admin/system/ai",       "AI configuration and usage", "The enrichment model, model pricing and allowed roles, the Exa web-search toggle, and a map of every AI surface in the app."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
     ]),
     ("Health and maintenance", "Automated checks, spend, backups, and database tools.", [
@@ -28451,15 +28451,20 @@ _ANTHROPIC_PRICING_URL = "https://www.anthropic.com/pricing"
 
 
 _SW_CARD_CSS = '''.sw-form{margin:0;display:inline-flex;}
-.sw-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:28px;}
-.sw-main{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;}
+.sw-cell{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;white-space:nowrap;min-height:28px;}
+.sw-main{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
 .sw-word{font-size:13px;color:var(--ink-soft);}
-.sw-flag{display:inline-block;background:var(--coral-wash);color:var(--navy);border-radius:5px;padding:2px 8px;font-size:11.5px;font-weight:600;text-decoration:none;white-space:nowrap;}
+.sw-flag{display:inline-block;background:var(--coral-wash);color:var(--navy);border-radius:5px;padding:2px 6px;font-size:11.5px;font-weight:600;text-decoration:none;white-space:nowrap;}
 .sw-model .sw-id{font-size:11.5px;color:var(--muted);font-weight:400;}
 .sw-todo{margin:0;padding-left:16px;font-size:13px;}
 .sw-ready,.sw-note{font-size:13px;color:var(--muted);}
 .sw-notes{margin:14px 0 0;font-size:13px;color:var(--ink-soft);line-height:1.6;display:grid;gap:6px;}
-.sw-table td,.sw-table th,.sw-log td,.sw-log th{padding:10px 12px;vertical-align:top;}'''
+.sw-table{table-layout:fixed;}
+.sw-table col.sw-c-model{width:140px;}
+.sw-table col.sw-c-role{width:172px;}
+.sw-table td,.sw-table th,.sw-log td,.sw-log th{padding:10px 12px;vertical-align:top;}
+.sw-table td.sw-rc,.sw-table th.sw-rc{padding-left:8px;padding-right:8px;}
+.sw-table .sw-id{overflow-wrap:anywhere;}'''
 
 
 def _switch_html(on: bool, *, label: str, disabled: bool = False) -> str:
@@ -28515,7 +28520,7 @@ def _allowed_roles_card_html(info: dict, log: list[dict]) -> str:
                        f'<input type="hidden" name="role" value="{role}">'
                        f'<input type="hidden" name="allow" value="{nxt}">{_switch_html(on, label=label)}</form>')
                 word = "On" if on else "Off"
-            cells.append(f'<td><div class="sw-cell"><span class="sw-main">{ctl}<span class="sw-word">{word}</span></span>{flag}</div></td>')
+            cells.append(f'<td class="sw-rc"><div class="sw-cell"><span class="sw-main">{ctl}<span class="sw-word">{word}</span></span>{flag}</div></td>')
         todo = []
         if d["status"] == "not_using":
             todo.append("Set status to available")
@@ -28527,7 +28532,8 @@ def _allowed_roles_card_html(info: dict, log: list[dict]) -> str:
                      if todo else '<span class="sw-ready">Ready</span>')
         rows.append(f'<tr><td class="sw-model"><strong>{_esc(model_display_name(mid))}</strong>'
                     f'<div class="sw-id">{_esc(mid)}</div></td>{"".join(cells)}<td>{todo_html}</td></tr>')
-    head = "".join(f"<th>{t}</th>" for t in ["Model", *[ROLE_LABELS[r] for r in ROLES], "To do"])
+    head = "".join(f"<th>{t}</th>" for t in ["Model"]) + "".join(f'<th class="sw-rc">{ROLE_LABELS[r]}</th>' for r in ROLES) + "<th>To do</th>"
+    colgroup = '<colgroup><col class="sw-c-model">' + '<col class="sw-c-role">' * len(ROLES) + '<col></colgroup>'
     log_rows = "".join(
         f'<tr><td style="white-space:nowrap;">{_esc(_fmt_log_time(l["created_at"]))}</td>'
         f'<td>{_esc(model_display_name(l["model_id"]))}</td><td>{_esc(ROLE_LABELS.get(l["role"], l["role"]))}</td>'
@@ -28545,7 +28551,7 @@ def _allowed_roles_card_html(info: dict, log: list[dict]) -> str:
             f'font-size:13.5px;">Edit allowed roles</summary>'
             f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Turning a role on doesn&rsquo;t enable the model. '
             f'It also needs verified pricing and status available. Changes apply immediately.</p>'
-            f'<div class="table-frame" style="overflow-x:auto;"><table class="sw-table" style="min-width:{_TABLE_FLOOR_XWIDE}px;"><thead><tr>{head}</tr></thead>'
+            f'<div class="table-frame" style="overflow-x:auto;"><table class="sw-table" style="min-width:1180px;">{colgroup}<thead><tr>{head}</tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table></div>{notes}{log_html}</details>')
 
 
