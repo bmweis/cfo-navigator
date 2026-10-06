@@ -27900,15 +27900,12 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
 
 
 def _enrich_model_label(model_id: str) -> str:
-    """Friendly label for a model id, from the same curated registry every
-    picker uses — falls back to the raw id for a model that's retired from
-    the registry or was set via the LINKLIB_ENRICH_MODEL env var fallback
-    rather than picked from the dropdown."""
-    from linklib.models import models_for
-    for m in models_for(blurb="short", allow_new=False):
-        if m["id"] == model_id:
-            return m["label"]
-    return model_id
+    """Friendly label for a model id: the registry label, else a readable form
+    of the id (claude-opus-4-8 -> Opus 4.8), else the id itself. One source,
+    `linklib.models.model_display_name`, so every card on this page names a
+    model the same way."""
+    from linklib.models import model_display_name
+    return model_display_name(model_id)
 
 
 def _ai_model_config_html(current: str) -> str:
@@ -28244,9 +28241,9 @@ def admin_system_ai(request: Request):
 <p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Changes take effect immediately. No redeploy.</p>
 {_card("Enrichment model", _ai_model_config_html(enrich_model))}
 {_card("Matchmaker model", _matchmaker_model_html(matchmaker_model, matchmaker_blocks))}
-{_card("FP&amp;A Buddy tiers", _buddy_tiers_html(buddy_models, buddy_blocks))}
+{_card("FP&A Buddy tiers", _buddy_tiers_html(buddy_models, buddy_blocks))}
 {_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, enable_blocks, role_info))}
-{_card("Allowed roles", _allowed_roles_card_html(roles_editor, roles_log))}
+{_allowed_roles_card_html(roles_editor, roles_log)}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
 
 <h2 style="margin:28px 0 4px;">Usage index</h2>
@@ -28547,12 +28544,12 @@ def _allowed_roles_card_html(info: dict, log: list[dict]) -> str:
              f'Fable models. {_esc(MATCHMAKER_BLOCK_REASON)}. Both stay off until <code>ask()</code> is checked for always-on thinking.</div>'
              f'<div><strong>In use.</strong> A model assigned to a role can&rsquo;t be switched off for it. Assign another model first.</div>'
              f'<div><strong>Test first.</strong> Enrichment for this model needs the test on the confirm step before it can be switched on.</div></div>')
-    return (f'<style>{_SW_CARD_CSS}</style><details id="allowed-roles" style="scroll-margin-top:16px;"><summary style="cursor:pointer;color:var(--accent);'
-            f'font-size:13.5px;">Edit allowed roles</summary>'
-            f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Turning a role on doesn&rsquo;t enable the model. '
-            f'It also needs verified pricing and status available. Changes apply immediately.</p>'
-            f'<div class="table-frame" style="overflow-x:auto;"><table class="sw-table" style="min-width:1180px;">{colgroup}<thead><tr>{head}</tr></thead>'
-            f'<tbody>{"".join(rows)}</tbody></table></div>{notes}{log_html}</details>')
+    inner = (f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Turning a role on doesn&rsquo;t enable the model. '
+             f'It also needs verified pricing and status available. Changes apply immediately.</p>'
+             f'<div class="table-frame" style="overflow-x:auto;"><table class="sw-table" style="min-width:1180px;">{colgroup}<thead><tr>{head}</tr></thead>'
+             f'<tbody>{"".join(rows)}</tbody></table></div>{notes}{log_html}')
+    return (f'<style>{_SW_CARD_CSS}</style><div id="allowed-roles" style="scroll-margin-top:16px;">'
+            + _disclosure_group("Allowed roles", inner, count_label="Switch each model on or off for each role") + '</div>')
 
 
 def _roles_error_page(request: Request, msg: str):

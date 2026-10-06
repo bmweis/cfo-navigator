@@ -172,7 +172,7 @@ def _stored(model, db=None):
 def _card(env, c=None):
     html = (c or _admin(env)).get("/admin/system/ai").text
     i = html.index('id="allowed-roles"')
-    return html[i:html.index("</details>", i)]
+    return html[i:html.index("</details></div>", i)]
 
 
 def _switches(card):
@@ -190,7 +190,7 @@ def _cell(card, model, role_index):
 def test_editor_section_is_collapsed_and_uses_switches_with_short_words(env):
     html = _admin(env).get("/admin/system/ai").text
     i = html.index('id="allowed-roles"')
-    assert html[i - 10:i + 200].count("<details") == 1 and " open" not in html[i:i + 60]
+    assert html[i:i + 200].count("<details") == 1 and "<details class=\"admin-group\" open" not in html[i:i + 300]
     card = _card(env)
     assert "To do" in card and "Still open before it can be used" not in card
     assert "Ready" in card and "Nothing open" not in card
@@ -323,3 +323,33 @@ def test_role_columns_have_one_equal_width_and_cells_do_not_wrap():
     html = appmod._allowed_roles_card_html(info, [])
     assert html.count('<col class="sw-c-role">') == 5
     assert html.count('<th class="sw-rc">') == 5
+
+
+# --- AI page polish (follow-up to 3c) ----------------------------------------
+
+def test_allowed_roles_uses_the_shared_disclosure_with_a_triangle_and_loads_collapsed(env):
+    html = _admin(env).get("/admin/system/ai").text
+    i = html.index('id="allowed-roles"')
+    head = html[i:i + 900]
+    assert '<details class="admin-group"' in head and "<details class=\"admin-group\" open" not in head
+    assert '<span class="disclosure-caret">' in html[i:i + 1500]
+    assert ">Allowed roles</span>" in head and "Edit allowed roles" not in html
+    # the log stays inside the collapsed section
+    j = html.index("</details></div>", i)
+    assert "Recent changes" in html[i:j] or "No changes recorded yet." in html[i:j]
+    # the old card title above it is gone, so the heading appears once
+    assert html.count(">Allowed roles</div>") == 0
+
+
+def test_buddy_tiers_heading_is_escaped_once(env):
+    html = _admin(env).get("/admin/system/ai").text
+    assert "&amp;amp;" not in html
+    assert ">FP&amp;A Buddy tiers</div>" in html
+
+
+def test_model_label_falls_back_to_a_readable_name_not_the_raw_id(env):
+    assert env._enrich_model_label("claude-opus-4-8") == "Opus 4.8"
+    assert env._enrich_model_label("claude-sonnet-5") == "Sonnet 5"
+    assert env._enrich_model_label("not-a-model") == "not-a-model"
+    html = _admin(env).get("/admin/system/ai").text
+    assert "Opus 4.8" in html
