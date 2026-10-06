@@ -1952,6 +1952,13 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .admin-only:focus-visible{outline:2px solid var(--seafoam-deep);outline-offset:2px;}
 .admin-only:disabled{opacity:.5;cursor:not-allowed;}
 .admin-only[hidden]{display:none;}
+/* Shared on/off switch (role=switch button). Green on, grey off; a disabled one is always grey. */
+.sw{position:relative;width:38px;height:22px;border-radius:11px;border:0;padding:0;cursor:pointer;background:var(--line-strong);flex-shrink:0;}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;}
+.sw[aria-checked="true"]{background:var(--seafoam-deep);}
+.sw[aria-checked="true"]::after{left:18px;}
+.sw:focus-visible{outline:2px solid var(--seafoam-deep);outline-offset:2px;}
+.sw:disabled{background:var(--line-strong);opacity:.6;cursor:not-allowed;}
 @media(hover:hover){.admin-only:hover{background:var(--seafoam-wash);color:var(--seafoam-deep);text-decoration:none;}.admin-only-del:hover{background:#fee2e2;color:#b91c1c;border-color:#b91c1c;}}
 
 /* Edit-page footer action row (primary save / stay-on-page save / cancel)—
@@ -26169,7 +26176,7 @@ _ADMIN_GROUPS = [
     # groups side by side read the same and cost nothing.
     ("Configuration", "Accounts, AI settings, and the site's open-source credits.", [
         ("/admin/users",           "Users",               "Create and manage user accounts for the gated sections."),
-        ("/admin/system/ai",       "AI configuration and usage", "The enrichment model, the Exa web-search toggle, and a map of every AI surface in the app."),
+        ("/admin/system/ai",       "AI configuration and usage", "The enrichment model, model pricing and allowed roles, the Exa web-search toggle, and a map of every AI surface in the app."),
         ("/admin/open-source",     "Open source",         "The open-source projects this site is built on—with gratitude."),
     ]),
     ("Health and maintenance", "Automated checks, spend, backups, and database tools.", [
@@ -27041,7 +27048,7 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("Site utilities and system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
-                                  "model_pricing", "model_catalog", "model_roles",
+                                  "model_pricing", "model_catalog", "model_roles", "model_role_log",
                                   "narrative_review_log", "entity_citations", "matchmaker_questions",
                                   "compare_summary_cache", "compare_summary_feedback",
                                   "voice_review_queue", "voice_approved_terms",
@@ -28143,6 +28150,15 @@ def admin_system_ai(request: Request):
         matchmaker_blocks = {m["id"]: lib.role_problems("matchmaker", m["id"]) for m in _REG}
         buddy_models = {t: lib.get_role_model(f"buddy_{t}") for t in ("quick", "standard", "deep")}
         buddy_blocks = {t: {m["id"]: lib.role_problems(f"buddy_{t}", m["id"]) for m in _REG} for t in buddy_models}
+        _ed_ids = [m["id"] for m in _REG]
+        _ed_ids += [r for role in ("enrichment", "matchmaker", "buddy_quick", "buddy_standard", "buddy_deep")
+                    for r in [lib.get_role_model(role)] if r not in _ed_ids]   # a model in use but not in the registry
+        roles_editor = {mid: {"allowed": lib.model_allowed_roles(mid),
+                              "status": lib.get_model_status(mid) or "available",
+                              "pricing": lib.pricing_problems(lib.get_model_pricing(mid)),
+                              "assigned": lib.roles_using(mid), "confirmed": lib.confirmed_roles(mid)}
+                        for mid in _ed_ids}
+        roles_log = lib.list_model_role_log()
     finally:
         lib.close()
     has_exa_key = bool(os.environ.get("EXA_API_KEY"))
@@ -28230,6 +28246,7 @@ def admin_system_ai(request: Request):
 {_card("Matchmaker model", _matchmaker_model_html(matchmaker_model, matchmaker_blocks))}
 {_card("FP&amp;A Buddy tiers", _buddy_tiers_html(buddy_models, buddy_blocks))}
 {_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, enable_blocks, role_info))}
+{_card("Allowed roles", _allowed_roles_card_html(roles_editor, roles_log))}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
 
 <h2 style="margin:28px 0 4px;">Usage index</h2>
@@ -28431,6 +28448,159 @@ def admin_system_ai_reactivate(model_id: str, request: Request):
 _PRICE_COLS = (("input", "Input"), ("output", "Output"), ("cache_write", "Cache write"),
                ("cache_write_1h", "Cache write 1h"), ("cache_read", "Cache read"))
 _ANTHROPIC_PRICING_URL = "https://www.anthropic.com/pricing"
+
+
+_SW_CARD_CSS = '''.sw-form{margin:0;display:inline-flex;}
+.sw-cell{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;white-space:nowrap;min-height:28px;}
+.sw-main{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+.sw-word{font-size:13px;color:var(--ink-soft);}
+.sw-flag{display:inline-block;background:var(--coral-wash);color:var(--navy);border-radius:5px;padding:2px 6px;font-size:11.5px;font-weight:600;text-decoration:none;white-space:nowrap;}
+.sw-model .sw-id{font-size:11.5px;color:var(--muted);font-weight:400;}
+.sw-todo{margin:0;padding-left:16px;font-size:13px;}
+.sw-ready,.sw-note{font-size:13px;color:var(--muted);}
+.sw-notes{margin:14px 0 0;font-size:13px;color:var(--ink-soft);line-height:1.6;display:grid;gap:6px;}
+.sw-table{table-layout:fixed;}
+.sw-table col.sw-c-model{width:140px;}
+.sw-table col.sw-c-role{width:172px;}
+.sw-table td,.sw-table th,.sw-log td,.sw-log th{padding:10px 12px;vertical-align:top;}
+.sw-table td.sw-rc,.sw-table th.sw-rc{padding-left:8px;padding-right:8px;}
+.sw-table .sw-id{overflow-wrap:anywhere;}'''
+
+
+def _switch_html(on: bool, *, label: str, disabled: bool = False) -> str:
+    """The shared on/off switch (class .sw, defined once in the sitewide CSS):
+    a button with role=switch. Enabled, it submits its form; disabled, it is
+    grey and never submits. Same markup for every use, no inline style."""
+    return (f'<button type="submit" class="sw" role="switch" aria-checked="{"true" if on else "false"}" '
+            f'aria-label="{_esc(label)}"{" disabled" if disabled else ""}></button>')
+
+
+def _fmt_log_time(iso: str) -> str:
+    """'2026-10-06T10:54:12+00:00' -> 'Oct 6, 10:54 UTC'."""
+    from datetime import datetime
+    try:
+        d = datetime.fromisoformat(iso)
+        return f"{d.strftime('%b')} {d.day}, {d.strftime('%H:%M')} UTC"
+    except ValueError:
+        return iso
+
+
+def _pricing_todo(problems: list[str]) -> str:
+    names = [p.replace(" rate", "").replace("verified date", "date") for p in problems]
+    return "Verify pricing: " + ", ".join(names) + "."
+
+
+def _allowed_roles_card_html(info: dict, log: list[dict]) -> str:
+    """Allowed-roles editor (PR 3c), collapsed on load: one row per model, one
+    on/off switch per role. The role check reads only the stored value this
+    edits. Disabled switches say why in a short word beside them (In use,
+    Locked, or a Test first flag that links to the confirm page); the long
+    reasons sit in one note block below the table, never in a tooltip."""
+    from linklib.models import (ROLES, ROLE_LABELS, hard_block_reason, needs_enrichment_confirm,
+                                model_display_name, BUDDY_BLOCK_REASON, MATCHMAKER_BLOCK_REASON)
+    rows = []
+    for mid, d in info.items():
+        cells = []
+        for role in ROLES:
+            on = role in d["allowed"]
+            label = f"{model_display_name(mid)}, {ROLE_LABELS[role]}"
+            flag = ""
+            if on and role in d["assigned"]:
+                ctl, word = _switch_html(True, label=label, disabled=True), "In use"
+            elif not on and hard_block_reason(mid, role):
+                ctl, word = _switch_html(False, label=label, disabled=True), "Locked"
+            elif not on and needs_enrichment_confirm(mid, role) and role not in d["confirmed"]:
+                ctl, word = _switch_html(False, label=label, disabled=True), "Off"
+                flag = (f'<a class="sw-flag" href="/admin/system/ai/allowed-roles/confirm/{_esc(mid)}/{role}">'
+                        f'&#9888; Test first</a>')
+            else:
+                nxt = "0" if on else "1"
+                ctl = (f'<form method="post" action="/admin/system/ai/allowed-roles/set" class="sw-form">'
+                       f'<input type="hidden" name="model_id" value="{_esc(mid)}">'
+                       f'<input type="hidden" name="role" value="{role}">'
+                       f'<input type="hidden" name="allow" value="{nxt}">{_switch_html(on, label=label)}</form>')
+                word = "On" if on else "Off"
+            cells.append(f'<td class="sw-rc"><div class="sw-cell"><span class="sw-main">{ctl}<span class="sw-word">{word}</span></span>{flag}</div></td>')
+        todo = []
+        if d["status"] == "not_using":
+            todo.append("Set status to available")
+        if d["status"] == "deactivated":
+            todo.append("Reactivate")
+        if d["pricing"]:
+            todo.append(_pricing_todo(d["pricing"]).rstrip("."))
+        todo_html = ("<ul class=\"sw-todo\">" + "".join(f"<li>{_esc(x)}.</li>" for x in todo) + "</ul>"
+                     if todo else '<span class="sw-ready">Ready</span>')
+        rows.append(f'<tr><td class="sw-model"><strong>{_esc(model_display_name(mid))}</strong>'
+                    f'<div class="sw-id">{_esc(mid)}</div></td>{"".join(cells)}<td>{todo_html}</td></tr>')
+    head = "".join(f"<th>{t}</th>" for t in ["Model"]) + "".join(f'<th class="sw-rc">{ROLE_LABELS[r]}</th>' for r in ROLES) + "<th>To do</th>"
+    colgroup = '<colgroup><col class="sw-c-model">' + '<col class="sw-c-role">' * len(ROLES) + '<col></colgroup>'
+    log_rows = "".join(
+        f'<tr><td style="white-space:nowrap;">{_esc(_fmt_log_time(l["created_at"]))}</td>'
+        f'<td>{_esc(model_display_name(l["model_id"]))}</td><td>{_esc(ROLE_LABELS.get(l["role"], l["role"]))}</td>'
+        f'<td>{"Turned on" if l["action"] == "allowed" else "Turned off"}</td>'
+        f'<td>{"Test confirmed" if l["confirmed_tested"] else ""}</td></tr>' for l in log)
+    log_html = (f'<h4 style="margin:18px 0 6px;font-size:13px;">Recent changes</h4><div class="table-frame" style="overflow-x:auto;">'
+                f'<table class="sw-log" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;"><thead><tr><th>When</th><th>Model</th><th>Role</th>'
+                f'<th>Change</th><th>Note</th></tr></thead><tbody>{log_rows}</tbody></table></div>'
+                if log else '<p class="sw-note">No changes recorded yet.</p>')
+    notes = (f'<div class="sw-notes"><div><strong>Locked.</strong> {_esc(BUDDY_BLOCK_REASON)} for Opus 5.5, Sonnet 5.5 and the '
+             f'Fable models. {_esc(MATCHMAKER_BLOCK_REASON)}. Both stay off until <code>ask()</code> is checked for always-on thinking.</div>'
+             f'<div><strong>In use.</strong> A model assigned to a role can&rsquo;t be switched off for it. Assign another model first.</div>'
+             f'<div><strong>Test first.</strong> Enrichment for this model needs the test on the confirm step before it can be switched on.</div></div>')
+    return (f'<style>{_SW_CARD_CSS}</style><details id="allowed-roles" style="scroll-margin-top:16px;"><summary style="cursor:pointer;color:var(--accent);'
+            f'font-size:13.5px;">Edit allowed roles</summary>'
+            f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Turning a role on doesn&rsquo;t enable the model. '
+            f'It also needs verified pricing and status available. Changes apply immediately.</p>'
+            f'<div class="table-frame" style="overflow-x:auto;"><table class="sw-table" style="min-width:1180px;">{colgroup}<thead><tr>{head}</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>{notes}{log_html}</details>')
+
+
+def _roles_error_page(request: Request, msg: str):
+    return HTMLResponse(_page("Allowed roles", "Admin", f'''<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/system/ai#allowed-roles" style="font-size:13px;color:var(--muted);">&larr; AI configuration</a></p>
+<h1>Not changed</h1><p style="color:var(--ink-soft);">{_esc(msg)}</p></div>''', authed=True, request=request), status_code=400)
+
+
+@app.post("/admin/system/ai/allowed-roles/set")
+async def admin_system_ai_allowed_roles_set(request: Request):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    form = await request.form()
+    model_id, role = (form.get("model_id") or "").strip(), (form.get("role") or "").strip()
+    lib = _lib()
+    try:
+        problems = lib.set_allowed_role(model_id, role, form.get("allow") == "1",
+                                        tested=form.get("tested") == "1")
+    finally:
+        lib.close()
+    if problems:
+        return _roles_error_page(request, "; ".join(problems).capitalize() + ".")
+    return RedirectResponse("/admin/system/ai#allowed-roles", status_code=303)
+
+
+@app.get("/admin/system/ai/allowed-roles/confirm/{model_id}/{role}", response_class=HTMLResponse)
+def admin_system_ai_allowed_roles_confirm(model_id: str, role: str, request: Request):
+    from linklib.models import ENRICHMENT_TEST_STEPS, ROLE_LABELS, needs_enrichment_confirm
+    if not _is_authed(request):
+        return _login_redirect(request)
+    if not needs_enrichment_confirm(model_id, role):
+        raise HTTPException(status_code=404, detail="no confirm step for this role")
+    steps = "".join(f"<li>{_esc(x)}</li>" for x in ENRICHMENT_TEST_STEPS)
+    label = _enrich_model_label(model_id)
+    return HTMLResponse(_page("Turn on enrichment", "Admin", f'''<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/system/ai#allowed-roles" style="font-size:13px;color:var(--muted);">&larr; AI configuration</a></p>
+<h1>Turn on {_esc(label)} for {_esc(ROLE_LABELS[role])}</h1>
+<div style="max-width:900px;margin:0 auto;">
+<p style="color:var(--ink-soft);line-height:1.6;">This model has not been checked for enrichment. Several generate calls have a small answer budget that always-on thinking could use up, and a refusal comes back as empty text. Before allowing it, test it:</p>
+<ol style="line-height:1.7;color:var(--ink-soft);">{steps}</ol>
+<form method="post" action="/admin/system/ai/allowed-roles/set">
+<input type="hidden" name="model_id" value="{_esc(model_id)}"><input type="hidden" name="role" value="{_esc(role)}"><input type="hidden" name="allow" value="1">
+<label style="display:block;margin:14px 0;"><input type="checkbox" name="tested" value="1" required> I ran this test with {_esc(label)} and neither result was empty or cut off.</label>
+<p style="font-size:13px;color:var(--muted);">This is recorded on the page with the date. Turning the role on doesn&rsquo;t enable the model. It also needs verified pricing and status available.</p>
+<button class="btn" type="submit">Turn on {_esc(ROLE_LABELS[role])}</button>
+<a href="/admin/system/ai#allowed-roles" class="btn btn-ghost" style="margin-left:8px;">Cancel</a>
+</form></div></div>''', authed=True, request=request))
+
 
 
 def _model_pricing_card_html(rows: list[dict], status: dict, enable_blocks: dict, role_info: dict) -> str:

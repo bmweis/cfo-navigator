@@ -170,6 +170,18 @@ CREATE TABLE IF NOT EXISTS model_roles (
     updated_at TEXT NOT NULL DEFAULT ''
 );
 
+-- model_role_log (PR 3c): every change to a model's allowed roles, with who
+-- confirmed what. Append-only; nothing reads it except the admin page.
+CREATE TABLE IF NOT EXISTS model_role_log (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_id         TEXT NOT NULL,
+    role             TEXT NOT NULL,
+    action           TEXT NOT NULL,            -- 'allowed' | 'disallowed'
+    confirmed_tested INTEGER NOT NULL DEFAULT 0,
+    detail           TEXT NOT NULL DEFAULT '',
+    created_at       TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS model_catalog (
     model_id          TEXT PRIMARY KEY,
     status            TEXT NOT NULL DEFAULT 'available'
@@ -9264,6 +9276,51 @@ class Library:
                 pass
         return list(default_allowed_roles(model_id))
 
+    def set_allowed_role(self, model_id: str, role: str, allow: bool, *, tested: bool = False) -> list[str]:
+        """Admin edit of one role in a model's stored allowed_roles (PR 3c).
+        Returns the problems that refused it (empty = saved, and logged).
+        Hard blocks in code cannot be enabled; enrichment for an unconfirmed
+        model needs `tested`; a role the model is currently assigned to can't
+        be switched off (assign another model first)."""
+        import json
+        from .models import ROLES, ROLE_LABELS, hard_block_reason, needs_enrichment_confirm
+        if role not in ROLES:
+            return [f"unknown role {role}"]
+        row = self.conn.execute("SELECT 1 FROM model_catalog WHERE model_id=?", (model_id,)).fetchone()
+        if not row:
+            return ["unknown model"]
+        current = self.model_allowed_roles(model_id)
+        if allow == (role in current):
+            return []                                   # nothing to change, nothing to log
+        if allow:
+            if hard_block_reason(model_id, role):
+                return [f"{ROLE_LABELS[role]} is blocked in code: {hard_block_reason(model_id, role)}"]
+            if (needs_enrichment_confirm(model_id, role) and not tested
+                    and role not in self.confirmed_roles(model_id)):
+                return ["this model has not been tested for enrichment; confirm that you ran the test"]
+        elif model_id == self.get_role_model(role):
+            return [f"it is the current {ROLE_LABELS[role]} model; assign another model first"]
+        new = [r for r in ROLES if (r in current or r == role) and not (r == role and not allow)]
+        self.conn.execute("UPDATE model_catalog SET allowed_roles=? WHERE model_id=?", (json.dumps(new), model_id))
+        confirmed = bool(allow and needs_enrichment_confirm(model_id, role) and tested)
+        self.conn.execute(
+            "INSERT INTO model_role_log(model_id, role, action, confirmed_tested, detail, created_at) VALUES (?,?,?,?,?,?)",
+            (model_id, role, "allowed" if allow else "disallowed", int(confirmed),
+             "Confirmed the enrichment test was run" if confirmed else "", _now()))
+        self.conn.commit()
+        return []
+
+    def confirmed_roles(self, model_id: str) -> set[str]:
+        """Roles whose test confirmation is already recorded for this model, so
+        switching one off and on again does not ask for the test twice."""
+        return {r["role"] for r in self.conn.execute(
+            "SELECT DISTINCT role FROM model_role_log WHERE model_id=? AND action='allowed' AND confirmed_tested=1",
+            (model_id,)).fetchall()}
+
+    def list_model_role_log(self, limit: int = 20) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM model_role_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()]
+
     def get_role_model(self, role: str) -> str:
         """The model a role uses right now. Enrichment is the enrich_model
         setting; Matchmaker and the Buddy tiers read model_roles, then fall
@@ -9288,10 +9345,12 @@ class Library:
         """Why a model can't be assigned to a role right now (empty = it can):
         not allowed for the role, marked not using, deactivated, or incomplete
         or unverified pricing."""
-        from .models import ROLES, ROLE_LABELS, role_block_reason
+        from .models import ROLES, ROLE_LABELS, role_block_reason, hard_block_reason
         if role not in ROLES:
             return [f"unknown role {role}"]
         problems = self.model_enable_problems(model_id)
+        if hard_block_reason(model_id, role):
+            problems.append(f"{ROLE_LABELS[role]} is blocked in code ({hard_block_reason(model_id, role)})")
         if self.get_model_status(model_id) == "not_using":
             problems.append("it is marked not using")
         if role not in self.model_allowed_roles(model_id):
