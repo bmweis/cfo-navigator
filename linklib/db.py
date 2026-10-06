@@ -9700,7 +9700,7 @@ class Library:
         rows = self.conn.execute(
             f"""SELECT f.*, u.username AS rater_username, u.name AS rater_name,
                        aq.question, aq.answer, aq.model, aq.effort, aq.cost_usd,
-                       aq.conversation_id, aq.turn_index, aq.citations_json,
+                       aq.conversation_id, aq.turn_index, aq.citations_json, aq.stop_reason,
                        aq.user_id AS asker_user_id
                 FROM ask_feedback f
                 LEFT JOIN users u ON u.id = f.user_id
