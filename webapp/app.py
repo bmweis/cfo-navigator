@@ -19064,7 +19064,7 @@ def _refusal_banner_html(refusal: list | None) -> str:
 # A Software vendor's Name must be the vendor's name, never a pasted web
 # address. A bare domain-style name such as "cfo.ai" is a real product name and
 # is allowed; only a clear URL is refused (contains "://", or starts with
-# "www." or "http"). The check runs in the two save routes before any write,
+# "www.", "http:" or "https:"). The check runs in the two save routes before any write,
 # so before add_tool/update_tool derive a slug (the name-based slug,
 # _slugify("https://cfo.ai") = "httpscfoai", is only the fallback when the URL
 # field has no parseable host).
@@ -19073,7 +19073,7 @@ _TOOL_NAME_IS_URL_MESSAGE = "This looks like a web address. Enter the vendor's n
 
 def _looks_like_web_address(name: str) -> bool:
     n = (name or "").strip().lower()
-    return "://" in n or n.startswith("www.") or n.startswith("http")
+    return "://" in n or n.startswith("www.") or n.startswith(("http:", "https:"))
 
 
 def _tool_name_refusals(form) -> list:

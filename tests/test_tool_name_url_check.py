@@ -86,7 +86,7 @@ def _edit(admin, slug, name):
 
 
 URLS = ["https://cfo.ai", "http://cfo.ai", "www.cfo.ai", "WWW.CFO.AI", "  https://cfo.ai  ",
-        "Visit https://cfo.ai", "httpie"]
+        "Visit https://cfo.ai", "http://x.com", "https:cfo.ai", "HTTPS:cfo.ai"]
 
 
 @pytest.mark.parametrize("name", URLS)
@@ -116,18 +116,20 @@ def test_refusal_keeps_what_was_typed(admin):
     assert 'value="https://cfo.ai"' in r.text
 
 
-def test_bare_domain_style_name_saves_on_new(admin):
-    r = _new(admin, "cfo.ai")
+@pytest.mark.parametrize("name", ["cfo.ai", "HTTPie", "Httpbin"])
+def test_real_names_save_on_new(admin, name):
+    r = _new(admin, name)
     assert r.status_code in (302, 303)
     assert _count() == 1
 
 
-def test_bare_domain_style_name_saves_on_edit(admin):
+@pytest.mark.parametrize("name", ["cfo.ai", "HTTPie"])
+def test_real_names_save_on_edit(admin, name):
     tid, slug = _tool()
-    r = _edit(admin, slug, "cfo.ai")
+    r = _edit(admin, slug, name)
     assert r.status_code in (302, 303)
     lib = Library(os.environ["LINKLIB_DB"])
-    assert lib.get_tool(tid)["name"] == "cfo.ai"
+    assert lib.get_tool(tid)["name"] == name
     lib.close()
 
 
@@ -137,6 +139,7 @@ def test_check_runs_before_any_slug_is_made(app_module):
     assert _slugify("https://cfo.ai") == "httpscfoai"
     assert app_module._tool_name_refusals({"name": "https://cfo.ai"}) == [("Name", MSG)]
     assert app_module._tool_name_refusals({"name": "cfo.ai"}) == []
+    assert app_module._tool_name_refusals({"name": "HTTPie"}) == []
 
 
 def test_message_passes_the_voice_lint():
