@@ -4657,12 +4657,14 @@ _hs_warn_style = ("background:#fef3c7;border:1px solid #fde68a;color:#92400e;bor
                   "padding:10px 14px;margin:12px 0 0;font-size:14px;line-height:1.5;")
 
 
-def _hero_og_description(subhead: str, headline: str) -> str:
-    """og:description for the homepage: the hero subhead's first paragraph as
-    plain text (tags stripped), else the headline; "" when both are empty so
+def _hero_og_description(headline: str, subhead: str) -> str:
+    """og:description for the homepage: the hero headline as plain text (tags
+    stripped), else the subhead's first paragraph; "" when both are empty so
     _page() falls back to _OG_DEFAULT_DESCRIPTION. Static on purpose: the
-    Status note never feeds it."""
-    for text in (subhead, headline):
+    Status note never feeds it. The headline is a complete sentence; the
+    subhead's first paragraph can end on a cliffhanger in a card. og:title is
+    "Home", so the card never shows the same sentence twice."""
+    for text in (headline, subhead):
         first = (text.strip().split("\n\n") or [""])[0]
         plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", first)).strip()
         if plain:
@@ -4890,7 +4892,7 @@ def homepage(request: Request):
 </div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request), request=request,
-                               og_description=_esc_attr_normalize(_hero_og_description(homepage_subhead, homepage_headline))))
+                               og_description=_esc_attr_normalize(_hero_og_description(homepage_headline, homepage_subhead))))
 
 
 @app.get("/about", response_class=HTMLResponse)

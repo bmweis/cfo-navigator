@@ -201,7 +201,7 @@ def test_startup_seed_starts_the_clock_once(env):
         assert _get(env, "homepage_status_revised_at") == first
 
 
-# ---- og:description is static: hero subhead, never the Status ---------------
+# ---- og:description is static: hero headline, never the Status ------------
 
 def _og(appmod):
     import re
@@ -209,20 +209,21 @@ def _og(appmod):
     return m.group(1)
 
 
-def test_og_description_ignores_the_status_and_follows_the_subhead(env):
-    _set(env, "homepage_subhead_copy", "Subhead first <b>paragraph</b>.\n\nSecond paragraph.")
+def test_og_description_ignores_the_status_and_follows_the_headline(env):
+    _set(env, "homepage_headline_copy", "Headline with <b>tags</b>.")
     before = _og(env)
-    assert before == "Subhead first paragraph."
+    assert before == "Headline with tags."
     _client(env).post("/admin/copy/homepage", json={"homepage_status_copy": "A brand new status."})
     assert _og(env) == before                                  # Status change: no effect
-    _set(env, "homepage_subhead_copy", "A different subhead.")
-    assert _og(env) == "A different subhead."                  # subhead change: follows
+    _set(env, "homepage_headline_copy", "A different headline.")
+    assert _og(env) == "A different headline."                 # headline change: follows
+    _set(env, "homepage_subhead_copy", "Subhead change.")
+    assert _og(env) == "A different headline."                 # subhead is not the source
 
 
-def test_og_description_falls_back_to_headline_then_site_default(env):
-    _set(env, "homepage_subhead_copy", "  ")
-    _set(env, "homepage_headline_copy", "Just the headline.")
-    # blank stored subhead falls back to the code default subhead, so test the helper directly
-    assert env._hero_og_description("", "Just the headline.") == "Just the headline."
+def test_og_description_fallback_chain(env):
+    assert env._hero_og_description("H.", "S one.\n\nS two.") == "H."
+    assert env._hero_og_description("  ", "S <i>one</i>.\n\nS two.") == "S one."
     assert env._hero_og_description("", "") == ""
-    assert _og(env)                                            # page still renders a non-empty value
+    # both empty at the page level: _page() falls back to the site default
+    assert env._OG_DEFAULT_DESCRIPTION
