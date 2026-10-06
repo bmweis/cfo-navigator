@@ -6731,7 +6731,7 @@ never reads as something to tap.
   full write-up, and `tests/test_password_change_recommended.py` for the
   regression coverage (flag defaults/set/clear across all four call sites,
   the admin-reset email, the in-session change-password form, and the
-  banner's presence/absence including the break-glass admin login, which has
+  banner's presence/absence including a session with no `users` row (the break-glass login, retired in #627), which has
   no `users` row and so can never carry the flag).
 
 - **Surface Hidden Community Profile Fields (2026-09) — Stage focus, Jobs
@@ -13565,7 +13565,7 @@ subscription.
   orphan. **Byline rule, one function (`_ask_byline`):** the viewer's own row
   reads "You" first (an admin included, by `user_id` equality, never by name),
   then an admin sees another asker's stored name, then a member sees nothing.
-  The break-glass admin login has no `user_id`, so nothing is "own" there and it
+  A session with no `user_id` (the break-glass login, retired in #627; token-only callers still lack one) has nothing "own" and it
   shows stored names. Other name renderers (admin report, admin feedback card)
   are admin-only pages that always name the asker; `/ask/history`, Recent and the
   open thread show only the viewer's own questions with no byline. Tests:
