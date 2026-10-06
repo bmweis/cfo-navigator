@@ -61,34 +61,17 @@ def test_homepage_subhead_renders_multiple_paragraphs(env):
             'Second subhead paragraph.</p>') in r.text
 
 
-def test_homepage_teaser_renders_multiple_paragraphs(env):
+def test_homepage_status_renders_multiple_paragraphs(env):
     lib = env._lib()
     try:
-        lib.set_setting("homepage_teaser_copy", "First teaser line.\n\nSecond teaser line.")
+        lib.set_setting("homepage_status_copy", "First status line.\n\nSecond status line.")
     finally:
         lib.close()
-    c = _client(env)
-    r = c.get("/")
+    r = _client(env).get("/")
     assert r.status_code == 200
-    assert '<p style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;">First teaser line.</p>' in r.text
-    assert '<p style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;">Second teaser line.</p>' in r.text
-
-
-def test_homepage_expanded_still_renders_multiple_paragraphs(env):
-    lib = env._lib()
-    try:
-        lib.set_setting("homepage_expanded_copy", "Expanded para one.\n\nExpanded para two.")
-    finally:
-        lib.close()
-    c = _client(env)
-    r = c.get("/")
-    assert r.status_code == 200
-    # Homepage Restructure phase: the expanded-copy block shares the same
-    # explicit style as the teaser-copy block above it in the status box
-    # (previously it fell through to the sitewide default <p> margin, which
-    # read as a different spacing rhythm within the same box — see CLAUDE.md).
-    assert '<p style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;">Expanded para one.</p>' in r.text
-    assert '<p style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;">Expanded para two.</p>' in r.text
+    assert "<p>First status line.</p>" in r.text
+    assert "<p>Second status line.</p>" in r.text
+    assert ".home-status-body p{font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;}" in r.text
 
 
 def test_about_page_renders_multiple_paragraphs(env):

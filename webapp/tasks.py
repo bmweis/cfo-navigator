@@ -550,7 +550,7 @@ def refresher_status() -> dict:
 
 
 def _stale_admin_checks_reminders(lib: Library) -> int:
-    """0-3 — how many of /admin/checks' three dated manual-attestation
+    """0-4 — the homepage Status staleness plus how many of /admin/checks' three dated manual-attestation
     banners (Pricing freshness, New-model awareness, Exa pricing freshness)
     currently read stale/never-reviewed. These are computed live in the
     admin_checks() route but never fed into run_all()'s "In-app" list (they
@@ -570,7 +570,12 @@ def _stale_admin_checks_reminders(lib: Library) -> int:
     section), so adding a second count for the identical violations under
     the /admin/checks href would double the total past what's actually
     pending, which is precisely what was flagged as a real risk here."""
+    from linklib import homepage_status as hs
     return sum([
+        # Homepage Status note past its window: counted here, once, from a
+        # live settings read. Its /admin/checks row is a "Live + CI" row, which
+        # _compute_failing_checks_count() does not count, so there is no double count.
+        hs.status_age(lib.get_setting(hs.STATUS_REVISED_KEY))["stale"],
         bool(lib.pricing_freshness()["stale_ids"]),
         models_review_is_stale(lib.get_setting("models_last_reviewed")) or _lineup_has_findings(lib),
         exa_pricing_review_is_stale(lib.get_setting("exa_pricing_last_verified")),

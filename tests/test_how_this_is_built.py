@@ -388,14 +388,12 @@ def test_admin_copy_itself_is_not_a_page(env):
     assert _client(env).get("/admin/copy").status_code == 404
 
 
-def test_admin_copy_homepage_page_renders_both_boxes(env):
+def test_admin_copy_homepage_page_renders_headline_and_status_boxes(env):
     html = _client(env).get("/admin/copy/homepage").text
     assert 'id="home-headline"' in html
     assert 'id="home-subhead"' in html
-    assert 'id="home-teaser"' in html
-    assert 'id="home-expanded"' in html
-    # This page's fields are plain text — no raw-HTML mention here.
-    assert "raw HTML" not in html
+    assert 'id="home-status-copy"' in html
+    assert 'id="home-teaser"' not in html and 'id="home-expanded"' not in html
 
 
 def test_admin_copy_about_page_renders_the_bio_box(env):

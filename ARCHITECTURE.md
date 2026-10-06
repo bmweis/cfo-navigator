@@ -11469,3 +11469,29 @@ to `<db>.pre-restore-<timestamp>`, then `os.replace` swaps it in and `-wal`/`-sh
 are removed. The Drive folder id comes from `--folder-id`, `GOOGLE_DRIVE_FOLDER_ID`,
 the `settings` row (`backup_drive_folder_id`) if the old file still opens, or a
 search by folder name. See RUNBOOK.md §1 Path C and §4.
+
+### Homepage Status note (2026-10)
+
+The "Status:" card under the homepage photo is one `settings` key,
+`homepage_status_copy`, rendered with `_render_original_content_markdown`
+(trusted admin text: markdown plus raw HTML, so an outbound link is a raw
+`<a target="_blank" rel="noopener">`). It replaces the two legacy keys
+`homepage_teaser_copy` and `homepage_expanded_copy`, which are left in place
+and never deleted; until the first save the page and the admin box read them
+(or their code defaults) joined by a blank line (`_homepage_status_text`).
+`og:description` uses the first paragraph of the Status, tags stripped.
+
+Staleness lives in `linklib/homepage_status.py` (`STATUS_STALE_DAYS = 14`).
+`settings.homepage_status_revised_at` is a UTC ISO stamp, written only by
+`POST /admin/copy/homepage` (save) and `POST /admin/copy/homepage/status-reviewed`
+(Mark reviewed, text unchanged), shown on the card as "Last revised or confirmed",
+in UTC like the other admin log times. A startup hook writes the stamp once if
+it is missing, so the first deploy counts as confirmed today. The
+"Homepage status is current" row on `/admin/checks` (`checks.homepage_status_check`,
+a "Live + CI" row in the Voice and copy theme) reads that one settings row, is
+not behind `cached_static_check`, and renders no routes. The Admin badge counts it
+once, through `tasks._stale_admin_checks_reminders` (a live settings read).
+`_compute_failing_checks_count` compares `where == "In-app"`, which no
+`run_all()` row carries, so failing "Live + CI" rows do not reach the badge;
+that is a separate, pre-existing gap, and it is why this check is counted in the
+reminders function instead.

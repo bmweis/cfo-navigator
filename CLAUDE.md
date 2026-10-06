@@ -11222,6 +11222,8 @@ it supersedes the old "`/save` is token-gated" note.
   sandbox: Drive access, the container's environment variables, Railway's request
   duration cap. See `tests/test_restore_from_drive.py`.
 
+- **Homepage Status note (2026-10).** `/admin/copy/homepage`'s two-field "Bio box" is one "Status" box (`homepage_status_copy`, trusted markdown renderer, Preview reused from About). Saving or "Mark reviewed" stamps `homepage_status_revised_at` (UTC); after 14 days (`homepage_status.STATUS_STALE_DAYS`) the card shows an amber notice and the "Homepage status is current" row on `/admin/checks` fails and adds 1 to the Admin badge via `_stale_admin_checks_reminders`. Legacy keys stay stored and are shown until the first save. Known, not fixed: `tasks._compute_failing_checks_count` filters on `where == "In-app"`, which no row has, so failing `run_all()` rows never reach the badge. See ARCHITECTURE.md's "Homepage Status note".
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a
