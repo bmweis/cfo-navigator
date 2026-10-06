@@ -27911,15 +27911,12 @@ thead .cc-cell{{border-bottom:2px solid var(--line);}}
 
 
 def _enrich_model_label(model_id: str) -> str:
-    """Friendly label for a model id, from the same curated registry every
-    picker uses — falls back to the raw id for a model that's retired from
-    the registry or was set via the LINKLIB_ENRICH_MODEL env var fallback
-    rather than picked from the dropdown."""
-    from linklib.models import models_for
-    for m in models_for(blurb="short", allow_new=False):
-        if m["id"] == model_id:
-            return m["label"]
-    return model_id
+    """Friendly label for a model id: the registry label, else a readable form
+    of the id (claude-opus-4-8 -> Opus 4.8), else the id itself. One source,
+    `linklib.models.model_display_name`, so every card on this page names a
+    model the same way."""
+    from linklib.models import model_display_name
+    return model_display_name(model_id)
 
 
 def _ai_model_config_html(current: str) -> str:
@@ -28154,9 +28151,10 @@ def admin_system_ai(request: Request):
         pricing_rows = lib.list_model_pricing()
         model_status = {r["model_id"]: r for r in lib.list_model_catalog()}
         from linklib.models import _REGISTRY as _REG
-        enable_blocks = {m["id"]: lib.model_enable_problems(m["id"]) for m in _REG}
-        role_info = {m["id"]: {"used_by": lib.roles_using(m["id"]), "allowed": lib.model_allowed_roles(m["id"])}
-                     for m in _REG}
+        # Used by is read for every priced model, not just the registry, so a model in
+        # use but not in the picker registry (Opus 4.8 for Buddy Deep) shows its roles.
+        role_info = {mid: {"used_by": lib.roles_using(mid)}
+                     for mid in dict.fromkeys([m["id"] for m in _REG] + [r["model_id"] for r in pricing_rows])}
         matchmaker_model = lib.get_role_model("matchmaker")
         matchmaker_blocks = {m["id"]: lib.role_problems("matchmaker", m["id"]) for m in _REG}
         buddy_models = {t: lib.get_role_model(f"buddy_{t}") for t in ("quick", "standard", "deep")}
@@ -28255,9 +28253,9 @@ def admin_system_ai(request: Request):
 <p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Changes take effect immediately. No redeploy.</p>
 {_card("Enrichment model", _ai_model_config_html(enrich_model))}
 {_card("Matchmaker model", _matchmaker_model_html(matchmaker_model, matchmaker_blocks))}
-{_card("FP&amp;A Buddy tiers", _buddy_tiers_html(buddy_models, buddy_blocks))}
-{_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, enable_blocks, role_info))}
-{_card("Allowed roles", _allowed_roles_card_html(roles_editor, roles_log))}
+{_card("FP&A Buddy tiers", _buddy_tiers_html(buddy_models, buddy_blocks))}
+{_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, role_info))}
+{_allowed_roles_card_html(roles_editor, roles_log)}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
 
 <h2 style="margin:28px 0 4px;">Usage index</h2>
@@ -28558,12 +28556,12 @@ def _allowed_roles_card_html(info: dict, log: list[dict]) -> str:
              f'Fable models. {_esc(MATCHMAKER_BLOCK_REASON)}. Both stay off until <code>ask()</code> is checked for always-on thinking.</div>'
              f'<div><strong>In use.</strong> A model assigned to a role can&rsquo;t be switched off for it. Assign another model first.</div>'
              f'<div><strong>Test first.</strong> Enrichment for this model needs the test on the confirm step before it can be switched on.</div></div>')
-    return (f'<style>{_SW_CARD_CSS}</style><details id="allowed-roles" style="scroll-margin-top:16px;"><summary style="cursor:pointer;color:var(--accent);'
-            f'font-size:13.5px;">Edit allowed roles</summary>'
-            f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Turning a role on doesn&rsquo;t enable the model. '
-            f'It also needs verified pricing and status available. Changes apply immediately.</p>'
-            f'<div class="table-frame" style="overflow-x:auto;"><table class="sw-table" style="min-width:1180px;">{colgroup}<thead><tr>{head}</tr></thead>'
-            f'<tbody>{"".join(rows)}</tbody></table></div>{notes}{log_html}</details>')
+    inner = (f'<p style="font-size:13px;color:var(--muted);margin:10px 0;">Turning a role on doesn&rsquo;t enable the model. '
+             f'It also needs verified pricing and status available. Changes apply immediately.</p>'
+             f'<div class="table-frame" style="overflow-x:auto;"><table class="sw-table" style="min-width:1180px;">{colgroup}<thead><tr>{head}</tr></thead>'
+             f'<tbody>{"".join(rows)}</tbody></table></div>{notes}{log_html}')
+    return (f'<style>{_SW_CARD_CSS}</style><div id="allowed-roles" style="scroll-margin-top:16px;">'
+            + _disclosure_group("Allowed roles", inner, count_label="Switch each model on or off for each role") + '</div>')
 
 
 def _roles_error_page(request: Request, msg: str):
@@ -28614,78 +28612,113 @@ def admin_system_ai_allowed_roles_confirm(model_id: str, role: str, request: Req
 
 
 
-def _model_pricing_card_html(rows: list[dict], status: dict, enable_blocks: dict, role_info: dict) -> str:
-    """The Model pricing table on /admin/system/ai (PR 3a): one row per model,
-    rates in USD per million tokens, a per-row freshness chip, a link to
-    Anthropic's pricing page, and an Edit form. Saving with the verify box
-    ticked stamps today; saving without it clears the date, because changed
-    rates have not been checked against the page."""
-    from linklib.pricing import row_pricing_state, PRICING_REVIEW_STALE_DAYS
+_PRICE_W_RATE = 96   # a USD-per-million rate (a number or "empty"), header up to "Cache write 1h" wraps to two lines
+_PRICE_W_STATUS = _COL_WIDTH_STATUS_AGE
+_PRICE_W_USEDBY = 150
+_PRICE_W_EDIT = 90
+
+
+def _pricing_chip(r) -> str:
+    from linklib.pricing import row_pricing_state
     chips = {"fresh": ("var(--seafoam)", "Verified"), "stale": ("var(--coral-wash)", "Stale"),
              "unverified": ("var(--coral-wash)", "Unverified")}
+    bg, word = chips[row_pricing_state(r["verified_on"])]
+    when = f' {_esc(r["verified_on"])}' if r["verified_on"] else ""
+    return (f'<span style="display:inline-block;background:{bg};color:var(--navy);border-radius:6px;'
+            f'padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap;">{word}{when}</span>')
+
+
+def _pricing_flag(cat: dict) -> str:
+    """Short row flag for the one constraint that changes who can use a model."""
+    if "data retention" in (cat.get("note") or "").lower():
+        return ('<span style="display:inline-block;background:var(--navy-wash);color:var(--navy);'
+                'border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap;">30-day data retention</span>')
+    return ""
+
+
+def _pricing_rates(r) -> str:
+    def cell(v):
+        return ('<td><em style="color:var(--muted);">empty</em></td>' if v is None
+                else f'<td style="white-space:nowrap;">{v:g}</td>')
+    return "".join(cell(r[k]) for k, _ in _PRICE_COLS)
+
+
+def _pricing_used_by(info) -> str:
+    from linklib.models import ROLE_LABELS
+    return ", ".join(ROLE_LABELS[x] for x in info["used_by"]) if info and info["used_by"] else "None"
+
+
+def _pricing_edit(r, cat) -> str:
+    mid = r["model_id"]
+    inputs = "".join(
+        f'<label style="font-size:12px;display:block;">{lbl}<input name="{k}" value="{"" if r[k] is None else f"{r[k]:g}"}" '
+        f'inputmode="decimal" style="width:100%;min-width:0;padding:4px 6px;border:1px solid var(--line);'
+        f'border-radius:6px;font:inherit;"></label>' for k, lbl in _PRICE_COLS)
+    return (f'<details><summary style="cursor:pointer;color:var(--accent);font-size:13px;display:inline-flex;align-items:center;gap:5px;">'
+            f'Edit <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>'
+            f'<form method="post" action="/admin/system/ai/pricing/save" style="margin-top:8px;display:grid;'
+            f'gap:6px;min-width:200px;"><input type="hidden" name="model_id" value="{_esc(mid)}">{inputs}'
+            f'<label style="font-size:12px;display:block;">Source note<input name="source_note" '
+            f'value="{_esc(r["source_note"])}" style="width:100%;min-width:0;padding:4px 6px;'
+            f'border:1px solid var(--line);border-radius:6px;font:inherit;"></label>'
+            f'<label style="font-size:12px;display:block;">Note<input name="note" value="{_esc(cat.get("note", ""))}" '
+            f'style="width:100%;min-width:0;padding:4px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;"></label>'
+            f'<label style="font-size:12px;"><input type="checkbox" name="verified" value="1"> '
+            f'I checked these rates against Anthropic&rsquo;s page today</label>'
+            f'<button class="btn" type="submit" style="font-size:12px;padding:5px 12px;">Save</button>'
+            f'</form>' + (
+                f'<form method="post" action="/admin/system/ai/reactivate/{_esc(mid)}" style="margin-top:8px;">'
+                f'<button class="btn btn-ghost" type="submit" style="font-size:12px;padding:5px 12px;">Reactivate</button></form>'
+                if cat.get("status") == "deactivated" else
+                f'<a href="/admin/system/ai/deactivate/{_esc(mid)}" style="display:inline-block;margin-top:8px;'
+                f'font-size:12px;color:var(--accent);">Deactivate&hellip;</a>') + '</details>')
+
+
+def _pricing_notes_text(r, cat) -> list[str]:
+    out = []
+    if r["source_note"]:
+        out.append(r["source_note"])
+    if cat.get("note"):
+        out.append(cat["note"])
+    return out
+
+
+def _pricing_intro() -> str:
+    from linklib.pricing import PRICING_REVIEW_STALE_DAYS
+    return (f'<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">USD per million tokens. Each row ages on its own '
+            f'and goes stale after {PRICING_REVIEW_STALE_DAYS} days. A model with an empty rate or no verified date can&rsquo;t be '
+            f'switched on for any role. Check rates on <a href="{_ANTHROPIC_PRICING_URL}" target="_blank" rel="noopener" '
+            f'style="color:var(--accent);">Anthropic&rsquo;s pricing page &#8599;</a>.</p>')
+
+
+def _model_pricing_card_html(rows: list[dict], status: dict, role_info: dict) -> str:
+    """Model pricing (option 1): one table. Price columns, one status chip, Used by, Edit.
+    Anything longer sits behind a collapsed Notes disclosure in the row."""
     body = []
     for r in rows:
         mid = r["model_id"]
-        st = row_pricing_state(r["verified_on"])
-        bg, word = chips[st]
-        when = f' {_esc(r["verified_on"])}' if r["verified_on"] else ""
-        chip = (f'<span style="display:inline-block;background:{bg};color:var(--navy);border-radius:6px;'
-                f'padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap;">{word}{when}</span>')
         cat = status.get(mid, {})
         stat = cat.get("status", "available").replace("_", " ")
-        def _rate_cell(v):
-            return ('<td><em style="color:var(--muted);">empty</em></td>' if v is None
-                    else f'<td style="white-space:nowrap;">{v:g}</td>')
-        cells = "".join(_rate_cell(r[k]) for k, _ in _PRICE_COLS)
-        inputs = "".join(
-            f'<label style="font-size:12px;display:block;">{lbl}<input name="{k}" value="{"" if r[k] is None else f"{r[k]:g}"}" '
-            f'inputmode="decimal" style="width:100%;min-width:0;padding:4px 6px;border:1px solid var(--line);'
-            f'border-radius:6px;font:inherit;"></label>' for k, lbl in _PRICE_COLS)
-        edit = (f'<details><summary style="cursor:pointer;color:var(--accent);font-size:13px;">Edit</summary>'
-                f'<form method="post" action="/admin/system/ai/pricing/save" style="margin-top:8px;display:grid;'
-                f'gap:6px;min-width:200px;"><input type="hidden" name="model_id" value="{_esc(mid)}">{inputs}'
-                f'<label style="font-size:12px;display:block;">Source note<input name="source_note" '
-                f'value="{_esc(r["source_note"])}" style="width:100%;min-width:0;padding:4px 6px;'
-                f'border:1px solid var(--line);border-radius:6px;font:inherit;"></label>'
-                f'<label style="font-size:12px;display:block;">Note<input name="note" value="{_esc(cat.get("note", ""))}" '
-                f'style="width:100%;min-width:0;padding:4px 6px;border:1px solid var(--line);border-radius:6px;font:inherit;"></label>'
-                f'<label style="font-size:12px;"><input type="checkbox" name="verified" value="1"> '
-                f'I checked these rates against Anthropic&rsquo;s page today</label>'
-                f'<button class="btn" type="submit" style="font-size:12px;padding:5px 12px;">Save</button>'
-                f'</form>' + (
-                    f'<form method="post" action="/admin/system/ai/reactivate/{_esc(mid)}" style="margin-top:8px;">'
-                    f'<button class="btn btn-ghost" type="submit" style="font-size:12px;padding:5px 12px;">Reactivate</button></form>'
-                    if cat.get("status") == "deactivated" else
-                    f'<a href="/admin/system/ai/deactivate/{_esc(mid)}" style="display:inline-block;margin-top:8px;'
-                    f'font-size:12px;color:var(--accent);">Deactivate&hellip;</a>') + '</details>')
-        block = enable_blocks.get(mid) or []
-        note = f'<div style="font-size:12px;color:var(--muted);">Can&rsquo;t be enabled: {_esc(", ".join(block))}</div>' if block else ""
-        src = f'<div style="font-size:12px;color:var(--muted);">{_esc(r["source_note"])}</div>' if r["source_note"] else ""
-        info = role_info.get(mid)
-        if info:
-            from linklib.models import ROLES, ROLE_LABELS, role_block_reason
-            used = ", ".join(ROLE_LABELS[x] for x in info["used_by"]) or "none"
-            src += f'<div style="font-size:12px;color:var(--muted);">Used by: {_esc(used)}</div>'
-            for role in ROLES:
-                if role not in info["allowed"]:
-                    why = role_block_reason(mid, role) or "not allowed"
-                    src += (f'<div style="font-size:12px;color:var(--muted);">{_esc(ROLE_LABELS[role])}: '
-                            f'not allowed. {_esc(why)}</div>')
-        note = cat.get("note", "")
-        if note:
-            src += f'<div style="font-size:12px;color:var(--muted);">{_esc(note)}</div>'
+        flag = _pricing_flag(cat)
+        flag_html = f'<div style="margin-top:4px;">{flag}</div>' if flag else ""
+        notes = _pricing_notes_text(r, cat)
+        notes_html = ("" if not notes else
+                      '<details style="margin-top:6px;"><summary style="cursor:pointer;color:var(--accent);font-size:12.5px;display:inline-flex;'
+                      'align-items:center;gap:5px;">Notes <span class="disclosure-caret" style="font-size:11px;">&#9654;</span></summary>'
+                      + "".join(f'<div style="font-size:13px;color:var(--ink-soft);margin-top:4px;">{_esc(n)}</div>' for n in notes)
+                      + '</details>')
         body.append(
-            f'<tr><td style="font-weight:600;">{_esc(_enrich_model_label(mid))}'
-            f'<div style="font-size:11.5px;color:var(--muted);font-weight:400;">{_esc(mid)} &middot; {_esc(stat)}</div></td>'
-            f'{cells}<td>{chip}{src}{note}</td>'
-            f'<td><a href="{_ANTHROPIC_PRICING_URL}" target="_blank" rel="noopener" '
-            f'style="color:var(--accent);font-size:13px;white-space:nowrap;">Open Anthropic&rsquo;s pricing &#8599;</a></td>'
-            f'<td>{edit}</td></tr>')
-    head = "".join(f"<th>{t}</th>" for t in ["Model", *[lbl for _, lbl in _PRICE_COLS], "Verified", "Source", "Edit"])
-    return (f'<div id="model-pricing" style="scroll-margin-top:16px;"><p style="font-size:13px;color:var(--muted);margin:0 0 10px;">'
-            f'USD per million tokens. Each row ages on its own and goes stale after {PRICING_REVIEW_STALE_DAYS} days. '
-            f'A model with an empty rate or no verified date can&rsquo;t be switched on for any role.</p>'
-            f'<div class="table-frame" style="overflow-x:auto;"><table style="min-width:{_TABLE_FLOOR_XWIDE}px;"><thead><tr>{head}</tr></thead>'
+            f'<tr><td><div style="font-weight:600;">{_esc(_enrich_model_label(mid))}</div>'
+            f'<div style="font-size:12.5px;color:var(--muted);">{_esc(mid)} &middot; {_esc(stat)}</div>'
+            f'{flag_html}</td>'
+            f'{_pricing_rates(r)}<td>{_pricing_chip(r)}{notes_html}</td>'
+            f'<td style="font-size:13px;">{_esc(_pricing_used_by(role_info.get(mid)))}</td>'
+            f'<td>{_pricing_edit(r, cat)}</td></tr>')
+    heads = [("Model", 240)] + [(lbl, _PRICE_W_RATE) for _, lbl in _PRICE_COLS] + [("Status", _PRICE_W_STATUS), ("Used by", _PRICE_W_USEDBY), ("Edit", _PRICE_W_EDIT)]
+    colgroup = "<colgroup>" + "".join(f'<col style="width:{w}px;">' for _, w in heads) + "</colgroup>"
+    head = "".join(f"<th>{t}</th>" for t, _ in heads)
+    return (f'<div id="model-pricing" style="scroll-margin-top:16px;">{_pricing_intro()}'
+            f'<div class="table-frame" style="overflow-x:auto;"><table style="min-width:1180px;table-layout:fixed;">{colgroup}<thead><tr>{head}</tr></thead>'
             f'<tbody>{"".join(body)}</tbody></table></div></div>')
 
 
