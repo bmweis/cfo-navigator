@@ -666,6 +666,26 @@ def test_ci_quota_toggle_replaces_latest_run_links(env, monkeypatch):
     assert dynamic_phrase not in r3.text
 
 
+def test_ci_quota_switch_is_green_when_on_and_grey_when_off(env, monkeypatch):
+    """The switch track is --seafoam-deep when on (it was navy), grey when off."""
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    from fastapi.testclient import TestClient
+    import webapp.app as appmod
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "admin", "password": "adminpass"})
+
+    def _switch(html):
+        i = html.index('aria-label="GitHub Actions quota exhausted"')
+        return html[i:i + 260]
+
+    off = _switch(c.get("/admin/checks").text)
+    assert "background:var(--line-strong)" in off
+    c.post("/admin/checks/ci-quota", data={"exhausted": "on", "pr_url": "https://github.com/bmweis/cfo-navigator/pull/1"})
+    html = c.get("/admin/checks").text
+    on = _switch(html)
+    assert "background:var(--seafoam-deep)" in on and "var(--navy);flex-shrink" not in on
+
+
 def test_ci_quota_toggle_requires_auth(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", tempfile.mktemp(suffix=".db"))
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
