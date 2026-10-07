@@ -203,7 +203,7 @@ def test_row_check_needs_an_admin_session_not_the_save_token(world):
 def test_row_check_refuses_an_id_not_in_the_drive_list(world):
     w = world
     r = w["admin"].post("/admin/library-backup/check/not-a-real-id", follow_redirects=False)
-    assert r.status_code == 404
+    assert r.status_code == 404 and "not in the list of backups in Drive" in r.text
     assert restore_status.read_status(w["db"]) == {}
 
 
@@ -309,3 +309,127 @@ def test_panel_shows_only_the_current_attempts_log(world):
     page = w["admin"].get("/admin/library-backup").text
     log = page.split('id="restore-log"')[1].split("</pre>")[0]
     assert "Restore of" in log and "Dry run finished" not in log and "valid backup" not in log
+
+
+# --- Interrupted, retry after an old record, two real processes -----------------
+
+def _script_cmd(w, *extra, mode="restore"):
+    return [sys.executable, "-m", "scripts.restore_from_drive", "--db", w["db"], "--snapshot", "f-new",
+            "--dry-run" if mode == "check" else "--yes-replace-live", *extra]
+
+
+def _wait_for(pred, timeout=30):
+    end = time.time() + timeout
+    while time.time() < end:
+        v = pred()
+        if v:
+            return v
+        time.sleep(0.1)
+    raise AssertionError("timed out waiting")
+
+
+def test_a_killed_script_is_reported_interrupted_and_a_new_attempt_is_allowed(world, monkeypatch):
+    """The record holds the SCRIPT's pid once it has started (not the web app's, which is always alive),
+    so a script killed mid-download is Interrupted straight away, with no wait for the heartbeat."""
+    import signal
+    import subprocess
+    w = world
+    monkeypatch.setenv("FAKE_DRIVE_SLEEP", "30")
+    proc = subprocess.Popen(_script_cmd(w), cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        st = _wait_for(lambda: (lambda s: s if s.get("stage") == "downloading" else None)(
+            restore_status.read_status(w["db"])))
+        assert st["pid"] == proc.pid and st["pid"] != os.getpid()
+        assert w["app"]._restore_state_view(w["db"])["state"] == "running"
+        proc.send_signal(signal.SIGKILL)
+        proc.wait()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert restore_status.read_status(w["db"])["state"] == "running"  # nobody recorded an ending
+    assert w["app"]._restore_state_view(w["db"])["state"] == "interrupted"
+    page = w["admin"].get("/admin/library-backup").text
+    assert 'data-state="interrupted"' in page and "Interrupted." in page
+    assert _titles(w["db"]) == ["live-1", "live-2"]
+    # a new attempt is allowed and works
+    monkeypatch.setenv("FAKE_DRIVE_SLEEP", "0")
+    assert _start(w, "restore").status_code == 303
+    _wait_done()
+    assert restore_status.read_status(w["db"])["state"] == "finished"
+    assert _titles(w["db"]) == ["snap-a", "snap-b", "snap-c"]
+
+
+def test_route_watching_a_killed_script_records_a_truthful_failure(world, monkeypatch):
+    """When the web app is alive and watching, a killed script is noticed at once and the panel says
+    it is not known whether anything changed (a restore) instead of staying 'running'."""
+    import signal
+    monkeypatch.setenv("FAKE_DRIVE_SLEEP", "30")
+    w = world
+    assert _start(w, "restore").status_code == 303
+    st = _wait_for(lambda: (lambda s: s if s.get("stage") == "downloading" else None)(
+        restore_status.read_status(w["db"])))
+    assert st["pid"] != os.getpid()
+    os.kill(int(st["pid"]), signal.SIGKILL)
+    _wait_done()
+    st = restore_status.read_status(w["db"])
+    assert st["state"] == "failed" and "not known whether anything changed" in st["message"]
+    assert _titles(w["db"]) == ["live-1", "live-2"]
+    monkeypatch.setenv("FAKE_DRIVE_SLEEP", "0")
+    assert _start(w, "check").status_code == 303
+    _wait_done()
+    assert restore_status.read_status(w["db"])["state"] == "checked"
+
+
+OLD_RECORDS = {
+    # exactly what production's restore-status.json held after the two failed attempts
+    "production-failed-check": {"state": "failed", "stage": "failed", "mode": "check", "pid": 0,
+                                "started_at": "2026-10-07T20:48:48+00:00",
+                                "message": "The restore script stopped without a result. The Railway logs and restore.log have the details.",
+                                "user": 5, "file_name": "library-20261007-204540.db",
+                                "updated_at": "2026-10-07T20:48:49+00:00", "finished_at": "2026-10-07T20:48:49+00:00"},
+    "failed-restore": {"state": "failed", "stage": "failed", "mode": "restore", "pid": 0, "message": "x"},
+    "refused": {"state": "refused", "stage": "refused", "mode": "restore", "pid": 0, "message": "x"},
+    "rolled-back": {"state": "rolled_back", "stage": "rolled_back", "mode": "restore", "pid": 0, "message": "x"},
+}
+
+
+@pytest.mark.parametrize("name", sorted(OLD_RECORDS))
+@pytest.mark.parametrize("mode", ["check", "restore"])
+def test_an_old_failed_or_refused_record_blocks_nothing(world, name, mode):
+    w = world
+    p = restore_status.paths(w["db"])["status"]
+    open(p, "w").write(json.dumps(OLD_RECORDS[name]))
+    assert w["app"]._restore_refusal({"id": "f-new", "name": "n", "size": 1}, mode) == ""
+    assert _start(w, mode).status_code == 303
+    _wait_done()
+    assert restore_status.read_status(w["db"])["state"] == ("finished" if mode == "restore" else "checked")
+    if mode == "restore":
+        assert _titles(w["db"]) == ["snap-a", "snap-b", "snap-c"]
+
+
+def test_two_real_processes_the_second_is_refused_and_the_first_record_is_untouched(world, monkeypatch):
+    import subprocess
+    w = world
+    monkeypatch.setenv("FAKE_DRIVE_SLEEP", "6")
+    a = subprocess.Popen(_script_cmd(w), cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        first = _wait_for(lambda: (lambda s: s if s.get("stage") == "downloading" else None)(
+            restore_status.read_status(w["db"])))
+        assert first["pid"] == a.pid
+        # process B: a second real script, with no job id and with someone else's
+        for extra in ([], ["--job-id", "someone-elses-job"]):
+            b = subprocess.run(_script_cmd(w, *extra, mode="check"), cwd=str(ROOT), capture_output=True,
+                               text=True, timeout=60)
+            assert b.returncode != 0 and "already running" in (b.stdout + b.stderr)
+            now = restore_status.read_status(w["db"])
+            for k in ("pid", "job_id", "started_at", "mode", "state", "user"):
+                assert now.get(k) == first.get(k), k
+        # and the web route refuses too
+        r = _start(w, "restore")
+        assert r.status_code == 409 and "already running" in r.text
+        assert restore_status.read_status(w["db"])["pid"] == a.pid
+    finally:
+        a.wait(timeout=60)
+    assert restore_status.read_status(w["db"])["state"] == "finished"  # the first one was never disturbed
+    assert _titles(w["db"]) == ["snap-a", "snap-b", "snap-c"]

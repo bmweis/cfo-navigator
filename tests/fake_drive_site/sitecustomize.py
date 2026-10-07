@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 
 _cfg = os.environ.get("FAKE_DRIVE_JSON")
 if _cfg and os.path.exists(_cfg):
@@ -18,6 +19,7 @@ if _cfg and os.path.exists(_cfg):
         for f in _files]
 
     def _download(token, file_id, dest, chunk=1 << 20):
+        time.sleep(float(os.environ.get("FAKE_DRIVE_SLEEP", "0")))  # lets a test act mid-download
         src = next(f["src"] for f in _files if f["id"] == file_id)
         shutil.copyfile(src, dest)
         return os.path.getsize(dest), hashlib.md5(open(dest, "rb").read()).hexdigest()
