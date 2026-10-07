@@ -450,7 +450,8 @@ def test_ask_matchmaker_failed_turn_is_a_plain_tool_error_and_not_recorded(live_
     result = _call_tool(live_server.base_url, live_server.member, "ask_matchmaker",
                         {"kind": "tools", "question": "close automation software"})
     text = _error_text(result)
-    assert text == "Couldn't answer that just now. Try again in a moment."
+    # FastMCP prefixes a tool error with "Error executing tool <name>: ".
+    assert text.endswith("Couldn't answer that just now. Try again in a moment.")
     assert raw not in text and "Answer call failed" not in text
     lib = Library(os.environ["LINKLIB_DB"])
     n = lib.conn.execute("SELECT COUNT(*) FROM matchmaker_questions").fetchone()[0]
