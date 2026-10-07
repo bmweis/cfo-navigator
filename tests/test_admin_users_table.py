@@ -73,6 +73,16 @@ def _admin_client(appmod):
     return c
 
 
+def _rowless_admin_client(appmod):
+    """An admin session with no `users` row of its own, so tests about
+    "who is the last active admin" count only the accounts they seed. Logging
+    in as admin/<password> would (via tests/conftest.py) add a real admin row
+    and change those counts."""
+    c = _client(appmod)
+    c.cookies.set(appmod.COOKIE_NAME, appmod._make_session("admin", "ops"))
+    return c
+
+
 def _seed_users(appmod):
     lib = appmod._lib()
     try:
@@ -221,7 +231,7 @@ def test_rows_carry_username_role_and_status(env):
 
 
 def test_empty_state_when_no_users(env):
-    admin = _admin_client(env)
+    admin = _rowless_admin_client(env)
     body = admin.get("/admin/users").text
     assert "No accounts yet. Create one below." in body
 
@@ -297,7 +307,7 @@ def test_access_level_and_status_badges_carry_their_own_action_form(env):
     (revealed only once "Edit" is clicked) but structurally part of the
     SAME <td> as the badge now, not the Actions cell."""
     jane_id, bob_id = _seed_users(env)
-    admin = _admin_client(env)
+    admin = _rowless_admin_client(env)
     body = admin.get("/admin/users").text
     assert 'data-col="users:access_level"' in body
     assert 'data-col="users:status"' in body
@@ -607,7 +617,7 @@ def test_bulk_delete_check_allows_deleting_a_member(env):
 
 def test_bulk_delete_check_blocks_the_last_active_admin(env):
     jane_id, bob_id = _seed_users(env)
-    admin = _admin_client(env)
+    admin = _rowless_admin_client(env)
     r = admin.post("/admin/users/bulk-delete-check", json={"ids": [bob_id]})
     data = r.json()
     assert data["users"] == []
@@ -654,7 +664,7 @@ def test_bulk_delete_actually_deletes_selected_members(env):
 
 def test_bulk_delete_skips_the_last_active_admin_without_erroring(env):
     jane_id, bob_id = _seed_users(env)
-    admin = _admin_client(env)
+    admin = _rowless_admin_client(env)
     r = admin.post("/admin/users/bulk-delete", json={"ids": [jane_id, bob_id]})
     assert r.status_code == 200
     assert r.json() == {"ok": True, "deleted": 1}   # jane deleted, bob skipped

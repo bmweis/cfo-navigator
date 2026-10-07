@@ -47,19 +47,20 @@ def _admin_client(appmod):
 
 
 def _seed_admin_user(appmod) -> int:
-    """A real `users` row, username 'admin' — matching ADMIN_USERNAME so the
-    break-glass session _admin_client() logs into above resolves to a real
+    """A real `users` row, username 'admin' — so the
+    session _admin_client() logs into above resolves to a real
     user_id via _current_user_id (needed for /read-later/refresh and
     /api/read-article's session-scoped Read Later lookup), not just
     default_admin_user_id()'s token-only fallback (which any admin row, any
     username, already satisfies)."""
     lib = appmod._lib()
     try:
-        lib.conn.execute(
-            "INSERT INTO users (username, password_hash, role, active, name, email, created_at) "
-            "VALUES ('admin','x','admin',1,'Admin','a@example.com','2026-01-01')"
-        )
-        lib.conn.commit()
+        # A real password (not a dummy hash) so this row is also what
+        # _admin_client() logs into now that the shared-secret login is gone.
+        # Idempotent: tests/conftest.py may already have created it at login.
+        if lib.get_user("admin") is None:
+            lib.create_user("admin", "adminpass", role="admin", name="Admin",
+                            email="a@example.com", password_change_recommended=False)
         return lib.default_admin_user_id()
     finally:
         lib.close()

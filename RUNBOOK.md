@@ -68,12 +68,15 @@ reads the restored file.
 2. **Download the snapshot from Google Drive** you want to restore
    (normally the newest `library-*.db`).
 
-3. **Upload it.** Either use the upload form on `/admin/library-backup` (admin
-   login), or from a terminal:
+3. **Upload it.** The route accepts an **admin session only**: the save token
+   (`X-Save-Token` or `?token=`) is refused with `401`, as is a non-admin
+   login. Use the upload form on `/admin/library-backup` (admin login), or from
+   a terminal reuse an admin session cookie (the `cfo_session` value from your
+   browser after logging in):
 
    ```bash
    curl -si -X POST "https://bmweis.com/admin/library-backup/upload-db" \
-        -H "X-Save-Token: $LINKLIB_SAVE_TOKEN" \
+        -H "Cookie: cfo_session=<your admin session cookie>" \
         -F "file=@library-YYYYMMDD-HHMMSS.db"
    ```
 
@@ -186,7 +189,7 @@ bookmarklet's secret; two other env vars *fall back to it* when unset:
 
 | If this is unset in Railway… | …then rotating the save token also |
 |---|---|
-| `LINKLIB_PASSWORD` | **changes the break-glass admin login password** (it *is* the save token) |
+| `LINKLIB_PASSWORD` | nothing about login (the shared-secret login was retired, issue #627); it still turns auth on and is the fallback cookie-signing key |
 | `LINKLIB_SECRET_KEY` (when `LINKLIB_PASSWORD` is also unset) | **invalidates every member session** (cookie-signing key falls back to the password) — everyone just logs in again, no data impact |
 
 Member accounts in the `users` table are unaffected either way — their
@@ -333,7 +336,9 @@ paths against scratch files.
    `LINKLIB_DB=.../live.db LINKLIB_SAVE_TOKEN=<anything> uvicorn webapp.app:app --port 8123`
 4. Confirm the pre-restore state through the API
    (`GET /api/search?q=&limit=50&token=…` shows only the live DB's rows).
-5. Restore with section 1's exact curl (`POST /admin/library-backup/upload-db`).
+5. Restore with section 1's curl (`POST /admin/library-backup/upload-db`). It
+   needs an admin session, so log in to this local instance as admin first
+   (`LINKLIB_PASSWORD`) and send that cookie.
 6. Validate: the 303 redirect's `uploaded=<N>` matches the good DB's
    article count; `/api/search` now returns the snapshot's rows (including
    an FTS query that missed before); the stale row is gone; on the file
@@ -373,7 +378,8 @@ paths against scratch files.
 - Snapshot via `snapshot_to_file()` → 233,472-byte self-contained file, no
   WAL sidecar.
 - Pre-restore: API listed 2 rows; FTS query `netsuite` → 0 hits.
-- `POST /admin/library-backup/upload-db` with `X-Save-Token` → `303`,
+- `POST /admin/library-backup/upload-db` with `X-Save-Token` → `303` (the route
+  has been admin-session-only since 2026-10; the token is now refused),
   `location: /admin/library-backup?uploaded=5` (count matched the snapshot).
 - Post-restore, **no restart**: API listed the snapshot's 5 rows; `netsuite`
   → 1 hit; stale row unfindable; `PRAGMA integrity_check` = `ok`; FTS
@@ -796,3 +802,62 @@ key that might not be good.
    replacement key), just delete the variable—every call site already
    treats a missing `EXA_API_KEY` as a normal, best-effort "not available"
    condition (never raises), so there's nothing else to change.
+
+---
+
+## 9. Locked out of admin, and rotating `LINKLIB_SECRET_KEY`
+
+**Background.** The shared-secret "break-glass" login was retired (issue #627).
+Logging in now needs a row in `users`. If the admin password is lost and the
+emailed reset (`/forgot-password`, which needs an email on the user row and
+working Gmail) can't help, reset it on the container.
+
+### Recover access
+
+1. Open a shell in the service:
+
+   ```bash
+   railway ssh
+   ```
+
+2. Preview (writes nothing, asks for no password). Always pass the absolute DB path:
+
+   ```bash
+   python -m scripts.reset_user_password --db /data/library.db --username <username>
+   ```
+
+3. Reset an existing user. It prompts twice, hidden. The password is never an
+   argument and never logged:
+
+   ```bash
+   python -m scripts.reset_user_password --db /data/library.db --username <username> --apply
+   ```
+
+   Or generate one (printed once, copy it now):
+
+   ```bash
+   python -m scripts.reset_user_password --db /data/library.db --username <username> --apply --generate
+   ```
+
+4. If no admin account exists at all, create one:
+
+   ```bash
+   python -m scripts.reset_user_password --db /data/library.db --username <username> --create-admin --apply --generate
+   ```
+
+5. The script reads the row back and prints `verified by read-back`. Then sign in at `/login`
+   and change the password at `/change-password`.
+
+### Rotate `LINKLIB_SECRET_KEY` (signs out every session)
+
+Do this once after the shared-secret login is retired, so any session issued
+through the old fallback, and any legacy role-less cookie, stops working.
+
+1. Generate a value: `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+2. Railway dashboard, service, **Variables**: set `LINKLIB_SECRET_KEY` to it. Saving redeploys.
+3. Everyone, you included, signs in again. Nothing stored depends on this key, so
+   MCP tokens, password-reset links, the bookmarklet and the database are unaffected.
+4. Confirm it took: an old browser session lands on `/login`.
+
+Only session cookies are signed with this key (`webapp/app.py` `_sign`/`_session_claims`).
+MCP tokens and reset tokens are plain sha256 hashes in the database, not keyed to it.

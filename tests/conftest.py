@@ -33,6 +33,7 @@ Two autouse behaviors, both kept deliberately small and explicit:
 """
 from __future__ import annotations
 
+import os
 import importlib
 
 import pytest
@@ -42,6 +43,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "real_coral: run the real coral_moment_problems() page scan instead of the suite-wide stub")
+    config.addinivalue_line(
+        "markers",
+        "no_admin_seed: do not auto-create the 'admin' users row on login (tests of the retired fallback)")
 
 
 def _reset_module_globals() -> None:
@@ -105,3 +109,28 @@ def _stub_coral_scan(request, monkeypatch):
     # freshly reloaded real function) is the one that sticks.
     for mod, fn in real_fns:
         mod.coral_moment_problems = fn
+
+
+@pytest.fixture(autouse=True)
+def _seed_admin_on_login(request, monkeypatch):
+    """The shared-secret login fallback was retired (issue #627), so a login as
+    "admin" needs a real `users` row. Hundreds of tests log in as
+    admin/<LINKLIB_PASSWORD> against a fresh temp DB; this creates that row
+    lazily, only at the moment such a login is attempted, so a test that makes
+    its own "admin" user first is unaffected. Opt out with
+    `@pytest.mark.no_admin_seed` (tests/test_break_glass_retired.py does)."""
+    if request.node.get_closest_marker("no_admin_seed") is not None:
+        return
+    from linklib.db import Library
+    original = Library.authenticate
+
+    def authenticate(self, username, password):
+        user = original(self, username, password)
+        if user is None and (username or "").strip().lower() == "admin":
+            secret = os.environ.get("LINKLIB_PASSWORD") or os.environ.get("LINKLIB_SAVE_TOKEN")
+            if secret and password == secret and self.get_user("admin") is None:
+                self.create_user("admin", secret, role="admin", password_change_recommended=False)
+                user = original(self, username, password)
+        return user
+
+    monkeypatch.setattr(Library, "authenticate", authenticate)

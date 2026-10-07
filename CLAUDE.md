@@ -6731,7 +6731,7 @@ never reads as something to tap.
   full write-up, and `tests/test_password_change_recommended.py` for the
   regression coverage (flag defaults/set/clear across all four call sites,
   the admin-reset email, the in-session change-password form, and the
-  banner's presence/absence including the break-glass admin login, which has
+  banner's presence/absence including a session with no `users` row (the break-glass login, retired in #627), which has
   no `users` row and so can never carry the flag).
 
 - **Surface Hidden Community Profile Fields (2026-09) — Stage focus, Jobs
@@ -6929,6 +6929,14 @@ never reads as something to tap.
   badge; the badge itself still visible in that collapsed state; the nested-
   nested case specifically; the mirrored count and its deliberate exclusion
   of the per-field flags).
+
+- **Admin badge counted no failing check until 2026-10.** `_compute_failing_checks_count`
+  filtered on `where == "In-app"`, a label `run_all()` stopped emitting on 2026-06-30
+  (`d3d44e0`); the badge shipped three days later (`ad416e8`) already using it, so it
+  was wrong from birth, and the 2026-09 page-speed move did not narrow it. It now
+  matches `"Live + CI"` with `ok is False`. Any earlier text here saying the badge
+  counted failing checks described intent, not behavior. Cache, sentinel, static-check
+  cache and refresher are unchanged. See `tests/test_task_badges.py`.
 
 - **Admin menu badge coverage, follow-up (2026-09) — the per-field
   `*_needs_verification` flags this PR left out are folded in after all,
@@ -11222,16 +11230,28 @@ it supersedes the old "`/save` is token-gated" note.
   sandbox: Drive access, the container's environment variables, Railway's request
   duration cap. See `tests/test_restore_from_drive.py`.
 
+- **Homepage Status note (2026-10).** `/admin/copy/homepage`'s two-field "Bio box" is one "Status" box (`homepage_status_copy`, trusted markdown renderer, Preview reused from About). Saving or "Mark reviewed" stamps `homepage_status_revised_at` (UTC); after 14 days (`homepage_status.STATUS_STALE_DAYS`) the card shows an amber notice and the "Homepage status is current" row on `/admin/checks` fails and adds 1 to the Admin badge. Legacy keys stay stored and are shown until the first save. The badge counts it through the failing "Live + CI" rows (#719), not the reminders function. See ARCHITECTURE.md's "Homepage Status note".
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a
 single shared secret with a session-cookie login on top — no user accounts, no DB
 tables, no third-party dependency.
 
-- **One secret, two front doors.** `LINKLIB_PASSWORD` is the login password; if unset it
-  **falls back to `LINKLIB_SAVE_TOKEN`**, so by default the same string unlocks both the
-  login screen and the token API. If *neither* is set, the private routes are open
-  (local-dev convenience).
+- **One secret authorizes the token routes; it no longer logs anyone in.**
+  `LINKLIB_PASSWORD` (falling back to `LINKLIB_SAVE_TOKEN`) turns auth on, and
+  `LINKLIB_SAVE_TOKEN` authorizes the token routes (`/save`, `/api/search`,
+  `/admin/backup-now`, ...). If *neither* is set, the private routes are open
+  (local-dev convenience). **The shared-secret "break-glass" login was
+  retired (2026-10, issue #627):** `login_submit()` accepts only a `users`
+  row, so every session is attributed and metered. A lost admin password is
+  recovered with `scripts/reset_user_password.py` on the container
+  (RUNBOOK §9, preview by default, password via hidden prompt or generated,
+  never an argument). Old fallback-era sessions end when
+  `LINKLIB_SECRET_KEY` is rotated (RUNBOOK §9); the session format is
+  unchanged. Test suite: `tests/conftest.py` lazily creates the `admin`
+  users row when a test logs in as admin/<LINKLIB_PASSWORD>;
+  `@pytest.mark.no_admin_seed` opts out (`tests/test_break_glass_retired.py`).
 - **Login = signed session cookie.** `POST /login` checks the password and sets an
   HMAC-signed, HttpOnly, SameSite=Lax cookie (`cfo_session`, 30-day TTL). Signing uses
   `LINKLIB_SECRET_KEY`, falling back to the password. Implemented with the stdlib
@@ -11283,6 +11303,15 @@ tables, no third-party dependency.
     only the `X-Save-Token` header (2026-09 correction: this line previously
     claimed `?token=` worked for all of them, verified false in code for
     `/ask` specifically during the MCP cleanup/hardening PR's Phase 0).
+  - **`POST /admin/library-backup/upload-db` is admin-session-only (2026-10).**
+    It used `_require_api` (admin cookie OR save token), but it atomically
+    replaces the live `library.db` with only an `articles`-table check, so the
+    bookmarklet token could swap in a database carrying its own `users` table.
+    It now uses `_is_authed` alone: the token (header or `?token=`) and a
+    member session get the same 401 as an anonymous caller. `/admin/backup-now`
+    keeps `_require_api` (the Railway cron calls it with the token). No audit
+    record is written (a row in the live DB would be lost in the swap). See
+    `tests/test_upload_db_admin_only.py`.
   - **`/api/search` is now admin-only (`_require_api`), matching `/read`'s real
     access tier (2026-09 fix)** — previously gated at member-tier
     (`_require_member`, any signed-in user), a likely-unintentional survivor
@@ -13547,7 +13576,7 @@ subscription.
   orphan. **Byline rule, one function (`_ask_byline`):** the viewer's own row
   reads "You" first (an admin included, by `user_id` equality, never by name),
   then an admin sees another asker's stored name, then a member sees nothing.
-  The break-glass admin login has no `user_id`, so nothing is "own" there and it
+  A session with no `user_id` (the break-glass login, retired in #627; token-only callers still lack one) has nothing "own" and it
   shows stored names. Other name renderers (admin report, admin feedback card)
   are admin-only pages that always name the asker; `/ask/history`, Recent and the
   open thread show only the viewer's own questions with no byline. Tests:
