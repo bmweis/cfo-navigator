@@ -72,6 +72,15 @@ is a mistake. Log in as admin, open `/admin/library-backup` and click
 > is needed. If the page says to restart, restart the service in Railway.
 > If the swapped file fails its checks, the script puts the previous database back
 > and the page says **rolled back**.
+>
+> **Pick a quiet moment.** The site keeps serving during a restore. A request already
+> running at the instant of the swap keeps reading the old file and any save it makes
+> then is lost (the old file survives only as `pre-restore`). A request that opens the
+> database in the few microseconds between the swap and the removal of the old `-wal`
+> and `-shm` files could briefly read old pages through them. Both are very unlikely
+> at this traffic. A write in that window is the one case that could harm the restored
+> file; the post-restore article count and the pre-restore copy are your check. For the first live rehearsal,
+> pick a time nobody is saving anything.
 
 ### Path B — the app is down or won't boot
 

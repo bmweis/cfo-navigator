@@ -37113,6 +37113,7 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Leave <code>GOOGLE_DRIVE_FOLDER_ID</code> unset in Railway. The app creates and remembers its own folder. Setting it sends backups to that folder instead, starting with the next attempt.</p>
 {_backup_status_banner(backup_rows)}
 <h2 style="font-size:16px;margin:24px 0 4px;">Backups in Drive</h2>
+<style>@media(max-width:700px){{.drive-list-table{{min-width:0 !important}}.drive-list-table thead{{display:none}}.drive-list-table tr{{display:block;padding:6px 0;border-bottom:1px solid var(--line)}}.drive-list-table td{{display:block;white-space:normal !important;padding:2px 12px !important;border:0 !important}}}}</style>
 <div id="drive-list"><p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Loading the list from Google Drive&hellip;</p></div>
 <p style="color:var(--muted);font-size:13px;margin:8px 0 0;">Only backups made by this app appear here: the daily ones and the ones from the button. A file placed in the Drive folder by hand does not show. The newest 14 are kept, so extra manual backups push the oldest out.</p>
 <script>
@@ -39897,6 +39898,11 @@ def _restore_refusal(file: dict, mode: str) -> str:
     return restore_status.disk_problem(DB_PATH, int(file.get("size") or 0))
 
 
+def _panel_msg(m: str) -> str:
+    """Drop a lead-in the panel heading already says ("Restore finished.", "The restore failed.")."""
+    return re.sub(r"^(Restore finished: |The (restore|check) failed: )", "", m or "")
+
+
 def _restore_state_view(db_path: str) -> dict:
     st = restore_status.read_status(db_path)
     state = restore_status.effective_state(st)
@@ -39946,7 +39952,7 @@ def _restore_panel_html(db_path: str) -> str:
         else:
             tail = ' The app is refreshing what it keeps in memory. Reload in a moment.'
         body = (f'<div id="restore-panel" data-state="finished" style="{ok}"><strong>Restore finished.</strong> '
-                f'{_esc(v["message"])}{tail} The restore took {_fmt_elapsed(v["elapsed"])}.{log_html}</div>')
+                f'{_esc(_panel_msg(v["message"]))}{tail} The restore took {_fmt_elapsed(v["elapsed"])}.{log_html}</div>')
     elif state == "checked":
         body = (f'<div id="restore-panel" data-state="checked" style="{ok}"><strong>Check finished.</strong> '
                 f'{_esc(v["message"])}{log_html}</div>')
@@ -39964,7 +39970,7 @@ def _restore_panel_html(db_path: str) -> str:
                 f'{log_html}</div>')
     else:  # failed
         body = (f'<div id="restore-panel" data-state="failed" style="{warn}"><strong>The {what} failed.</strong> '
-                f'{_esc(v["message"])}{log_html}</div>')
+                f'{_esc(_panel_msg(v["message"]))}{log_html}</div>')
     script = ""
     if state == "running":
         script = """<script>

@@ -286,3 +286,17 @@ def test_list_script_links_each_backup_to_its_confirmation_page(world):
 
 def test_confirmation_page_is_not_a_hub_nav_orphan(world):
     assert world["app"].hub_nav_orphans() == []
+
+
+def test_drive_list_stacks_on_a_phone_so_the_restore_button_is_never_off_screen(world):
+    """At 390px the table used to scroll sideways and hide Restore from backup."""
+    page = world["admin"].get("/admin/library-backup").text
+    assert "@media(max-width:700px){.drive-list-table" in page
+    assert ".drive-list-table td{display:block" in page
+
+
+def test_panel_does_not_repeat_the_heading_in_the_message(world):
+    app = world["app"]
+    assert app._panel_msg("The restore failed: Not enough free space.") == "Not enough free space."
+    assert app._panel_msg("Restore finished: 4,516 articles.") == "4,516 articles."
+    assert app._panel_msg("Something else.") == "Something else."
