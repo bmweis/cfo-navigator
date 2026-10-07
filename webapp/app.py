@@ -4230,6 +4230,26 @@ def _reader_access_card_html() -> str:
     )
 
 
+def _reader_open_control_html() -> str:
+    """The homepage's admin-only "Open reader" control (2026-10): one compact
+    outlined .admin-only link in the Toolbox card's column, replacing the
+    large seafoam "Reader access" card there. /tools keeps the card
+    (_reader_access_card_html). The visible muted words "Admin only" beside
+    the button say who it is for; a tooltip alone would not. Same
+    destination as the card (/read), same icon (_ICON_NEWSPAPER, a plain
+    stroke path with no hardcoded fill, so the Icon fill contract check has
+    nothing to register). The caller decides whether to render it."""
+    return (
+        '<div class="home-reader-open" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+        '<a href="/read" rel="nofollow noreferrer" class="admin-only" title="Admin only">'
+        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" '
+        f'style="margin-right:6px;">{_ICON_NEWSPAPER}</svg>Open reader</a>'
+        '<span style="font-size:12px;color:var(--muted);">Admin only</span>'
+        '</div>'
+    )
+
+
 def _toolbox_icon_badge(index: int, svg_path: str, *, size: int = 44, icon_size: int = 22,
                          margin_bottom: int = 14) -> str:
     """Icon badge for the CFO Toolbox 2x2 tile grid (Phase 3, "Toolbox Illustration
@@ -4747,7 +4767,7 @@ def homepage(request: Request):
     # (PR 16, 2026-09) so /tools' own standalone version of this card can't
     # drift from this one.
     is_admin = _is_authed(request)
-    reader_access_box = _reader_access_card_html() if is_admin else ""
+    reader_access_box = _reader_open_control_html() if is_admin else ""
 
     body = f"""<div class="page page-standard">
 {password_nudge_html}
@@ -4785,7 +4805,7 @@ def homepage(request: Request):
 .home-status-body p{{font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;}}
 .home-status-body a{{color:var(--navy);}}
 .home-status{{position:relative;margin-top:-50px;background:#fff;border:2px solid var(--ink-graffiti);border-radius:14px;padding:20px 22px;transform:rotate(-1.5deg);box-shadow:3px 3px 0 var(--ink-graffiti);box-sizing:border-box;z-index:2;}}
-.home-toolbox-panel,.home-reader-slot{{width:100%;}}
+.home-toolbox-panel{{width:100%;}}
 .home-toolbox-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:26px;box-sizing:border-box;position:relative;}}
 .home-toolbox-rows{{display:flex;flex-direction:column;gap:16px;}}
 /* Homepage-only icon badge for the Toolbox panel's tile rows — deliberately
@@ -4799,6 +4819,7 @@ def homepage(request: Request):
 .home-tl-bullet{{display:flex;gap:12px;font-size:15.5px;line-height:1.55;color:var(--ink-soft);}}
 .home-tl-bullet-mark{{color:var(--navy);flex-shrink:0;font-size:18px;line-height:1.3;}}
 .home-tl-highlights-wrap{{border-top:1px solid var(--line);padding-top:28px;}}
+.home-tl-seeall{{margin-top:32px;}}
 /* Original content block: a fixed 2x2 (one column on mobile). The block is
    capped at 4 pieces in the query, so its item count always matches its
    shape and there is no sparse case; auto-fill at the shared 220px floor
@@ -4832,7 +4853,17 @@ def homepage(request: Request):
 @media(min-width:1024px){{
   .home-grid{{display:grid;grid-template-columns:1fr 360px;grid-template-rows:auto auto;gap:56px;align-items:start;}}
   .home-hero-block{{grid-column:1;grid-row:1;}}
-  .home-tl-section{{grid-column:1;grid-row:2;}}
+  /* The Thought leadership section dissolves into the grid on desktop so its
+     parts can be placed separately: the intro, bullets and Original content stay in
+     the left column, while the highlights row and the See-all link span the
+     full content width in their own rows under both columns. Below 1024px the
+     section is an ordinary block, so the phone order is exactly the DOM
+     order it always was. */
+  .home-tl-section{{display:contents;}}
+  .home-tl-main{{grid-column:1;grid-row:2;}}
+  .home-tl-highlights-wrap{{grid-column:1 / -1;grid-row:3;}}
+  .home-tl-seeall{{grid-column:1 / -1;grid-row:4;margin-top:-24px;justify-self:start;}}
+  .home-tl-seeall-r3{{grid-row:3;}}
   .home-photo-wrap{{grid-column:2;grid-row:1;}}
   .home-avatar-wrap{{width:240px;height:240px;left:40px;top:-16px;}}
   .home-status{{margin-left:-30px;width:calc(100% + 30px);}}
@@ -4859,9 +4890,10 @@ def homepage(request: Request):
   </div>
 
   <div class="home-tl-section" style="min-width:0;">
+    <div class="home-tl-main" style="min-width:0;">
     <div style="font-size:13px;font-weight:600;letter-spacing:.08em;color:var(--seafoam-deep);text-transform:uppercase;margin-bottom:14px;">Thought leadership</div>
     <h2 style="margin:0 0 16px;font-family:var(--font-head);font-weight:700;font-size:30px;">What I write about</h2>
-    <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0 0 22px;max-width:640px;">Frameworks, playbooks, and real opinions on building finance functions that scale&mdash;collected across writing, speaking, podcasts, and press.</p>
+    <p style="font-size:17px;line-height:1.65;color:var(--ink-soft);margin:0 0 22px;max-width:640px;">Frameworks, playbooks, and real opinions on building finance functions that scale, collected across writing, speaking, podcasts, and press.</p>
 
     <ul class="home-tl-bullets" style="padding:0;list-style:none;">
       <li class="home-tl-bullet"><span class="home-tl-bullet-mark">&bull;</span>AI in finance&mdash;separating signal from noise, tracking what&rsquo;s changing.</li>
@@ -4875,12 +4907,14 @@ def homepage(request: Request):
       {_oc_featured_cards_html(original_content_home, "tl-featured-home")}
     </div>''' if original_content_home else ''}
 
+    </div>
+
     {f'''<div class="home-tl-highlights-wrap">
       <div class="home-tl-highlights-label">Recent highlights</div>
       <div class="home-tl-highlights">{recent_highlights}</div>
     </div>''' if tl_featured else ''}
 
-    <a href="/thought-leadership" style="display:inline-block;margin-top:32px;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all thought leadership &rarr;</a>
+    <a href="/thought-leadership" class="home-tl-seeall{' home-tl-seeall-r3' if not tl_featured else ''}" style="display:inline-block;font-family:var(--font-body);font-weight:600;font-size:15px;color:var(--navy);text-decoration:none;">See all thought leadership &rarr;</a>
   </div>
 
   <div class="home-sidebar-rest">
@@ -39194,9 +39228,9 @@ def admin_copy_homepage_page(request: Request):
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Hero headline and subhead</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The large text at the very top of the homepage, next to your photo.</p>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Headline</label>
-<textarea id="home-headline" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_headline)}</textarea>
+<textarea id="home-headline" class="copy-autogrow" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_headline)}</textarea>
 <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Subhead</label>
-<textarea id="home-subhead" rows="3" style="{prose}">{_esc(homepage_subhead)}</textarea>
+<textarea id="home-subhead" class="copy-autogrow" rows="2" style="{prose}">{_esc(homepage_subhead)}</textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="headline-save-btn" onclick="saveHeadline()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
 <span id="headline-status" style="font-size:13px;color:var(--muted);"></span></div></div>
@@ -39204,7 +39238,7 @@ def admin_copy_homepage_page(request: Request):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Status</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The note under your photo on the homepage, below a fixed "Status:" label. Separate paragraphs with a blank line.</p>
-<textarea id="home-status-copy" rows="9" style="{prose}">{_esc(homepage_status)}</textarea>
+<textarea id="home-status-copy" class="copy-autogrow" rows="2" style="{prose}">{_esc(homepage_status)}</textarea>
 <p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.5;">Markdown works. For a link to another site, write a raw tag: <code>&lt;a href="https://example.com" target="_blank" rel="noopener"&gt;text&lt;/a&gt;</code>. Use Preview to check it before saving.</p>
 <div id="status-warning" role="status" style="{_hs_warn_style}display:{"block" if age["stale"] else "none"};">{_esc(_hs.warning_text(age["days"]))}</div>
 <p id="status-revised" style="font-size:13px;color:var(--muted);margin:12px 0 0;">{_status_revised_label(status_stamp)}</p>
@@ -39262,6 +39296,7 @@ function markStatusReviewed() {{
   statusPost('/admin/copy/homepage/status-reviewed', {{}}, 'status-reviewed-btn', 'Mark reviewed');
 }}
 {_ADMIN_COPY_PREVIEW_JS}
+{_ADMIN_COPY_AUTOGROW_JS}
 </script>"""
     return HTMLResponse(_page("Homepage copy—Admin", "Admin", body, authed=True))
 
@@ -39287,6 +39322,51 @@ async function previewCopy(taId, boxId) {
   }
   box.style.display = 'block';
 }
+"""
+
+
+# Admin copy textareas size themselves to their content (2026-10): a small
+# JS helper, not CSS `field-sizing: content`. Brian edits on an iPhone and
+# WebKit support for field-sizing could not be confirmed (the sandbox has no
+# WebKit), so the helper is the safe choice and behaves the same everywhere.
+# Between about 2 and 20 rows, then it scrolls inside. Dragging the resize
+# handle is respected: once a person has resized a box by hand, it stops
+# auto-fitting until the page reloads. Shared by /admin/copy/homepage,
+# /admin/copy/about and /admin/copy/how-this-is-built (every textarea with the
+# `copy-autogrow` class); the Preview and Save code is untouched.
+_ADMIN_COPY_AUTOGROW_JS = """
+function initCopyAutogrow() {
+  var MIN_ROWS = 2, MAX_ROWS = 20;
+  document.querySelectorAll('textarea.copy-autogrow').forEach(function (t) {
+    function fit() {
+      if (t.dataset.manual === '1') return;
+      var cs = getComputedStyle(t);
+      var lh = parseFloat(cs.lineHeight) || 22;
+      var pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      var bor = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+      var bb = cs.boxSizing === 'border-box';
+      t.style.height = 'auto';
+      var need = t.scrollHeight + (bb ? bor : -pad);
+      var min = lh * MIN_ROWS + (bb ? pad + bor : 0);
+      var max = lh * MAX_ROWS + (bb ? pad + bor : 0);
+      var h = Math.min(Math.max(need, min), max);
+      t.style.height = h + 'px';
+      t.style.overflowY = need > max + 1 ? 'auto' : 'hidden';
+      t.dataset.auto = String(h);
+    }
+    t.addEventListener('input', fit);
+    var settle = function () {
+      var a = parseFloat(t.dataset.auto || '0');
+      if (a && Math.abs(t.offsetHeight - a) > 2) t.dataset.manual = '1';
+    };
+    t.addEventListener('mouseup', settle);
+    t.addEventListener('touchend', settle);
+    window.addEventListener('resize', fit);
+    fit();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  });
+}
+initCopyAutogrow();
 """
 
 
@@ -39318,7 +39398,7 @@ def admin_copy_about_page(request: Request):
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Bio</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">Separate paragraphs with a blank line.</p>
-<textarea id="about-copy" rows="14" style="{prose}">{_esc(about_copy)}</textarea>
+<textarea id="about-copy" class="copy-autogrow" rows="2" style="{prose}">{_esc(about_copy)}</textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="about-save-btn" onclick="saveAbout()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
 <button type="button" onclick="previewCopy('about-copy','about-preview')" class="btn btn-ghost" style="font-size:14px;padding:9px 22px;">Preview</button>
@@ -39330,6 +39410,7 @@ def admin_copy_about_page(request: Request):
 
 <script>
 {_ADMIN_COPY_PREVIEW_JS}
+{_ADMIN_COPY_AUTOGROW_JS}
 async function saveAbout() {{
   var text = document.getElementById('about-copy').value.trim();
   var btn = document.getElementById('about-save-btn'), status = document.getElementById('about-status');
@@ -39372,7 +39453,7 @@ def admin_copy_how_this_is_built_page(request: Request):
         f'''<div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
 <div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">{_esc(sec["label"])}</div>
 <p style="font-size:13px;color:var(--muted);margin:0 0 12px;">{_esc(sec["desc"])} Shown on <a href="/how-this-is-built">/how-this-is-built</a>.</p>
-<textarea id="copy-{sec["key"]}" rows="{sec["rows"]}" style="{prose}">{_esc(htib[sec["key"]])}</textarea>
+<textarea id="copy-{sec["key"]}" class="copy-autogrow" rows="2" style="{prose}">{_esc(htib[sec["key"]])}</textarea>
 <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
 <button id="btn-{sec["key"]}" onclick="saveHtib(&apos;{sec["key"]}&apos;)" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
 <button type="button" onclick="previewCopy('copy-{sec["key"]}','preview-{sec["key"]}')" class="btn btn-ghost" style="font-size:14px;padding:9px 22px;">Preview</button>
@@ -39394,6 +39475,7 @@ def admin_copy_how_this_is_built_page(request: Request):
 
 <script>
 {_ADMIN_COPY_PREVIEW_JS}
+{_ADMIN_COPY_AUTOGROW_JS}
 async function saveHtib(key) {{
   var text = document.getElementById('copy-' + key).value.trim();
   var btn = document.getElementById('btn-' + key), status = document.getElementById('status-' + key);

@@ -179,12 +179,12 @@ def test_reader_access_box_admin_only(env):
     # onto this branch, so it's a real link now, not a "build pending"
     # placeholder.
     anon_html = _client(env).get("/").text
-    assert "Reader access" not in anon_html
+    assert "Open reader" not in anon_html
 
     c = _client(env)
     c.post("/login", data={"username": "admin", "password": "adminpass"}, follow_redirects=False)
     admin_html = c.get("/").text
-    assert "Reader access" in admin_html
+    assert "Open reader" in admin_html          # compact control replaced the big card (2026-10)
     assert "Admin only" in admin_html
     assert 'href="/read"' in admin_html
     assert c.get("/read").status_code == 200

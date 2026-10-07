@@ -225,3 +225,100 @@ def test_hub_lists_original_content_before_third_party(env):
 
 def test_hub_nav_orphans_unchanged(env):
     assert env.hub_nav_orphans() == []
+
+
+# ---- item 7: one sentence ---------------------------------------------
+
+def test_what_i_write_about_intro_uses_a_comma_not_a_dash(env):
+    html = _client(env).get("/").text
+    assert "building finance functions that scale, collected across writing, speaking, podcasts, and press." in html
+    assert "scale&mdash;collected" not in html
+
+
+# ---- item 6: compact Open reader control -------------------------------
+
+def test_open_reader_control_is_admin_only(env):
+    anon = _client(env).get("/").text
+    assert "Open reader" not in anon and 'href="/read"' not in anon
+    adm = _client(env, admin=True).get("/").text
+    assert 'class="admin-only"' in adm and "Open reader" in adm
+    assert ">Admin only<" in adm                      # visible words, not just a tooltip
+    assert "Reader access" not in adm                 # the big card is gone from the homepage
+    assert "/read" in adm
+
+
+def test_tools_page_keeps_the_reader_card(env):
+    assert "Reader access" in _client(env, admin=True).get("/tools").text
+
+
+# ---- item 2 (option B): highlights span the full width, phone order intact
+
+def test_dom_order_is_unchanged_for_phones(env):
+    lib = env._lib()
+    try:
+        _tl(lib, 3)
+        _oc(lib, 4, status="live")
+    finally:
+        lib.close()
+    body = _client(env, admin=True).get("/").text.split('<div class="home-grid">')[1]
+    marks = ['home-hero-block"', 'home-photo-wrap"', "Thought leadership</div>", 'home-oc-wrap"',
+             'home-tl-highlights-label">Recent', 'class="home-tl-seeall', 'home-toolbox-panel"', "home-reader-open"]
+    idx = [body.index(m) for m in marks]
+    assert idx == sorted(idx), list(zip(marks, idx))
+
+
+def test_highlights_wrap_is_a_direct_child_of_the_section_not_the_left_column(env):
+    lib = env._lib()
+    try:
+        _tl(lib, 3)
+    finally:
+        lib.close()
+    html = _client(env).get("/").text
+    main = html[html.index('class="home-tl-main"'):html.index('class="home-tl-highlights-wrap"')]
+    assert "</div>" in main[-30:]        # main column closed right before the highlights wrap
+    assert ".home-tl-highlights-wrap{grid-column:1 / -1;grid-row:3;}" in html
+    assert ".home-tl-section{display:contents;}" in html
+
+
+# ---- item 5: self-sizing copy boxes ------------------------------------
+
+@pytest.mark.parametrize("path,n", [("/admin/copy/homepage", 3), ("/admin/copy/about", 1),
+                                    ("/admin/copy/how-this-is-built", 2)])
+def test_copy_textareas_use_the_autogrow_helper(env, path, n):
+    html = _client(env, admin=True).get(path).text
+    assert html.count('class="copy-autogrow"') == n
+    assert "function initCopyAutogrow" in html and "initCopyAutogrow();" in html
+
+
+def _chromium():
+    pw = pytest.importorskip("playwright.sync_api")
+    p = pw.sync_playwright().start()
+    try:
+        return p, p.chromium.launch()
+    except Exception:
+        pass
+    try:                                    # sandbox fallback: the pre-installed build
+        return p, p.chromium.launch(executable_path="/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
+    except Exception:
+        p.stop()
+        pytest.skip("no chromium")
+
+
+def test_copy_boxes_fit_content_and_cap_at_twenty_rows(env):
+    html = _client(env, admin=True).get("/admin/copy/homepage").text
+    p, b = _chromium()
+    try:
+        pg = b.new_page(viewport={"width": 1280, "height": 900})
+        pg.set_content(html)
+        short = pg.eval_on_selector("#home-headline", "e=>e.offsetHeight")
+        assert short < 90                                   # about 2 rows, not 3 to 8
+        pg.fill("#home-status-copy", "\n".join(f"line {i}" for i in range(40)))
+        pg.dispatch_event("#home-status-copy", "input")
+        h = pg.eval_on_selector("#home-status-copy", "e=>[e.offsetHeight,e.scrollHeight,getComputedStyle(e).overflowY]")
+        assert h[0] < 20 * 24 and h[1] > h[0] and h[2] == "auto"   # capped, scrolls inside
+        pg.fill("#home-status-copy", "one line")
+        pg.dispatch_event("#home-status-copy", "input")
+        assert pg.eval_on_selector("#home-status-copy", "e=>e.offsetHeight") < 90
+    finally:
+        b.close()
+        p.stop()
