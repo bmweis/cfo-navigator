@@ -78,16 +78,17 @@ def test_tools_page_keeps_its_callout(env):
 
 # ---- item 2: three-column highlights ----------------------------------
 
-def test_highlights_markup_is_three_columns_with_clamped_summary(env):
+def test_highlights_markup_is_three_columns_with_full_summary(env):
     lib = env._lib()
     try:
         _tl(lib, 3)
     finally:
         lib.close()
     html = _client(env).get("/").text
-    assert "@container (min-width:640px)" in html
+    assert "@container (min-width:960px)" in html
     assert "repeat(3,minmax(0,1fr))" in html
-    assert "-webkit-line-clamp:3" in html
+    assert "line-clamp" not in html.split(".home-hl-desc")[1].split("}")[0]   # never cut off text
+    assert 'class="home-hl-desc" title=' not in html
     assert html.count('class="home-hl-desc"') == 3
 
 

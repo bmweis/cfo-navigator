@@ -1004,7 +1004,7 @@ exists to prevent:
   begin with — catalog size changes a badge number, never the layout.
 - **Homepage sidebar panel and Recent highlights** — the Toolbox panel is
   one fixed-360px card, nothing to distribute; Recent highlights is a
-  one row of three equal columns, full content width under both homepage columns (a container query: three columns at 640px of container width or more, else one), capped at 3 hand-curated featured pieces (`Library.HOME_HIGHLIGHTS_CAP`), summary clamped to three lines (full text stays on `/thought-leadership`) (any mix
+  one row of three equal columns, full content width under both homepage columns (a container query: three columns at 960px of container width or more, so cards are at least about 300px, else one), capped at 3 hand-curated featured pieces (`Library.HOME_HIGHLIGHTS_CAP`), summaries shown in full, no clamp (any mix
   of types — no longer one per thought-leadership type, see CLAUDE.md's
   "Recent highlights" bullet), and collapses entirely (heading and grid
   both) rather than stretching when there's nothing to show.

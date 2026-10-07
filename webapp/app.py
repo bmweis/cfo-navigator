@@ -4834,14 +4834,14 @@ def homepage(request: Request):
 /* Highlights row: one row of three equal columns. Container query, not a
    viewport breakpoint: the left column is ~560px wide at 1024px and ~820px
    at 1280px, so the viewport says nothing about the room the cards have. At
-   640px or more of container width the three cards sit side by side (>=190px
-   each); below that they stack straight to one column, never two plus a
-   lone orphan. Rows stretch to equal height (grid default); the summary is
-   clamped to three lines so no card runs away. */
+   960px or more of container width the three cards sit side by side (>=300px
+   each: a 1024px viewport gives a 976px container, ~307px cards); below that
+   they stack to one column, never two plus a lone orphan. Rows stretch to
+   equal height (grid default); summaries are shown in full. */
 .home-tl-highlights-wrap{{container-type:inline-size;}}
 .home-tl-highlights{{display:grid;grid-template-columns:minmax(0,1fr);gap:32px 28px;}}
-.home-hl-desc{{font-size:13px;line-height:1.55;color:var(--muted);margin:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}}
-@container (min-width:640px){{
+.home-hl-desc{{font-size:13px;line-height:1.55;color:var(--muted);margin:0;}}
+@container (min-width:960px){{
   .home-tl-highlights{{grid-template-columns:repeat(3,minmax(0,1fr));}}
 }}
 /* 1024px, not the sitewide-standard 900px other sections on this page use—
@@ -16864,9 +16864,9 @@ def _tl_recent_highlight_item(index: int, icon_svg: str, type_label: str, item: 
                   if item.get("url") else
                   f'<div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);'
                   f'line-height:1.4;margin-bottom:4px;">{_esc(item["title"])}</div>')
-    # Clamped to three lines (home-hl-desc). Nothing is lost: the full text
-    # stays on /thought-leadership, and the title attribute carries it here.
-    desc_html = (f'<p class="home-hl-desc" title="{_esc(item["description"])}">{_esc(item["description"])}</p>'
+    # Full text, never clamped (the "never cut off text" rule); the grid gives
+    # the cards in a row equal heights.
+    desc_html = (f'<p class="home-hl-desc">{_esc(item["description"])}</p>'
                  if item.get("description") else "")
     # Badge built inline rather than via _card_icon() — that helper's
     # margin-bottom:14px (meant for a badge stacked above a title) would
