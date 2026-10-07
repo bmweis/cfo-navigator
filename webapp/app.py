@@ -63,7 +63,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import markdown as _markdown
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
 from linklib import compare, gates, homepage_status as _hs, tool_labels
@@ -89,6 +89,7 @@ from linklib.extract import _MIN_CONTENT_WORDS
 from linklib.pipeline import ingest_url
 from linklib.original_content_sync import sync_original_content_article
 from linklib import backup
+from linklib import restore_status
 from webapp.markdown_render import render_narrative_markdown
 from webapp.ask_orchestrator import (
     ForbiddenConversationError as _AskForbiddenConversationError,
@@ -26473,7 +26474,10 @@ _SCRIPT_REGISTRY = [
      "(integrity check, FTS5 check, article count), keeps the current database as a "
      "pre-restore copy, and swaps the snapshot in atomically. Runs on the container because a "
      "browser upload cannot pass Cloudflare's 100 MB request limit at the current database size. Refuses to replace an "
-     "existing file without --yes-replace-live; --dry-run downloads and validates only.",
+     "existing file without --yes-replace-live; --dry-run downloads and validates only. Also what the "
+     "Restore from backup button on /admin/library-backup runs (as a subprocess): it records its stage in "
+     "restore-status.json and restore.log beside the database, appends restore-audit.jsonl, puts the kept "
+     "copy back if the swapped file fails its checks, and deletes older pre-restore copies and stale downloads.",
      "Disaster-only, plus a yearly rehearsal against a scratch path (RUNBOOK.md section 4).",
      ["GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN (same as the daily backup)"],
      ["python -m scripts.restore_from_drive --db /data/library.db --list",
@@ -37021,7 +37025,9 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
         'Daily consistent snapshots, uploaded automatically. The destination folder is created on the '
         'first successful run.'
     )
-    running = backup.backup_is_running()
+    restore_state = restore_status.effective_state(restore_status.read_status(DB_PATH))
+    restore_active = restore_state == "running"
+    running = backup.backup_is_running() and not restore_active
     run_note = ""
     if running:
         run_note = ('<p style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
@@ -37031,7 +37037,7 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
                     '<script>setTimeout(function(){location.reload();},8000);</script>')
     if busy:
         run_note += ('<p style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:10px;'
-                    'padding:10px 16px;font-size:14px;margin:0 0 16px;">A backup is already running.</p>')
+                    'padding:10px 16px;font-size:14px;margin:0 0 16px;">A backup or restore is already running.</p>')
     backup_log_rows_html = "".join(
         f"""<tr>
           <td data-label="When" style="padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:13px;">{_esc(b['created_at'][:16].replace('T',' '))}</td>
@@ -37081,6 +37087,7 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Archive backup</h1>
 {run_note}
+{_restore_panel_html(DB_PATH)}
 <p style="color:var(--muted);margin:-6px 0 24px;">Currently <strong>{count:,}</strong> articles in the live database.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:40px;">
@@ -37094,7 +37101,8 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Back up to Drive now</p>
       <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Runs the integrity check, then uploads a snapshot to Google Drive. It takes a few minutes and you can leave this page. The daily backup keeps running either way.</p>
       <form method="post" action="/admin/library-backup/run">
-        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;width:202px;text-align:center;box-sizing:border-box;"{' disabled' if running else ''}>{'Backup running' if running else 'Back up to Drive now'}</button>
+        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;width:202px;text-align:center;box-sizing:border-box;"{' disabled' if (running or restore_active) else ''}>{'Backup running' if running else ('Restore running' if restore_active else 'Back up to Drive now')}</button>
+        {'<p style="font-size:13px;color:var(--muted);margin:8px 0 0;">A restore is running, so backups wait until it ends.</p>' if restore_active else ''}
       </form>
     </div>
   </div>
@@ -37105,6 +37113,7 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Leave <code>GOOGLE_DRIVE_FOLDER_ID</code> unset in Railway. The app creates and remembers its own folder. Setting it sends backups to that folder instead, starting with the next attempt.</p>
 {_backup_status_banner(backup_rows)}
 <h2 style="font-size:16px;margin:24px 0 4px;">Backups in Drive</h2>
+<style>@media(max-width:700px){{.drive-list-table{{min-width:0 !important}}.drive-list-table thead{{display:none}}.drive-list-table tr{{display:block;padding:6px 0;border-bottom:1px solid var(--line)}}.drive-list-table td{{display:block;white-space:normal !important;padding:2px 12px !important;border:0 !important}}}}</style>
 <div id="drive-list"><p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Loading the list from Google Drive&hellip;</p></div>
 <p style="color:var(--muted);font-size:13px;margin:8px 0 0;">Only backups made by this app appear here: the daily ones and the ones from the button. A file placed in the Drive folder by hand does not show. The newest 14 are kept, so extra manual backups push the oldest out.</p>
 <script>
@@ -37117,12 +37126,14 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
     if(!d.ok){{say(d.message||'Could not load the list.');return;}}
     if(!d.files.length){{say('No backups in Drive yet. The first one appears after the next backup.');return;}}
     var t=document.createElement('table');t.className='drive-list-table';t.style.width='100%';t.style.minWidth='{_TABLE_FLOOR_NARROW}px';
-    t.innerHTML='<thead><tr style="background:var(--accent-light);"><th style="padding:8px 12px;text-align:left;font-size:13px;">Name</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Size</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Made</th></tr></thead>';
+    t.innerHTML='<thead><tr style="background:var(--accent-light);"><th style="padding:8px 12px;text-align:left;font-size:13px;">Name</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Size</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Made</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Actions</th></tr></thead>';
     var tb=document.createElement('tbody');
     d.files.forEach(function(f){{
       var tr=document.createElement('tr');
       [f.name,(f.size/1048576).toFixed(1)+' MB',(f.created||'').slice(0,16).replace('T',' ')+' UTC'].forEach(function(v){{
         var td=document.createElement('td');td.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;';td.textContent=v;tr.appendChild(td);}});
+      var ta=document.createElement('td');ta.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;';
+      var a=document.createElement('a');a.href='/admin/library-backup/restore/'+encodeURIComponent(f.id);a.className='btn btn-ghost';a.style.cssText='font-size:12px;padding:5px 10px;text-decoration:none;';a.textContent='Restore from backup';ta.appendChild(a);tr.appendChild(ta);
       tb.appendChild(tr);}});
     t.appendChild(tb);
     var fr=document.createElement('div');fr.className='table-frame';fr.style.cssText='overflow-x:auto;overflow-y:hidden;';fr.appendChild(t);
@@ -37132,7 +37143,8 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 </script>
 
 <h2 style="font-size:16px;margin:32px 0 4px;">Restore from a Drive backup</h2>
-<p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Restoring happens on the server, not on this page. Download a backup first (above), then open a shell with the Railway CLI and run:</p>
+<p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Use <strong>Restore from backup</strong> in the list above. It opens a confirmation page, then the server downloads that backup from Drive, checks it, and swaps it in. It takes several minutes and you can leave the page. Download a backup first (above).</p>
+<p style="color:var(--muted);font-size:13px;margin:0 0 8px;"><strong>Use the terminal instead when the app is down</strong> or this page will not load. Open a shell with the Railway CLI and run:</p>
 <pre style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:13px;overflow-x:auto;margin:0 0 8px;">railway ssh
 cd /app
 python -m scripts.restore_from_drive --db /data/library.db --list
@@ -37140,8 +37152,8 @@ python -m scripts.restore_from_drive --db /data/library.db --dry-run
 python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live</pre>
 <ul style="color:var(--muted);font-size:13px;margin:0 0 8px;padding-left:20px;line-height:1.6;">
   <li><code>--list</code> shows the backups. <code>--dry-run</code> downloads and checks the newest one and changes nothing. The last command replaces the live database. To pick a different backup, add <code>--snapshot</code> and its name.</li>
-  <li>Before replacing, the script keeps the current file as <code>/data/library.db.pre-restore-&lt;timestamp&gt;</code>. It never deletes it. Each restore leaves one on the volume, about 254 MB each, so clear old ones by hand once you are sure.</li>
-  <li>After the last command, restart the service in Railway. The running app keeps some things in memory, including the web-search site list, which is rebuilt from the database only on start.</li>
+  <li>Before replacing, the script keeps the current file as <code>/data/library.db.pre-restore-&lt;timestamp&gt;</code> and deletes older <code>pre-restore</code> copies. If the restored file fails its checks after the swap, the script puts the kept file back.</li>
+  <li>After a terminal restore, restart the service in Railway. The running app keeps some things in memory, including the web-search site list, which is rebuilt from the database only on start. (The button on this page refreshes those itself.)</li>
   <li>Then check <code>https://bmweis.com/health</code> and run the post-restore checklist in <code>RUNBOOK.md</code> section 1.</li>
 </ul>
 
@@ -39788,6 +39800,311 @@ def admin_backup_drive_list(request: Request):
     return JSONResponse(backup.list_for_display(DB_PATH))
 
 
+# --- Restore from the page (Phase 2 of issue #714) --------------------------------
+# The route spawns scripts/restore_from_drive.py as a subprocess (the path
+# rehearsed at full size, PR 716) and watches it from a thread. The thread
+# holds the same lock a backup uses, so the nightly cron's request gets
+# "already running" while a restore runs. Status, log and audit are files on
+# the volume (linklib/restore_status.py), because the database is the thing
+# being replaced. The app never exits itself; the cron and healthcheck are
+# untouched.
+_RESTORE_PHRASE = "RESTORE"
+_RESTORE_STAGE_LABELS = {
+    "starting": "Starting", "downloading": "Downloading from Drive", "validating": "Checking the download",
+    "swapping": "Swapping the database in",
+}
+
+
+def _restore_command(snapshot_id: str, folder_id: str, mode: str, user_id) -> list[str]:
+    cmd = [sys.executable, "-m", "scripts.restore_from_drive", "--db", os.path.abspath(DB_PATH),
+           "--snapshot", snapshot_id, "--audit-user", str(user_id if user_id is not None else "admin")]
+    if folder_id:
+        cmd += ["--folder-id", folder_id]
+    cmd.append("--dry-run" if mode == "check" else "--yes-replace-live")
+    return cmd
+
+
+def _restore_run_process(cmd: list[str]) -> int:
+    """Run the restore script and wait. Tests replace this."""
+    import subprocess
+    log = restore_status.paths(DB_PATH)["log"]
+    with open(log, "a", encoding="utf-8") as errf:
+        return subprocess.call(cmd, cwd=_APP_DIR, stdout=subprocess.DEVNULL, stderr=errf)
+
+
+def _restore_post_actions() -> str:
+    """Refresh what the running app keeps in memory after a swap. Returns ''
+    on success, else a short reason. Never exits the process."""
+    try:
+        from webapp import tasks as _tasks
+        with _tasks._checks_cache_lock:
+            _tasks._checks_cache = None
+        from linklib import feed as _feed
+        with _feed._cache_lock:
+            _feed._cache.clear()
+        lib = _lib()
+        try:
+            lib.write_opml(OPML_PATH)  # also clears the preferred_domains cache
+        finally:
+            lib.close()
+        return ""
+    except Exception as e:
+        return str(e)[:200]
+
+
+def _restore_job(cmd: list[str], mode: str, file: dict, user_id) -> None:
+    """Background thread. The caller already holds the backup lock; this
+    releases it when the process has exited."""
+    try:
+        rc = _restore_run_process(cmd)
+        st = restore_status.read_status(DB_PATH)
+        if st.get("state") == "running":  # the script died before recording a result
+            msg = "The restore script stopped without a result. The Railway logs and restore.log have the details."
+            restore_status.write_status(DB_PATH, state="failed", stage="failed", message=msg,
+                                        finished_at=restore_status.now_iso(), pid=0)
+            restore_status.audit(DB_PATH, user=user_id, file_id=file["id"], file_name=file["name"],
+                                 mode=mode, result="failed", message=msg)
+        elif st.get("state") == "finished" and mode == "restore" and rc == 0:
+            err = _restore_post_actions()
+            if err:
+                restore_status.write_status(DB_PATH, post_applied=False, post_error=err)
+            else:
+                restore_status.write_status(DB_PATH, post_applied=True)
+            try:
+                restore_status.log_line(DB_PATH, "App caches refreshed." if not err
+                                        else f"App caches could not be refreshed: {err}")
+            except OSError:
+                pass
+    except Exception as e:
+        restore_status.write_status(DB_PATH, state="failed", stage="failed", pid=0,
+                                    message=f"The restore could not start: {e}"[:300],
+                                    finished_at=restore_status.now_iso())
+    finally:
+        backup.release_exclusive()
+
+
+def _restore_refusal(file: dict, mode: str) -> str:
+    """Plain sentence for why a restore or check cannot start now, else ''."""
+    if not backup.is_configured():
+        return "Google Drive is not set up, so nothing can be restored from it."
+    if restore_status.restore_is_running(DB_PATH):
+        return "A restore or check is already running. Wait for it to finish."
+    if backup.backup_is_running():
+        return "A backup is running. Wait for it to finish, then try again."
+    busy = [n for n, j in list(_JOB_STATE.items()) if j.get("running")]
+    if busy:
+        return ("A background job is running (" + ", ".join(sorted(busy)) +
+                "). Wait for it to finish or stop it, then try again.")
+    return restore_status.disk_problem(DB_PATH, int(file.get("size") or 0))
+
+
+def _panel_msg(m: str) -> str:
+    """Drop a lead-in the panel heading already says ("Restore finished.", "The restore failed.")."""
+    return re.sub(r"^(Restore finished: |The (restore|check) failed: )", "", m or "")
+
+
+def _restore_state_view(db_path: str) -> dict:
+    st = restore_status.read_status(db_path)
+    state = restore_status.effective_state(st)
+    return {"state": state, "stage": st.get("stage", ""), "mode": st.get("mode", ""),
+            "message": st.get("message", ""), "elapsed": restore_status.elapsed_seconds(st),
+            "downloaded": st.get("downloaded_bytes", 0), "total": st.get("total_bytes", 0),
+            "post_applied": st.get("post_applied"), "post_error": st.get("post_error", ""),
+            "log": restore_status.log_tail(db_path, 12)}
+
+
+def _fmt_elapsed(sec: int) -> str:
+    return f"{sec // 60}m {sec % 60:02d}s"
+
+
+def _restore_panel_html(db_path: str) -> str:
+    v = _restore_state_view(db_path)
+    state = v["state"]
+    if state == "idle":
+        return ""
+    what = "check" if v["mode"] == "check" else "restore"
+    box = ('background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 18px;'
+           'margin:0 0 16px;font-size:14px;line-height:1.5;')
+    warn = ('background:var(--alert-wash);border:1px solid var(--alert);border-radius:10px;padding:14px 18px;'
+            'margin:0 0 16px;font-size:14px;line-height:1.5;')
+    ok = ('background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;padding:14px 18px;'
+          'margin:0 0 16px;font-size:14px;line-height:1.5;')
+    log_html = ('<pre id="restore-log" style="background:var(--surface);border:1px solid var(--line);'
+                'border-radius:8px;padding:8px 12px;font-size:12px;overflow-x:auto;margin:8px 0 0;white-space:pre-wrap;">'
+                + _esc("\n".join(v["log"])) + '</pre>')
+    if state == "running":
+        stage = _RESTORE_STAGE_LABELS.get(v["stage"], v["stage"] or "Working")
+        prog = ""
+        if v["total"] and v["downloaded"]:
+            prog = f' ({v["downloaded"] / 1_000_000:,.0f} of {v["total"] / 1_000_000:,.0f} MB)'
+        head = (f'<strong>{"Check" if what == "check" else "Restore"} running.</strong> '
+                f'<span id="restore-stage">{_esc(stage)}{_esc(prog)}</span>, '
+                f'<span id="restore-elapsed">{_fmt_elapsed(v["elapsed"])}</span> so far. '
+                'You can leave this page; the site keeps working. Do not restart the service in Railway.')
+        body = f'<div id="restore-panel" data-state="running" style="{box}">{head}{log_html}</div>'
+    elif state == "finished":
+        if v["post_applied"] is False:
+            tail = (' <strong>Restart the service in Railway to finish.</strong> The app could not refresh '
+                    'what it keeps in memory (the web-search site list, the admin badge cache).')
+        elif v["post_applied"]:
+            tail = (' The app refreshed what it keeps in memory (admin badge cache, web-search site list, feeds). '
+                    'No restart is needed. Sign in again if this page asks you to.')
+        else:
+            tail = ' The app is refreshing what it keeps in memory. Reload in a moment.'
+        body = (f'<div id="restore-panel" data-state="finished" style="{ok}"><strong>Restore finished.</strong> '
+                f'{_esc(_panel_msg(v["message"]))}{tail} The restore took {_fmt_elapsed(v["elapsed"])}.{log_html}</div>')
+    elif state == "checked":
+        body = (f'<div id="restore-panel" data-state="checked" style="{ok}"><strong>Check finished.</strong> '
+                f'{_esc(v["message"])}{log_html}</div>')
+    elif state == "rolled_back":
+        body = (f'<div id="restore-panel" data-state="rolled_back" style="{warn}"><strong>Restore failed and was '
+                f'rolled back.</strong> {_esc(v["message"])}{log_html}</div>')
+    elif state == "interrupted":
+        body = (f'<div id="restore-panel" data-state="interrupted" style="{warn}"><strong>Interrupted.</strong> '
+                f'A {what} was running but its process is gone or has stopped reporting (the server may have '
+                'restarted). The live database may be either the old one or the restored one. To recover, open a '
+                'shell with <code>railway ssh</code>, run <code>ls -lh /data</code>, and check '
+                '<code>python -m scripts.restore_from_drive --db /data/library.db --list</code>. If the site is '
+                'broken, copy the newest <code>/data/library.db.pre-restore-&lt;timestamp&gt;</code> over '
+                '<code>/data/library.db</code>, or run the restore again from the terminal.'
+                f'{log_html}</div>')
+    else:  # failed
+        body = (f'<div id="restore-panel" data-state="failed" style="{warn}"><strong>The {what} failed.</strong> '
+                f'{_esc(_panel_msg(v["message"]))}{log_html}</div>')
+    script = ""
+    if state == "running":
+        script = """<script>
+(function(){
+  var last='running';
+  function fmt(s){return Math.floor(s/60)+'m '+('0'+(s%60)).slice(-2)+'s';}
+  function poll(){
+    fetch('/admin/library-backup/restore-status',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+      if(d.state!==last){location.reload();return;}
+      var e=document.getElementById('restore-elapsed');if(e)e.textContent=fmt(d.elapsed);
+      var st=document.getElementById('restore-stage');
+      if(st){var t=d.stage_label||d.stage;if(d.total&&d.downloaded)t+=' ('+Math.round(d.downloaded/1e6)+' of '+Math.round(d.total/1e6)+' MB)';st.textContent=t;}
+      var l=document.getElementById('restore-log');if(l)l.textContent=d.log.join('\n');
+      setTimeout(poll,3000);
+    }).catch(function(){setTimeout(poll,5000);});
+  }
+  setTimeout(poll,3000);
+})();
+</script>"""
+    return body + script
+
+
+def _restore_file_or_none(file_id: str) -> tuple[dict | None, str]:
+    """Look the id up in the current Drive list. Never trusts the id itself."""
+    res = backup.list_for_display(DB_PATH)
+    if not res["ok"]:
+        return None, res["message"]
+    for f in res["files"]:
+        if f["id"] == file_id:
+            return f, ""
+    return None, ""
+
+
+def _restore_confirm_page(file: dict, error: str = "", status_code: int = 200) -> HTMLResponse:
+    fid = quote(file["id"], safe="")
+    made = (file["created"] or "")[:16].replace("T", " ") + " UTC"
+    err = (f'<p style="background:var(--alert-wash);border:1px solid var(--alert);border-radius:10px;'
+           f'padding:10px 16px;font-size:14px;margin:0 0 16px;">{_esc(error)}</p>') if error else ""
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/library-backup" style="font-size:13px;color:var(--muted);">&larr; Archive backup</a></p>
+<h1>Restore from backup</h1>
+{err}
+<div style="max-width:760px;">
+<p style="font-size:14px;margin:0 0 16px;"><strong>{_esc(file['name'])}</strong><br>
+<span style="color:var(--muted);">{file['size'] / 1048576:,.1f} MB, made {_esc(made)}</span></p>
+<h2 style="font-size:16px;margin:0 0 6px;">What restoring does</h2>
+<ul style="font-size:14px;line-height:1.6;margin:0 0 16px;padding-left:20px;">
+  <li>It replaces everything in the live database with the state at this backup: articles, users, password hashes, MCP tokens and settings.</li>
+  <li>Anything added or changed since this backup is lost.</li>
+  <li>Passwords and MCP tokens revoked since then work again, and users added since can no longer sign in.</li>
+  <li>A copy of the current database is kept on the volume as <code>/data/library.db.pre-restore-&lt;timestamp&gt;</code>. Only the newest copy is kept, so a second restore deletes the one from the first.</li>
+  <li>It takes several minutes. The site keeps working, and backups and background jobs are refused until it ends.</li>
+</ul>
+<p style="font-size:14px;margin:0 0 20px;"><strong>Download a backup first.</strong> The live database may hold saves newer than any Drive backup. <a href="/admin/library-backup/download-db">Download library.db</a></p>
+
+<h2 style="font-size:16px;margin:0 0 6px;">Check this backup</h2>
+<p style="font-size:13px;color:var(--muted);margin:0 0 10px;">Downloads the backup and validates it (integrity, search index, article count). It swaps nothing and keeps nothing.</p>
+<form method="post" action="/admin/library-backup/restore/{fid}" style="margin:0 0 28px;">
+  <input type="hidden" name="mode" value="check">
+  <button type="submit" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;">Check this backup</button>
+</form>
+
+<h2 style="font-size:16px;margin:0 0 6px;">Restore</h2>
+<form method="post" action="/admin/library-backup/restore/{fid}">
+  <input type="hidden" name="mode" value="restore">
+  <label for="restore-confirm" style="display:block;font-size:14px;margin:0 0 6px;">Type <code>{_RESTORE_PHRASE}</code> to confirm. If the word does not match exactly, nothing is restored and you see this page again.</label>
+  <input id="restore-confirm" name="confirm" type="text" autocomplete="off" style="font-size:16px;padding:9px 12px;width:100%;max-width:280px;box-sizing:border-box;margin:0 0 12px;display:block;">
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Restore from backup</button>
+</form>
+</div></div>"""
+    return HTMLResponse(_page("Restore from backup", "Admin", body, authed=True), status_code=status_code)
+
+
+@app.get("/admin/library-backup/restore/{file_id}", response_class=HTMLResponse)
+def admin_backup_restore_page(request: Request, file_id: str):
+    if not _is_authed(request):
+        return _login_redirect(request)
+    file, msg = _restore_file_or_none(file_id)
+    if file is None:
+        body = ('<div class="page page-standard"><p style="margin:0 0 4px;"><a href="/admin/library-backup" '
+                'style="font-size:13px;color:var(--muted);">&larr; Archive backup</a></p><h1>Restore from backup</h1>'
+                f'<p>{_esc(msg) if msg else "That file is not in the list of backups in Drive, so it cannot be restored."}</p></div>')
+        return HTMLResponse(_page("Restore from backup", "Admin", body, authed=True), status_code=404 if not msg else 502)
+    return _restore_confirm_page(file, _restore_refusal(file, "restore"))
+
+
+@app.post("/admin/library-backup/restore/{file_id}")
+def admin_backup_restore_start(request: Request, file_id: str, mode: str = Form("restore"), confirm: str = Form("")):
+    """Start a restore or a check. Admin session only: the save token gets 401."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if mode not in ("restore", "check"):
+        raise HTTPException(status_code=400, detail="unknown mode")
+    file, msg = _restore_file_or_none(file_id)
+    if file is None:
+        body = ('<div class="page page-standard"><p><a href="/admin/library-backup">&larr; Archive backup</a></p>'
+                '<h1>Restore from backup</h1><p>' +
+                _esc(msg or "That file is not in the list of backups in Drive, so nothing was started.") + '</p></div>')
+        return HTMLResponse(_page("Restore from backup", "Admin", body, authed=True), status_code=404 if not msg else 502)
+    if mode == "restore" and confirm != _RESTORE_PHRASE:
+        return _restore_confirm_page(file, f"Type {_RESTORE_PHRASE} exactly (all capitals) to restore. Nothing was changed.", 400)
+    refusal = _restore_refusal(file, mode)
+    if refusal:
+        return _restore_confirm_page(file, refusal + " Nothing was started.", 409)
+    if not backup.try_acquire_exclusive():
+        return _restore_confirm_page(file, "A backup or restore started a moment ago. Nothing was started.", 409)
+    lib = _lib()
+    try:
+        uid = _current_user_id(lib, request)
+    finally:
+        lib.close()
+    try:
+        restore_status.reset_status(DB_PATH, state="running", stage="starting", mode=mode, pid=os.getpid(),
+                                    started_at=restore_status.now_iso(), message="", user=uid,
+                                    file_name=file["name"])
+        restore_status.log_line(DB_PATH, f"{'Check' if mode == 'check' else 'Restore'} of {file['name']} requested.")
+        cmd = _restore_command(file["id"], backup.known_folder_id(DB_PATH), mode, uid)
+        threading.Thread(target=_restore_job, args=(cmd, mode, file, uid), daemon=True).start()
+    except Exception:
+        backup.release_exclusive()
+        raise
+    return RedirectResponse("/admin/library-backup?restore=started", status_code=303)
+
+
+@app.get("/admin/library-backup/restore-status")
+def admin_backup_restore_status(request: Request):
+    """JSON for the restore panel's polling. Admin session only."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    v = _restore_state_view(DB_PATH)
+    v["stage_label"] = _RESTORE_STAGE_LABELS.get(v["stage"], v["stage"])
+    return JSONResponse(v)
+
+
 @app.get("/admin/library-backup/download-db")
 def download_db(request: Request):
     """Download a consistent snapshot of the live database (manual backup)."""
@@ -39823,7 +40140,7 @@ def backup_now_route(request: Request, token: str | None = None):
     except backup.BackupBusy:
         # 200, not 409: Railway shows a non-2xx cron run as failed, and a
         # backup already in progress is not a failure.
-        msg = "A backup is already running, so this request did nothing."
+        msg = "A backup or restore is already running, so this request did nothing."
         status_code = 200
     except Exception as e:
         # backup.backup_now() logs every failure to backup_log before it

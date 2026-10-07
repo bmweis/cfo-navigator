@@ -598,6 +598,7 @@ TABLE_OVERRIDE_ALLOWLIST = {
         "removes the frame stored on article table wrappers so the table's own frame is the only one",
     ".admin-table-responsive tr": "mobile card layout, where a table's rows become stacked cards",
     ".backup-log-table td": "mobile card layout for the backup history table",
+    ".drive-list-table td": "mobile card layout for the Drive backups list on /admin/library-backup",
     # Refs 655, B1. The generic td border rule is !important, so the rule that
     # drops cell borders in a stacked card has to be too; the earlier
     # non-lifted version never applied (see _CSS). Two entries, one per card

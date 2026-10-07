@@ -51,14 +51,36 @@ the Drive backup you restore from, and it is the only way back if the restore
 is a mistake. Log in as admin, open `/admin/library-backup` and click
 **Download library.db** (or open `/admin/library-backup/download-db`).
 
-> **There is no restore through the web app.** The upload form and
+> **There is no restore by uploading a file.** The upload form and
 > `POST /admin/library-backup/upload-db` were removed in 2026-10. bmweis.com is
 > behind Cloudflare, which rejects request bodies over 100 MB on the Free plan,
 > and `library.db` is about 254 MB, so a browser upload could never work at
 > production size (the 2026-10-06 rehearsal ran about 55 minutes and the app never
-> logged the POST, §4). All restores run on the container with **Path C**.
-> `/admin/library-backup` can make a Drive backup on demand (**Back up to Drive
-> now**), lists what is in Drive, and shows the Path C commands.
+> logged the POST, §4).
+>
+> **Path D (new, 2026-10): the Restore from backup button.** On
+> `/admin/library-backup`, each backup in the Drive list has **Restore from backup**.
+> It opens a confirmation page (**Check this backup** downloads and validates only;
+> restoring needs you to type `RESTORE`). The server downloads the backup from Drive
+> itself, so nothing passes through Cloudflare. It runs the same script as Path C.
+> The page shows the stage, elapsed time and the last log lines, and says
+> **Interrupted** with recovery steps if the process dies. Use Path C (the terminal)
+> when the app is down or the page will not load.
+> It records `restore-status.json`, `restore.log` and `restore-audit.jsonl` in `/data`
+> (not in the database). Backups and background jobs are refused while it runs.
+> After it finishes the app refreshes its own caches and the feed list, so no restart
+> is needed. If the page says to restart, restart the service in Railway.
+> If the swapped file fails its checks, the script puts the previous database back
+> and the page says **rolled back**.
+>
+> **Pick a quiet moment.** The site keeps serving during a restore. A request already
+> running at the instant of the swap keeps reading the old file and any save it makes
+> then is lost (the old file survives only as `pre-restore`). A request that opens the
+> database in the few microseconds between the swap and the removal of the old `-wal`
+> and `-shm` files could briefly read old pages through them. Both are very unlikely
+> at this traffic. A write in that window is the one case that could harm the restored
+> file; the post-restore article count and the pre-restore copy are your check. For the first live rehearsal,
+> pick a time nobody is saving anything.
 
 ### Path B — the app is down or won't boot
 
@@ -104,8 +126,10 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
   flag.
 - Before swapping it keeps the current file as
   `/data/library.db.pre-restore-<timestamp>` (a hard link, so no extra space; a
-  full copy if the volume cannot link) and never deletes it. Delete it by hand
-  once the restore is confirmed.
+  full copy if the volume cannot link). After a successful swap it deletes older
+  `pre-restore` copies and keeps this one, so check `ls -lh /data` shows exactly
+  one. It also removes stray `.restore-*.tmp` files at the start. If the swapped
+  file fails its article-count or integrity check, it puts the kept file back.
 - **Free space needed:** the snapshot size plus 16 MB (about 270 MB today), in
   the same directory as the destination. If links are unsupported, add the size
   of the current database. The script refuses before downloading if it is short.
@@ -118,10 +142,12 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
   the database is gone, the script finds the folder by name instead. If it
   reports more than one match, pass `--folder-id`.
 - It does not run the post-restore checklist below. Do that by hand.
+- It writes `restore-status.json`, `restore.log` and `restore-audit.jsonl` beside the
+  database, with `--audit-user terminal` unless told otherwise.
 
 ### Post-restore validation checklist
 
-- [ ] **Restart the service in Railway first.** The restore swaps the file under the running app, which keeps three things in memory: the admin badge's check cache (about 2 minutes), the web-search site list (`preferred_domains`, cached until restart), and `preferred_sites.opml`, which is rewritten from the `feeds` table only at boot. Without a restart, a restored feed list is not reflected in FP&A Buddy's web search.
+- [ ] **After a terminal restore (Path C), restart the service in Railway first.** (The button, Path D, refreshes these itself and tells you if it could not.) The restore swaps the file under the running app, which keeps three things in memory: the admin badge's check cache (about 2 minutes), the web-search site list (`preferred_domains`, cached until restart), and `preferred_sites.opml`, which is rewritten from the `feeds` table only at boot. Without a restart, a restored feed list is not reflected in FP&A Buddy's web search.
 - [ ] `https://bmweis.com/health` returns `{"ok": true}`
 - [ ] Log in as admin, open `/read?view=saved` — article count and recent items look right
 - [ ] FTS search works (search something specific on `/read?view=saved`, or

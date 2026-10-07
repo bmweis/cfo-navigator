@@ -11493,6 +11493,47 @@ disk (`_MultipartBody`, with Content-Length) instead of reading it into memory.
 The page shows `backup.plain_error()` text; the raw error stays in `backup_log`.
 `POST /admin/backup-now` is unchanged otherwise and still accepts the token.
 
+**Restore from backup on the page, Phase 2 of #714 (2026-10).** Each row of "Backups
+in Drive" links to `GET /admin/library-backup/restore/{file_id}`, a confirmation page
+(a path-parameter route, so `hub_nav_orphans()` skips it like every other per-record
+page; `restore-status` is JSON, so it is skipped too). The id is looked up in the
+current `backup.list_for_display()` result on every request and never trusted.
+`POST` on the same path (admin session only, `_is_authed`; the save token gets 401)
+takes `mode=restore` (needs the typed word `RESTORE`) or `mode=check`
+(`--dry-run`: download and validate, swap nothing). Before starting it refuses, with a
+plain sentence and no side effect: Drive not configured, a restore already running
+(per `restore-status.json`), a backup running, any `_JOB_STATE` job with `running`
+true, or less free space than the snapshot plus 16 MB. Then it takes the backup lock
+(`backup.try_acquire_exclusive()`, the same `_BACKUP_LOCK` `backup_now` uses), so the
+nightly cron's request gets 200 "already running" for as long as the restore lives, and
+starts `_restore_job` in a daemon thread. That thread runs
+`python -m scripts.restore_from_drive ... --yes-replace-live` as a **subprocess**
+(`_restore_run_process`, stderr to `restore.log`), waits, and releases the lock. The
+script's logic was not moved into `linklib/`.
+
+State lives in **files on the volume next to the database**, never in it
+(`linklib/restore_status.py`): `restore-status.json` (state `running`, `finished`,
+`checked`, `failed` or `rolled_back`; stage; pid; a heartbeat the script refreshes every
+5 seconds; download progress), `restore.log` (one flushed line per step) and
+`restore-audit.jsonl` (time, admin user id, Drive file id and name, mode, result).
+`effective_state()` reports `interrupted` when a record says `running` but the pid is
+gone or the heartbeat is older than 60 seconds. `GET /admin/library-backup/restore-status`
+(admin only, JSON) feeds the panel on `/admin/library-backup`, which polls every 3
+seconds while running and reloads on a state change.
+
+The script now cleans up and protects itself. It removes stray `.restore-*.tmp` at the
+start; after a successful swap it deletes older `pre-restore` copies (with their `-wal`)
+and keeps the one just made; and if the swapped file fails its article-count or
+integrity check, it puts the `pre-restore` file back with one `os.replace`
+(`rolled_back`, exit 1). There is deliberately no "fresh backup first": `backup_now`
+blocks on a failed integrity check, which is exactly when a restore is needed, and the
+`pre-restore` hard link already keeps the current file. After a successful restore the
+watcher thread refreshes what the process caches (the admin badge cache, the feed cache,
+and `preferred_sites.opml` regenerated from `feeds` with `Library.write_opml`, which also
+clears `preferred_domains`) and records `post_applied`. If that fails the page says to
+restart the service in Railway. The app never exits itself: `railway.toml` restarts only
+on failure. Tests: `tests/test_restore_from_page.py`.
+
 
 ### Admin badge counts failing checks (2026-10)
 

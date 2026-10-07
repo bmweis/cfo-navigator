@@ -80,7 +80,9 @@ def _run(*args):
 
 
 def _siblings(tmp):
-    return sorted(p.name for p in tmp.iterdir())
+    # restore-status.json, restore.log and restore-audit.jsonl are the restore's
+    # own records (Phase 2 of #714); they are not part of what these tests guard.
+    return sorted(p.name for p in tmp.iterdir() if not p.name.startswith("restore-") and p.name != "restore.log")
 
 
 def test_refuses_existing_destination_without_flag(world, capsys):
@@ -132,7 +134,7 @@ def test_good_snapshot_swaps_in_and_keeps_pre_restore_copy(world, capsys):
     assert open(pre_path, "rb").read()  # real file, still readable
     assert not [n for n in _siblings(world["tmp"]) if n.startswith(".restore-")]
     out = capsys.readouterr().out
-    assert "5 articles" in out and "POST /admin/backup-now" in out
+    assert "5 articles" in out and "Back up to Drive now" in out
     assert old_bytes  # (the pre-restore copy was taken from this file)
 
 
