@@ -6736,7 +6736,7 @@ never reads as something to tap.
   full write-up, and `tests/test_password_change_recommended.py` for the
   regression coverage (flag defaults/set/clear across all four call sites,
   the admin-reset email, the in-session change-password form, and the
-  banner's presence/absence including the break-glass admin login, which has
+  banner's presence/absence including a session with no `users` row (the break-glass login, retired in #627), which has
   no `users` row and so can never carry the flag).
 
 - **Surface Hidden Community Profile Fields (2026-09) — Stage focus, Jobs
@@ -6934,6 +6934,14 @@ never reads as something to tap.
   badge; the badge itself still visible in that collapsed state; the nested-
   nested case specifically; the mirrored count and its deliberate exclusion
   of the per-field flags).
+
+- **Admin badge counted no failing check until 2026-10.** `_compute_failing_checks_count`
+  filtered on `where == "In-app"`, a label `run_all()` stopped emitting on 2026-06-30
+  (`d3d44e0`); the badge shipped three days later (`ad416e8`) already using it, so it
+  was wrong from birth, and the 2026-09 page-speed move did not narrow it. It now
+  matches `"Live + CI"` with `ok is False`. Any earlier text here saying the badge
+  counted failing checks described intent, not behavior. Cache, sentinel, static-check
+  cache and refresher are unchanged. See `tests/test_task_badges.py`.
 
 - **Admin menu badge coverage, follow-up (2026-09) — the per-field
   `*_needs_verification` flags this PR left out are folded in after all,
@@ -11227,16 +11235,28 @@ it supersedes the old "`/save` is token-gated" note.
   sandbox: Drive access, the container's environment variables, Railway's request
   duration cap. See `tests/test_restore_from_drive.py`.
 
+- **Homepage Status note (2026-10).** `/admin/copy/homepage`'s two-field "Bio box" is one "Status" box (`homepage_status_copy`, trusted markdown renderer, Preview reused from About). Saving or "Mark reviewed" stamps `homepage_status_revised_at` (UTC); after 14 days (`homepage_status.STATUS_STALE_DAYS`) the card shows an amber notice and the "Homepage status is current" row on `/admin/checks` fails and adds 1 to the Admin badge. Legacy keys stay stored and are shown until the first save. The badge counts it through the failing "Live + CI" rows (#719), not the reminders function. See ARCHITECTURE.md's "Homepage Status note".
+
 ## Authentication & security
 
 The site is one app with a **public face** and a **private back office**. Auth is a
 single shared secret with a session-cookie login on top — no user accounts, no DB
 tables, no third-party dependency.
 
-- **One secret, two front doors.** `LINKLIB_PASSWORD` is the login password; if unset it
-  **falls back to `LINKLIB_SAVE_TOKEN`**, so by default the same string unlocks both the
-  login screen and the token API. If *neither* is set, the private routes are open
-  (local-dev convenience).
+- **One secret authorizes the token routes; it no longer logs anyone in.**
+  `LINKLIB_PASSWORD` (falling back to `LINKLIB_SAVE_TOKEN`) turns auth on, and
+  `LINKLIB_SAVE_TOKEN` authorizes the token routes (`/save`, `/api/search`,
+  `/admin/backup-now`, ...). If *neither* is set, the private routes are open
+  (local-dev convenience). **The shared-secret "break-glass" login was
+  retired (2026-10, issue #627):** `login_submit()` accepts only a `users`
+  row, so every session is attributed and metered. A lost admin password is
+  recovered with `scripts/reset_user_password.py` on the container
+  (RUNBOOK §9, preview by default, password via hidden prompt or generated,
+  never an argument). Old fallback-era sessions end when
+  `LINKLIB_SECRET_KEY` is rotated (RUNBOOK §9); the session format is
+  unchanged. Test suite: `tests/conftest.py` lazily creates the `admin`
+  users row when a test logs in as admin/<LINKLIB_PASSWORD>;
+  `@pytest.mark.no_admin_seed` opts out (`tests/test_break_glass_retired.py`).
 - **Login = signed session cookie.** `POST /login` checks the password and sets an
   HMAC-signed, HttpOnly, SameSite=Lax cookie (`cfo_session`, 30-day TTL). Signing uses
   `LINKLIB_SECRET_KEY`, falling back to the password. Implemented with the stdlib
@@ -11288,6 +11308,15 @@ tables, no third-party dependency.
     only the `X-Save-Token` header (2026-09 correction: this line previously
     claimed `?token=` worked for all of them, verified false in code for
     `/ask` specifically during the MCP cleanup/hardening PR's Phase 0).
+  - **`POST /admin/library-backup/upload-db` is admin-session-only (2026-10).**
+    It used `_require_api` (admin cookie OR save token), but it atomically
+    replaces the live `library.db` with only an `articles`-table check, so the
+    bookmarklet token could swap in a database carrying its own `users` table.
+    It now uses `_is_authed` alone: the token (header or `?token=`) and a
+    member session get the same 401 as an anonymous caller. `/admin/backup-now`
+    keeps `_require_api` (the Railway cron calls it with the token). No audit
+    record is written (a row in the live DB would be lost in the swap). See
+    `tests/test_upload_db_admin_only.py`.
   - **`/api/search` is now admin-only (`_require_api`), matching `/read`'s real
     access tier (2026-09 fix)** — previously gated at member-tier
     (`_require_member`, any signed-in user), a likely-unintentional survivor
@@ -13435,7 +13464,7 @@ subscription.
 - **Deactivation, Buddy tier changes and derived estimates, PR 3b-2 (2026-10, Refs 629, 630).** `GET/POST /admin/system/ai/deactivate/{model_id}` names every role using the model and requires a replacement for each; `Library.deactivate_model` validates all of them first, then writes the role changes and the `deactivated` flag in one transaction (nothing is written if any is missing or refused; never a delete, pricing and cost history stay; `POST .../reactivate/{id}` reverses it). A Buddy tier change goes through `POST /admin/system/ai/buddy-tier/preview` (cost per question before and after) and the save route refuses a `buddy_*` role without `confirm: true`. `ask_orchestrator.run_ask` passes the tier's role model into `answer_question`; with no role row it is the `EFFORT_SETTINGS` model, so nothing changes until a tier is changed on purpose. `ask()` and every Buddy `max_tokens` are untouched. `agent.COST_ESTIMATES` is deleted: `agent.tier_cost_estimate(model, tier, tokens)` derives the display estimate from `model_pricing` and typical tokens (`Library.typical_tier_tokens`, the last 50 first-turn answers of that tier when there are at least 10, else `TIER_TOKEN_PROFILE`, set from production rows read 2026-10-05: Deep about 21,000 in / 2,100 out, Quick 2,600 / 260, Standard 5,600 / 750; a test holds the profile within 15% of those rows). The estimate is model cost only: it excludes web search (about $0.007 a question) and thinking tokens, and says so on the page. Estimates are admin-only display, never a charge or a cap input. The Matchmaker card and usage row carry a note to test the `/tools/software/<slug>` link format after any model change.
 
 - **Allowed-roles editor, PR 3c (2026-10, Refs 629, 630).** `/admin/system/ai` has a collapsed "Allowed roles" card: one row per model (the registry plus any model a role is using, such as Opus 4.8 for Buddy Deep), one on/off switch per role (shared `.sw` class via `_switch_html`, green on, grey off) with a one-word state (On, Off, In use, Locked, or a "Test first" flag linking to the confirm page), a "To do" column (Set status to available, Reactivate, Verify pricing: cache write, cache write 1h, date) or "Ready", and the long reasons in one note block below the table. The five role columns share one fixed width (172px, `table-layout:fixed`) and every switch-plus-word cell is `nowrap`, so a label never drops below its switch; the table scrolls inside its frame below 1180px. A disabled switch (In use, Locked, untested) never relies on a tooltip. Once an enrichment test is confirmed for a model and role, switching it off and on again does not ask again (`Library.confirmed_roles`, read from `model_role_log`). `Library.set_allowed_role` writes `model_catalog.allowed_roles`, the only thing the role check reads; the code constants are seed data and the hard-block list. **Hard blocks cannot be edited:** Opus 5.5, Sonnet 5.5 and the Fable models for the Buddy tiers and the Matchmaker (`models.hard_block_reason`, enforced in the editor and again in `role_problems`, so even a value written straight into the table is refused at assignment). **Enrichment for an unconfirmed model** (`_ENRICHMENT_UNCONFIRMED`: Fable 5, Fable 5.1, Sonnet 5.5) goes through a confirm page that lists the test (Agent taxonomy or Description generate, a Bottom line generate, neither empty or cut off) and needs a ticked box; the change and the confirmation are recorded in `model_role_log` and shown under the card. A role a model is currently assigned to can't be switched off. Seeds never overwrite an edited value (the seed only fills a blank), and the lineup check and every background pass never write it. Allowing a role does not enable the model: pricing must be verified and the status available. Out of scope and untouched: `ask()`, every `max_tokens`, enabling Buddy or the Matchmaker for new models. See `tests/test_allowed_roles_editor.py`.
-- **AI page polish after 3c (2026-10).** Wording and layout only. The Allowed roles section is now the shared `_disclosure_group` (the `/admin` hub's group pattern: bold all-caps label, short description, `disclosure-caret` triangle on the right), loads collapsed, and replaces the "Edit allowed roles" link and the card title above it; the id `allowed-roles` sits on a wrapper div so `/admin/system/ai#allowed-roles` still opens it. The "FP&A Buddy tiers" card title was double-escaped (`FP&amp;amp;A` passed into `_card`, which escapes), so the browser showed "FP&AMP;A BUDDY TIERS" under its uppercase rule; the title is now plain "FP&A Buddy tiers". `_enrich_model_label` now returns `linklib.models.model_display_name` (registry label, else "Opus 4.8" derived from the id, else the id), so no card shows a raw model id as a name. The Model pricing table is one table: Model (label, then the exact id and status, plus a "30-day data retention" chip), five price columns (empty rates show "empty", never zero), one Status chip (Verified date, Stale or Unverified), Used by, Edit. The source text and the model note sit once, in a collapsed "Notes" disclosure in the Status cell (the same text is also the Edit form's inputs); the per-role "not allowed" reasons live only in the Allowed roles card, and one link to Anthropic's pricing page sits in the intro (the same URL as the "Anthropic pricing" row on `/admin/checks`). The retention chip is derived from the note text containing "data retention", so a note reworded without that phrase loses the chip. Used by is read for every priced model, including one outside the picker registry (Opus 4.8). The "Can't be enabled" note and its `enable_blocks` computation were dead (computed, never shown) and are removed; `Library.model_enable_problems` stays, since `set_role_model` uses it. Rows have a Notes disclosure and Edit with a triangle. See `tests/test_allowed_roles_editor.py`.
+- **AI page polish after 3c (2026-10).** Wording and layout only. The Allowed roles section is now the shared `_disclosure_group` (the `/admin` hub's group pattern: bold all-caps label, short description, `disclosure-caret` triangle on the right), loads collapsed, and replaces the "Edit allowed roles" link and the card title above it; the id `allowed-roles` sits on a wrapper div so `/admin/system/ai#allowed-roles` still opens it. The "FP&A Buddy tiers" card title was double-escaped (`FP&amp;amp;A` passed into `_card`, which escapes), so the browser showed "FP&AMP;A BUDDY TIERS" under its uppercase rule; the title is now plain "FP&A Buddy tiers". `_enrich_model_label` now returns `linklib.models.model_display_name` (registry label, else "Opus 4.8" derived from the id, else the id), so no card shows a raw model id as a name. The Model pricing table is one table: Model (label, then the exact id on its own line, which wraps instead of reaching the next column, plus a "30-day data retention" chip), five price columns (empty rates show "empty", never zero), one Status chip (Verified date, Stale or Unverified, about the pricing row), an Availability chip (Available, Not using or Deactivated, the catalog status; a separate fact from the Status chip, so it has a neutral fill and border, never seafoam or coral), Used by, Edit. Column widths are the named `_PRICE_W_*` constants and the table's floor is their sum. The source text and the model note sit once, in a collapsed "Notes" disclosure in the Status cell (the same text is also the Edit form's inputs); the per-role "not allowed" reasons live only in the Allowed roles card, and one link to Anthropic's pricing page sits in the intro (the same URL as the "Anthropic pricing" row on `/admin/checks`). The retention chip is derived from the note text containing "data retention", so a note reworded without that phrase loses the chip. Used by is read for every priced model, including one outside the picker registry (Opus 4.8). The "Can't be enabled" note and its `enable_blocks` computation were dead (computed, never shown) and are removed; `Library.model_enable_problems` stays, since `set_role_model` uses it. Rows have a Notes disclosure and Edit with a triangle. See `tests/test_allowed_roles_editor.py`.
 - **Compare visuals and the agent label (2026-10, follow-up to #676).** Three picks from Brian's mocks, applied to both Compare pages in one change. (1) The AI summary card opens with an `h2.cmp-summary-h`, "How they compare" (`_CMP_SUMMARY_HEADING`), before its text; the footnote is unchanged and the cap-hit note has no heading. (2) The Bottom line row is a plain white row with a 3px `--navy` inset rule on its label (`box-shadow:inset 3px 0 0`, so it stays with the sticky label when scrolled), replacing the seafoam-wash fill; the rule is shared, so Software and Communities change together. Measured at 1280px: ink contrast 17.4 on the row, 6.54 for the white-on-navy band text unchanged. The tint option was rejected because a 10% navy-light tint (236,239,245) nearly matches the header row (238,241,247). (3) The agent field is "What its agents do" everywhere (`tool_labels.AGENT`), and `SECTION_AGENT` is the same constant, so the Compare row shows the field name once instead of "AI / Agent involvement". "How autonomous is it?" was dropped because the field holds a roster of agents and what each does, not a degree of autonomy. `EYEBROW_AGENT` ("AI agent capabilities") is a grouping name and is unchanged. The empty-state copy follows: "What this tool's agents do hasn't been documented." Labels only; no key or column changed. See `tests/test_compare_summary.py` and `tests/test_software_labels.py`.
 
 - **FP&A Buddy Done, Resume and one small-button height (2026-10, PR A).** Done is a
@@ -13552,7 +13581,7 @@ subscription.
   orphan. **Byline rule, one function (`_ask_byline`):** the viewer's own row
   reads "You" first (an admin included, by `user_id` equality, never by name),
   then an admin sees another asker's stored name, then a member sees nothing.
-  The break-glass admin login has no `user_id`, so nothing is "own" there and it
+  A session with no `user_id` (the break-glass login, retired in #627; token-only callers still lack one) has nothing "own" and it
   shows stored names. Other name renderers (admin report, admin feedback card)
   are admin-only pages that always name the asker; `/ask/history`, Recent and the
   open thread show only the viewer's own questions with no byline. Tests:

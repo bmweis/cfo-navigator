@@ -375,12 +375,12 @@ def test_pricing_table_drops_per_role_reasons_and_the_duplicate_note(env):
 
 def test_pricing_row_keeps_id_status_chip_used_by_and_notes_disclosure(env):
     seg = _pricing_html(env)
-    assert "claude-fable-5 &middot; available" in seg
+    assert ">claude-fable-5</div>" in seg and "claude-fable-5 &middot;" not in seg
     assert ">Notes <span class=\"disclosure-caret\"" in seg
     assert "Unverified</span>" in seg and "Verified 2026-09-28" in seg
     assert "from cached API reference 2026-09-25, not confirmed against the live page" in seg   # source text
     assert "<em style=\"color:var(--muted);\">empty</em>" in seg   # empty rates stay empty, not zero
-    assert ">Opus 4.8</div>" in seg and ">claude-opus-4-8 &middot; available" in seg
+    assert ">Opus 4.8</div>" in seg and ">claude-opus-4-8</div>" in seg
     # a model in use but not in the picker registry still shows what uses it
     row = seg[seg.index(">Opus 4.8</div>"):]
     row = row[:row.index("</tr>")]
@@ -405,3 +405,45 @@ def test_pricing_intro_link_matches_the_old_row_links_and_the_checks_row(env):
     assert env._ANTHROPIC_PRICING_URL == "https://www.anthropic.com/pricing"
     checks = _admin(env).get("/admin/checks").text
     assert 'href="https://www.anthropic.com/pricing"' in checks and "/admin/system/ai#model-pricing" in checks
+
+
+# --- Availability column ------------------------------------------------------
+
+def _rows(*ids):
+    return [{"model_id": m, "input": 1.0, "output": 5.0, "cache_write": 1.25, "cache_write_1h": 2.0,
+             "cache_read": 0.1, "verified_on": "", "source_note": ""} for m in ids]
+
+
+def test_availability_column_renders_each_catalog_status(env):
+    rows = _rows("claude-a-1", "claude-b-1", "claude-c-1")
+    status = {"claude-a-1": {"status": "available"}, "claude-b-1": {"status": "not_using"},
+              "claude-c-1": {"status": "deactivated"}}
+    html = env._model_pricing_card_html(rows, status, {})
+    head = html[html.index("<thead>"):html.index("</thead>")]
+    assert head.index(">Status<") < head.index(">Availability<") < head.index(">Used by<")
+    for word in ("Available", "Not using", "Deactivated"):
+        assert f">{word}</span>" in html
+    assert html.count("</td><td><span style=\"display:inline-block;background:var(--navy-wash)") == 1
+    # the pricing chip stays its own fact: every row here is unverified regardless of status
+    assert html.count(">Unverified</span>") == 3
+
+
+def test_model_id_has_its_own_line_with_no_status_after_it(env):
+    rows = _rows("claude-haiku-4-5-20251001")
+    html = env._model_pricing_card_html(rows, {"claude-haiku-4-5-20251001": {"status": "not_using"}}, {})
+    assert ">claude-haiku-4-5-20251001</div>" in html
+    assert "&middot;" not in html and "claude-haiku-4-5-20251001 not using" not in html
+    i = html.index(">claude-haiku-4-5-20251001</div>")
+    assert "not using" not in html[i:i + 80].lower()
+
+
+def test_long_model_id_wraps_and_the_model_column_has_a_named_width(env):
+    long_id = "claude-an-extremely-long-model-identifier-with-no-natural-breaks-20991231"
+    html = env._model_pricing_card_html(_rows(long_id), {}, {})
+    assert f'overflow-wrap:anywhere;">{long_id}</div>' in html
+    assert f'<col style="width:{env._PRICE_W_MODEL}px;">' in html
+    assert env._PRICE_W_MODEL >= 220
+    # the table's floor is the sum of the named widths, so no column is squeezed below its name
+    total = (env._PRICE_W_MODEL + 5 * env._PRICE_W_RATE + env._PRICE_W_STATUS
+             + env._PRICE_W_AVAIL + env._PRICE_W_USEDBY + env._PRICE_W_EDIT)
+    assert f"min-width:{total}px" in html
