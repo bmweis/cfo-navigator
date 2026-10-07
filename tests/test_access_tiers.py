@@ -340,7 +340,10 @@ def test_last_admin_cannot_be_demoted_disabled_or_deleted(env):
     lib = Library(db)
     boss = lib.create_user("boss", "supersecret", role="admin")
     lib.close()
-    c = _admin_client(env)   # host-password admin session
+    # Sign in as the real admin itself. Logging in as "admin"/<password> would
+    # seed a second admin (tests/conftest.py) and defeat "the only admin".
+    c = _client(env)
+    c.post("/login", data={"username": "boss", "password": "supersecret"}, follow_redirects=False)
 
     def _boss():
         lib = Library(db)
