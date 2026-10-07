@@ -206,18 +206,20 @@ class Reporter:
     a log, and one audit line at the end (all on the volume next to the
     database, never inside it). --list never creates one."""
 
-    def __init__(self, dest: str, mode: str, user: str):
-        self.dest, self.mode, self.user = dest, mode, user
+    def __init__(self, dest: str, mode: str, user: str, job_id: str = ""):
+        self.dest, self.mode, self.user, self.job_id = dest, mode, user, job_id
         self.snap: dict = {}
         self.final = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.tmp_path = ""
         self.total = 0
+        self.changed = False  # set just before the first change to the live database
 
     def begin(self) -> None:
         rs.reset_status(self.dest, state="running", stage="starting", mode=self.mode,
-                        pid=os.getpid(), started_at=rs.now_iso(), message="", user=self.user)
+                        pid=os.getpid(), started_at=rs.now_iso(), message="", user=self.user,
+                        job_id=self.job_id)
         self._thread = threading.Thread(target=self._beat, daemon=True)
         self._thread.start()
 
@@ -354,6 +356,7 @@ def _run(args, rep: Reporter, dest: str, dest_dir: str) -> int:
             return 0
 
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        rep.changed = True
         rep.stage("swapping", "Swapping the restored database in.")
         if exists:
             pre = keep_current(dest, stamp)
@@ -402,6 +405,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="Required to replace a destination that already exists")
     ap.add_argument("--audit-user", default="terminal",
                     help="Who to record in restore-audit.jsonl (the admin page passes the admin's user id)")
+    ap.add_argument("--job-id", default="",
+                    help="Set by the admin page. It already wrote this run's 'running' record and holds the "
+                         "backup lock, so a 'running' record with this id is this run's own claim, not another restore")
     args = ap.parse_args(argv)
 
     if not backup.is_configured():
@@ -419,15 +425,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     prior = rs.read_status(dest)
-    if rs.effective_state(prior) == "running" and int(prior.get("pid") or 0) != os.getpid():
-        sys.exit("Another restore is already running (see restore-status.json). Nothing was changed.")
+    mine = bool(args.job_id) and prior.get("job_id") == args.job_id  # the page's claim for this very run
+    if rs.effective_state(prior) == "running" and not mine and int(prior.get("pid") or 0) != os.getpid():
+        # Another restore really is running. Leave its status file alone.
+        sys.exit("Another restore or check is already running. Wait for it to finish, then try again. "
+                 "Nothing was changed.")
 
-    rep = Reporter(dest, "check" if args.dry_run else "restore", args.audit_user)
+    rep = Reporter(dest, "check" if args.dry_run else "restore", args.audit_user, args.job_id)
     rep.begin()
     try:
         rc = _run(args, rep, dest, dest_dir)
     except SystemExit as e:
-        rep.end("failed", str(e.code) if isinstance(e.code, str) else "The restore did not finish.")
+        msg = str(e.code) if isinstance(e.code, str) else "The restore did not finish."
+        # A deliberate refusal before the swap changed nothing: say so, not "failed".
+        rep.end("failed" if rep.changed else "refused", msg)
         raise
     except Exception as e:
         rep.end("failed", f"The restore failed: {e}")
