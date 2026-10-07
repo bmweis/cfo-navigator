@@ -11474,6 +11474,14 @@ are removed. The Drive folder id comes from `--folder-id`, `GOOGLE_DRIVE_FOLDER_
 the `settings` row (`backup_drive_folder_id`) if the old file still opens, or a
 search by folder name. See RUNBOOK.md §1 Path C and §4.
 
+`POST /admin/library-backup/upload-db` is **admin-session only** (2026-10): it
+swaps the live `library.db` after checking only that an `articles` table
+exists, so a file bringing its own `users` table would be a takeover. The
+shared save token (header or `?token=`) and a member session are both refused
+with the same 401 as an anonymous request. `POST /admin/backup-now` is
+unchanged and still accepts the token (the Railway cron calls it). The handler
+writes no audit record: a log row in the live DB would be destroyed by the swap.
+
 
 ### Admin badge counts failing checks (2026-10)
 

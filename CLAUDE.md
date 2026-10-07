@@ -11301,6 +11301,15 @@ tables, no third-party dependency.
     only the `X-Save-Token` header (2026-09 correction: this line previously
     claimed `?token=` worked for all of them, verified false in code for
     `/ask` specifically during the MCP cleanup/hardening PR's Phase 0).
+  - **`POST /admin/library-backup/upload-db` is admin-session-only (2026-10).**
+    It used `_require_api` (admin cookie OR save token), but it atomically
+    replaces the live `library.db` with only an `articles`-table check, so the
+    bookmarklet token could swap in a database carrying its own `users` table.
+    It now uses `_is_authed` alone: the token (header or `?token=`) and a
+    member session get the same 401 as an anonymous caller. `/admin/backup-now`
+    keeps `_require_api` (the Railway cron calls it with the token). No audit
+    record is written (a row in the live DB would be lost in the swap). See
+    `tests/test_upload_db_admin_only.py`.
   - **`/api/search` is now admin-only (`_require_api`), matching `/read`'s real
     access tier (2026-09 fix)** — previously gated at member-tier
     (`_require_member`, any signed-in user), a likely-unintentional survivor

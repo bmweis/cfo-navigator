@@ -68,12 +68,15 @@ reads the restored file.
 2. **Download the snapshot from Google Drive** you want to restore
    (normally the newest `library-*.db`).
 
-3. **Upload it.** Either use the upload form on `/admin/library-backup` (admin
-   login), or from a terminal:
+3. **Upload it.** The route accepts an **admin session only**: the save token
+   (`X-Save-Token` or `?token=`) is refused with `401`, as is a non-admin
+   login. Use the upload form on `/admin/library-backup` (admin login), or from
+   a terminal reuse an admin session cookie (the `cfo_session` value from your
+   browser after logging in):
 
    ```bash
    curl -si -X POST "https://bmweis.com/admin/library-backup/upload-db" \
-        -H "X-Save-Token: $LINKLIB_SAVE_TOKEN" \
+        -H "Cookie: cfo_session=<your admin session cookie>" \
         -F "file=@library-YYYYMMDD-HHMMSS.db"
    ```
 
@@ -333,7 +336,9 @@ paths against scratch files.
    `LINKLIB_DB=.../live.db LINKLIB_SAVE_TOKEN=<anything> uvicorn webapp.app:app --port 8123`
 4. Confirm the pre-restore state through the API
    (`GET /api/search?q=&limit=50&token=…` shows only the live DB's rows).
-5. Restore with section 1's exact curl (`POST /admin/library-backup/upload-db`).
+5. Restore with section 1's curl (`POST /admin/library-backup/upload-db`). It
+   needs an admin session, so log in to this local instance as admin first
+   (`LINKLIB_PASSWORD`) and send that cookie.
 6. Validate: the 303 redirect's `uploaded=<N>` matches the good DB's
    article count; `/api/search` now returns the snapshot's rows (including
    an FTS query that missed before); the stale row is gone; on the file
@@ -373,7 +378,8 @@ paths against scratch files.
 - Snapshot via `snapshot_to_file()` → 233,472-byte self-contained file, no
   WAL sidecar.
 - Pre-restore: API listed 2 rows; FTS query `netsuite` → 0 hits.
-- `POST /admin/library-backup/upload-db` with `X-Save-Token` → `303`,
+- `POST /admin/library-backup/upload-db` with `X-Save-Token` → `303` (the route
+  has been admin-session-only since 2026-10; the token is now refused),
   `location: /admin/library-backup?uploaded=5` (count matched the snapshot).
 - Post-restore, **no restart**: API listed the snapshot's 5 rows; `netsuite`
   → 1 hit; stale row unfindable; `PRAGMA integrity_check` = `ok`; FTS

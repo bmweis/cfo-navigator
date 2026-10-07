@@ -36979,7 +36979,7 @@ def admin_backup(request: Request, uploaded: str = ""):
     </div>
     <div class="backup-action-divider">
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately—no restart needed.</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately—no restart needed. Uploads through this page are limited to 100 MB by Cloudflare.</p>
       {_upload_limit_note_html()}
       <form method="post" action="/admin/library-backup/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
         <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
@@ -39585,8 +39585,14 @@ def _upload_limit_note_html(db_path: str | None = None) -> str:
 
 
 @app.post("/admin/library-backup/upload-db", response_class=HTMLResponse)
-async def upload_db(request: Request, file: UploadFile = File(...), token: str | None = None):
-    _require_api(request, token)
+async def upload_db(request: Request, file: UploadFile = File(...)):
+    # Admin session only. This route atomically replaces the live library.db
+    # and validates only that an `articles` table exists, so a file carrying
+    # its own `users` table would be a full takeover: the shared bookmarklet
+    # token (LINKLIB_SAVE_TOKEN) and a member session are both refused, with
+    # the same 401 an anonymous request gets. /admin/backup-now keeps the token.
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
     import sqlite3
     import tempfile
 
