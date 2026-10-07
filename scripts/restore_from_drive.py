@@ -215,6 +215,7 @@ class Reporter:
         self.tmp_path = ""
         self.total = 0
         self.changed = False  # set just before the first change to the live database
+        self.articles = None  # article count of the validated file, once known
 
     def begin(self) -> None:
         rs.reset_status(self.dest, state="running", stage="starting", mode=self.mode,
@@ -253,8 +254,12 @@ class Reporter:
         self.say(message)
         rs.write_status(self.dest, state=state, stage=state, message=message, finished_at=rs.now_iso(),
                         pid=0)
+        # started_at, articles and job_id are additive: the history table on the page reads them,
+        # and an older line without them still parses.
         rs.audit(self.dest, user=self.user, file_id=self.snap.get("id", ""),
-                 file_name=self.snap.get("name", ""), mode=self.mode, result=state, message=message)
+                 file_name=self.snap.get("name", ""), mode=self.mode, result=state, message=message,
+                 started_at=rs.read_status(self.dest).get("started_at", ""), articles=self.articles,
+                 job_id=self.job_id)
 
 
 def _stamp_of(path: str) -> str:
@@ -349,6 +354,7 @@ def _run(args, rep: Reporter, dest: str, dest_dir: str) -> int:
             sys.exit(f"Snapshot refused: {e}. Destination untouched.")
         _remove_sidecars(tmp)
         rep.say(f"Validated: integrity ok, {count:,} articles.")
+        rep.articles = count
 
         if args.dry_run:
             rep.end("checked", f"Dry run finished: {snap['name']} is a valid backup with {count:,} articles. "

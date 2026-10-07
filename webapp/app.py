@@ -91,6 +91,7 @@ from linklib.pipeline import ingest_url
 from linklib.original_content_sync import sync_original_content_article
 from linklib import backup
 from linklib import restore_status
+from linklib import backup_history
 from webapp.markdown_render import render_narrative_markdown
 from webapp.ask_orchestrator import (
     ForbiddenConversationError as _AskForbiddenConversationError,
@@ -1782,7 +1783,7 @@ body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:v
    card system has its own breakpoint. */
 @media(max-width:700px){
   .site-main.site-main table.admin-table-responsive.admin-table-responsive td,
-  .site-main.site-main table.backup-log-table.backup-log-table td{border-top:0!important;}
+  .site-main.site-main table.bk-stack.bk-stack td{border-top:0!important;}
 }
 @media(max-width:820px){
   .site-main.site-main table.ff-table.ff-table td,
@@ -2145,10 +2146,14 @@ _COL_WIDTH_EMAIL = 220        # Email address
 # being squeezed to a sliver between the card breakpoint (700px) and the point
 # where the four fixed columns plus a readable Notes fit.
 _BACKUP_COL_WIDTH_WHEN = 150
+_BACKUP_COL_WIDTH_ACTION = 84
 _BACKUP_COL_WIDTH_FILENAME = 236
-_BACKUP_COL_WIDTH_LOCATION = 154
-_BACKUP_COL_WIDTH_STATUS = 90
-_BACKUP_TABLE_MIN_WIDTH = 860
+_BACKUP_COL_WIDTH_STATUS = 116   # the Result chip
+_BACKUP_COL_WIDTH_BY = 96
+_BACKUP_TABLE_MIN_WIDTH = 920    # the five fixed columns plus room for Detail
+# A finished or failed restore, check or backup panel stays at the top of the
+# page this long, then the history table is the only record.
+_RESULT_PANEL_MINUTES = 30
 
 _COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
                               # "YYYY-MM-DD HH:MM" value, not just "YYYY-MM-DD"
@@ -37110,6 +37115,52 @@ def _integrity_status_banner(integrity_rows: list[dict]) -> str:
             f'padding:14px 18px;margin:0 0 16px;font-size:14px;line-height:1.5;">{html}</div>')
 
 
+_HISTORY_CHIP = {
+    backup_history.SUCCEEDED: "background:var(--seafoam-wash);color:var(--navy);",
+    backup_history.FAILED: "background:var(--alert-wash);color:var(--alert);",
+    backup_history.REFUSED: "background:var(--line);color:var(--ink);",
+    backup_history.INTERRUPTED: "background:var(--line);color:var(--ink);",
+}
+
+
+def _backup_history_rows(backup_rows: list[dict]) -> list[dict]:
+    """Backups (database log) merged with checks and restores (audit file on the volume)."""
+    audit = restore_status.read_audit(DB_PATH)
+    names: dict = {}
+    ids = {str(a.get("user")) for a in audit if str(a.get("user", "")).isdigit()}
+    cur = restore_status.read_status(DB_PATH)
+    if str(cur.get("user", "")).isdigit():
+        ids.add(str(cur["user"]))
+    if ids:
+        lib = _lib()
+        try:
+            for i in ids:
+                u = lib.get_user_by_id(int(i))
+                if u:
+                    names[i] = u["username"]
+        finally:
+            lib.close()
+    interrupted = cur if restore_status.effective_state(cur) == "interrupted" else None
+    return backup_history.history_rows(backup_rows, audit, backup.plain_error, names, interrupted)
+
+
+def _backup_history_body_html(rows: list[dict]) -> str:
+    cell = "padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;"
+    out = []
+    for r in rows:
+        when = r["when"].astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        out.append(
+            f'<tr><td data-label="When" class="nw" style="{cell}">{_esc(when)}</td>'
+            f'<td data-label="Action" class="nw" style="{cell}">{_esc(r["action"])}</td>'
+            f'<td data-label="Backup file" class="nw" style="{cell}">{_esc(r["file"])}</td>'
+            f'<td data-label="Result" class="nw" style="{cell}"><span style="display:inline-block;font-size:12px;'
+            f'font-weight:600;padding:2px 8px;border-radius:999px;{_HISTORY_CHIP[r["result"]]}">{_esc(r["result"])}</span></td>'
+            f'<td data-label="Detail" style="{cell}color:var(--ink-soft);">{_esc(r["detail"]) or "—"}</td>'
+            f'<td data-label="By" class="nw" style="{cell}">{_esc(r["by"])}</td></tr>')
+    return "".join(out) or ('<tr><td colspan="6" style="padding:16px;color:var(--muted);font-size:13px;">'
+                            'Nothing recorded yet.</td></tr>')
+
+
 @app.get("/admin/library-backup", response_class=HTMLResponse)
 def admin_backup(request: Request, started: str = "", busy: str = ""):
     if not _is_authed(request):
@@ -37143,24 +37194,7 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
     if busy:
         run_note += ('<p style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:10px;'
                     'padding:10px 16px;font-size:14px;margin:0 0 16px;">A backup or restore is already running.</p>')
-    backup_log_rows_html = "".join(
-        f"""<tr>
-          <td data-label="When" style="padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:13px;">{_esc(b['created_at'][:16].replace('T',' '))}</td>
-          <td data-label="Filename" class="nw" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_esc(b['filename']) or '—'}</td>
-          <td data-label="Location" class="nw" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
-            f'<a href="https://drive.google.com/file/d/{quote(b["drive_file_id"])}/view" target="_blank" rel="noopener">Open in Drive &rarr;</a>'
-            if b['drive_file_id'] else '—'
-          }</td>
-          <td data-label="Status" class="nw" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;">{
-            '<span style="color:var(--seafoam-deep);font-weight:600;">Success</span>' if b['status'] == 'success'
-            else '<span style="color:var(--alert);font-weight:600;">Failed</span>'
-          }</td>
-          <td data-label="Notes" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-soft);">{
-            _esc(f"{b['bytes']:,} bytes · {b['row_count']:,} articles") if b['status'] == 'success' else _esc(backup.plain_error(b['error']))
-          }</td>
-        </tr>"""
-        for b in backup_rows
-    ) or '<tr><td colspan="5" style="padding:16px;color:var(--muted);font-size:13px;">No off-site backups recorded yet.</td></tr>'
+    backup_log_rows_html = _backup_history_body_html(_backup_history_rows(backup_rows))
     body = f"""<div class="page page-standard">
 <style>
 .backup-actions{{display:grid;grid-template-columns:1fr;gap:24px;}}
@@ -37172,21 +37206,24 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 .backup-log-table{{width:100%;table-layout:fixed;min-width:{_BACKUP_TABLE_MIN_WIDTH}px;}}
 .backup-log-table td{{overflow-wrap:anywhere;}}
 .backup-log-table .col-when{{width:{_BACKUP_COL_WIDTH_WHEN}px;}}
+.backup-log-table .col-action{{width:{_BACKUP_COL_WIDTH_ACTION}px;}}
 .backup-log-table .col-filename{{width:{_BACKUP_COL_WIDTH_FILENAME}px;}}
-.backup-log-table .col-location{{width:{_BACKUP_COL_WIDTH_LOCATION}px;}}
 .backup-log-table .col-status{{width:{_BACKUP_COL_WIDTH_STATUS}px;}}
+.backup-log-table .col-by{{width:{_BACKUP_COL_WIDTH_BY}px;}}
 .backup-log-table .nw{{white-space:nowrap;}}
-/* Notes gets no explicit width — table-layout:fixed hands it whatever's
-   left of the table's own full width, so it's the one column that grows
-   or shrinks with the page instead of the table just being capped small
-   or every column stretching evenly with wasted whitespace. */
+/* Detail gets no explicit width: table-layout:fixed hands it whatever is left. */
+.dl-restored{{font-size:12px;color:var(--ink-soft);margin-top:2px;}}
+/* Phones: both tables (history and the Drive list) become labelled cards, one
+   field per line with its column name. The sitewide td top border is
+   !important, so it is removed in the sitewide block (.bk-stack), not here. */
 @media(max-width:700px){{
-  .backup-log-table{{min-width:0 !important;}}
-  .backup-log-table thead{{display:none;}}
-  .backup-log-table, .backup-log-table tbody, .backup-log-table tr, .backup-log-table td{{display:block;width:100%;}}
-  .backup-log-table tr{{border-bottom:1px solid var(--line);padding:10px 12px;}}
-  .backup-log-table td{{border-bottom:none !important;padding:3px 0 !important;white-space:normal !important;}}
-  .backup-log-table td[data-label]::before{{content:attr(data-label);font-weight:600;display:inline-block;min-width:76px;color:var(--ink-soft);}}
+  .bk-stack{{min-width:0 !important;}}
+  .bk-stack thead{{display:none;}}
+  .bk-stack, .bk-stack tbody, .bk-stack tr, .bk-stack td{{display:block;width:100%;}}
+  .bk-stack tr{{border-bottom:1px solid var(--line);padding:10px 12px;}}
+  .bk-stack tr:last-child{{border-bottom:0;}}
+  .bk-stack td{{border-bottom:none !important;padding:3px 0 !important;white-space:normal !important;}}
+  .bk-stack td[data-label]::before{{content:attr(data-label);font-weight:600;display:inline-block;min-width:84px;color:var(--ink-soft);}}
 }}
 </style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
@@ -37218,7 +37255,6 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Leave <code>GOOGLE_DRIVE_FOLDER_ID</code> unset in Railway. The app creates and remembers its own folder. Setting it sends backups to that folder instead, starting with the next attempt.</p>
 {_backup_status_banner(backup_rows)}
 <h2 style="font-size:16px;margin:24px 0 4px;">Backups in Drive</h2>
-<style>@media(max-width:700px){{.drive-list-table{{min-width:0 !important}}.drive-list-table thead{{display:none}}.drive-list-table tr{{display:block;padding:6px 0;border-bottom:1px solid var(--line)}}.drive-list-table td{{display:block;white-space:normal !important;padding:2px 12px !important;border:0 !important}}}}</style>
 <div id="drive-list"><p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Loading the list from Google Drive&hellip;</p></div>
 <p style="color:var(--muted);font-size:13px;margin:8px 0 0;">Only backups made by this app appear here: the daily ones and the ones from the button. A file placed in the Drive folder by hand does not show. The newest 14 are kept, so extra manual backups push the oldest out.</p>
 <script>
@@ -37230,14 +37266,16 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
     clearTimeout(timer);
     if(!d.ok){{say(d.message||'Could not load the list.');return;}}
     if(!d.files.length){{say('No backups in Drive yet. The first one appears after the next backup.');return;}}
-    var t=document.createElement('table');t.className='drive-list-table';t.style.width='100%';t.style.minWidth='{_TABLE_FLOOR_NARROW}px';
+    var t=document.createElement('table');t.className='drive-list-table bk-stack';t.style.width='100%';t.style.minWidth='{_TABLE_FLOOR_NARROW}px';
     t.innerHTML='<thead><tr style="background:var(--accent-light);"><th style="padding:8px 12px;text-align:left;font-size:13px;">Name</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Size</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Made</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Actions</th></tr></thead>';
     var tb=document.createElement('tbody');
     d.files.forEach(function(f){{
       var tr=document.createElement('tr');
-      [f.name,(f.size/1048576).toFixed(1)+' MB',(f.created||'').slice(0,16).replace('T',' ')+' UTC'].forEach(function(v){{
-        var td=document.createElement('td');td.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;';td.textContent=v;tr.appendChild(td);}});
-      var ta=document.createElement('td');ta.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;';
+      [['Name',f.name],['Size',(f.size/1048576).toFixed(1)+' MB'],['Made',(f.created||'').slice(0,16).replace('T',' ')+' UTC']].forEach(function(v){{
+        var td=document.createElement('td');td.setAttribute('data-label',v[0]);td.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;';td.textContent=v[1];
+        if(v[0]==='Name'&&f.restored){{var rs=document.createElement('div');rs.className='dl-restored';rs.textContent='Restored '+f.restored+' UTC';td.appendChild(rs);}}
+        tr.appendChild(td);}});
+      var ta=document.createElement('td');ta.setAttribute('data-label','Actions');ta.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;';
       var wrap=document.createElement('div');wrap.className='dl-actions';wrap.style.cssText='display:flex;flex-wrap:wrap;gap:8px;';
       var fm=document.createElement('form');fm.method='post';fm.action='/admin/library-backup/check/'+encodeURIComponent(f.id);fm.style.margin='0';
       var cb=document.createElement('button');cb.type='submit';cb.className='btn btn-ghost';cb.style.cssText='font-size:12px;padding:5px 10px;';cb.textContent='Check this backup';fm.appendChild(cb);wrap.appendChild(fm);
@@ -37249,6 +37287,22 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
   }}).catch(function(){{clearTimeout(timer);say('Could not reach Google Drive just now. The rest of this page still works. Reload to try again.');}});
 }})();
 </script>
+
+<h2 style="font-size:16px;margin:32px 0 4px;">Backup and restore history</h2>
+<p style="color:var(--muted);font-size:13px;margin:0 0 8px;">The last 50 backups, checks and restores, newest first, times in UTC. Backups are read from the database, so a restore removes the backups made after the one it restored. Checks and restores are kept in a file beside the database and survive a restore.</p>
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
+<table class="backup-log-table bk-stack">
+<thead><tr style="background:var(--accent-light);">
+  <th class="col-when" style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
+  <th class="col-action" style="padding:8px 12px;text-align:left;font-size:13px;">Action</th>
+  <th class="col-filename" style="padding:8px 12px;text-align:left;font-size:13px;">Backup file</th>
+  <th class="col-status" style="padding:8px 12px;text-align:left;font-size:13px;">Result</th>
+  <th style="padding:8px 12px;text-align:left;font-size:13px;">Detail</th>
+  <th class="col-by" style="padding:8px 12px;text-align:left;font-size:13px;">By</th>
+</tr></thead>
+<tbody>{backup_log_rows_html}</tbody>
+</table>
+</div>
 
 <h2 style="font-size:16px;margin:32px 0 4px;">Restore from a Drive backup</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Use <strong>Restore from backup</strong> in the list above. It opens a confirmation page, then the server downloads that backup from Drive, checks it, and swaps it in. It takes several minutes and you can leave the page. Download a backup first (above).</p>
@@ -37268,18 +37322,6 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live</p
 <h2 style="font-size:16px;margin:24px 0 4px;">Pre-backup integrity check</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Runs automatically against the live database right before every backup attempt&mdash;<code>PRAGMA integrity_check</code> plus an FTS5 self-check. A failure blocks that night&rsquo;s upload so corruption is never captured into a retained snapshot.</p>
 {_integrity_status_banner(integrity_rows)}
-<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
-<table class="backup-log-table">
-<thead><tr style="background:var(--accent-light);">
-  <th class="col-when" style="padding:8px 12px;text-align:left;font-size:13px;">When</th>
-  <th class="col-filename" style="padding:8px 12px;text-align:left;font-size:13px;">Filename</th>
-  <th class="col-location" style="padding:8px 12px;text-align:left;font-size:13px;">Location</th>
-  <th class="col-status" style="padding:8px 12px;text-align:left;font-size:13px;">Status</th>
-  <th style="padding:8px 12px;text-align:left;font-size:13px;">Notes</th>
-</tr></thead>
-<tbody>{backup_log_rows_html}</tbody>
-</table>
-</div>
 </div>"""
     return HTMLResponse(_page("Archive backup—Admin", "Admin", body, authed=True))
 
@@ -39953,7 +39995,11 @@ def admin_backup_drive_list(request: Request):
     renders so a slow Drive cannot hang the admin page."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
-    return JSONResponse(backup.list_for_display(DB_PATH))
+    res = backup.list_for_display(DB_PATH)
+    by_id, by_name = backup_history.last_restore_times(restore_status.read_audit(DB_PATH))
+    for f in res.get("files", []):
+        f["restored"] = backup_history.restored_at(f, by_id, by_name)  # '' when never restored from this file
+    return JSONResponse(res)
 
 
 # --- Restore from the page (Phase 2 of issue #714) --------------------------------
@@ -40027,7 +40073,8 @@ def _restore_job(cmd: list[str], mode: str, file: dict, user_id) -> None:
             restore_status.write_status(DB_PATH, state="failed", stage="failed", message=msg,
                                         finished_at=restore_status.now_iso(), pid=0)
             restore_status.audit(DB_PATH, user=user_id, file_id=file["id"], file_name=file["name"],
-                                 mode=mode, result="failed", message=msg)
+                                 mode=mode, result="failed", message=msg,
+                                 started_at=st.get("started_at", ""), articles=None, job_id=st.get("job_id", ""))
         elif st.get("state") == "finished" and mode == "restore" and rc == 0:
             err = _restore_post_actions()
             if err:
@@ -40097,13 +40144,17 @@ def _restore_panel_html(db_path: str) -> str:
     state = v["state"]
     if state == "idle":
         return ""
+    if state != "running":
+        st = restore_status.read_status(db_path)
+        if restore_status._age_seconds(st.get("finished_at") or st.get("updated_at", "")) > _RESULT_PANEL_MINUTES * 60:
+            return ""  # old news: the history table keeps the record
     what = "check" if v["mode"] == "check" else "restore"
     box = ('background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 18px;'
-           'margin:0 0 16px;font-size:14px;line-height:1.5;')
+           'margin:0 0 16px;font-size:14px;line-height:1.5;overflow-wrap:anywhere;')
     warn = ('background:var(--alert-wash);border:1px solid var(--alert);border-radius:10px;padding:14px 18px;'
-            'margin:0 0 16px;font-size:14px;line-height:1.5;')
+            'margin:0 0 16px;font-size:14px;line-height:1.5;overflow-wrap:anywhere;')
     ok = ('background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;padding:14px 18px;'
-          'margin:0 0 16px;font-size:14px;line-height:1.5;')
+          'margin:0 0 16px;font-size:14px;line-height:1.5;overflow-wrap:anywhere;')
     log_html = ('<pre id="restore-log" style="background:var(--surface);border:1px solid var(--line);'
                 'border-radius:8px;padding:8px 12px;font-size:12px;overflow-x:auto;margin:8px 0 0;white-space:pre-wrap;">'
                 + _esc("\n".join(v["log"])) + '</pre>')

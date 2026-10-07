@@ -128,13 +128,14 @@ def test_backup_columns_are_named_constants(app_module, admin):
     _seed_backups()
     html = admin.get("/admin/library-backup").text
     assert f".backup-log-table .col-filename{{width:{a._BACKUP_COL_WIDTH_FILENAME}px;}}" in html
-    assert f".backup-log-table .col-location{{width:{a._BACKUP_COL_WIDTH_LOCATION}px;}}" in html
+    assert f".backup-log-table .col-action{{width:{a._BACKUP_COL_WIDTH_ACTION}px;}}" in html
+    assert f".backup-log-table .col-by{{width:{a._BACKUP_COL_WIDTH_BY}px;}}" in html
     assert f"min-width:{a._BACKUP_TABLE_MIN_WIDTH}px" in html
-    assert a._BACKUP_COL_WIDTH_FILENAME > 200 and a._BACKUP_COL_WIDTH_LOCATION > 120   # both grew
-    for label in ("Filename", "Location", "Status"):
+    assert a._BACKUP_COL_WIDTH_FILENAME > 200   # the filename column grew past its old width
+    for label in ("Backup file", "Result", "Action"):
         assert f'data-label="{label}" class="nw"' in html
     # The stacked card layout drops the desktop floor so the card is not pinned wide.
-    assert ".backup-log-table{min-width:0 !important;}" in html
+    assert ".bk-stack{min-width:0 !important;}" in html
 
 
 def test_backup_row_is_one_line_in_chromium(app_module, admin):

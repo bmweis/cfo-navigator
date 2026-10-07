@@ -291,8 +291,8 @@ def test_confirmation_page_is_not_a_hub_nav_orphan(world):
 def test_drive_list_stacks_on_a_phone_so_the_restore_button_is_never_off_screen(world):
     """At 390px the table used to scroll sideways and hide Restore from backup."""
     page = world["admin"].get("/admin/library-backup").text
-    assert "@media(max-width:700px){.drive-list-table" in page
-    assert ".drive-list-table td{display:block" in page
+    assert "t.className='drive-list-table bk-stack'" in page
+    assert ".bk-stack td{border-bottom:none !important;" in page and ".bk-stack, .bk-stack tbody" in page
 
 
 def test_panel_does_not_repeat_the_heading_in_the_message(world):

@@ -63,6 +63,10 @@ is a mistake. Log in as admin, open `/admin/library-backup` and click
 > It opens a confirmation page (**Check this backup** downloads and validates only;
 > restoring needs you to type `RESTORE`). The server downloads the backup from Drive
 > itself, so nothing passes through Cloudflare. It runs the same script as Path C.
+> The result panel at the top of the page shows a running job, or a finished or failed
+> one for 30 minutes; after that it disappears and the **Backup and restore history**
+> table (last 50 backups, checks and restores) is the record. The Drive list marks the
+> backup a restore last used ("Restored <date> UTC").
 > The page shows the stage, elapsed time and the last log lines, and says
 > **Interrupted** with recovery steps if the process dies. Use Path C (the terminal)
 > when the app is down or the page will not load.
@@ -148,7 +152,8 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
   reports more than one match, pass `--folder-id`.
 - It does not run the post-restore checklist below. Do that by hand.
 - It writes `restore-status.json`, `restore.log` and `restore-audit.jsonl` beside the
-  database, with `--audit-user terminal` unless told otherwise.
+  database (one line per attempt, now with the start time and article count), with
+  `--audit-user terminal` unless told otherwise. The history table on the page reads it.
 
 ### Post-restore validation checklist
 

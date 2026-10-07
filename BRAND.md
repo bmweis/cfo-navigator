@@ -896,16 +896,18 @@ constants:
   markup line up regardless of content length.
 - **`/admin/reader/feeds`'s `.ff-table`/`.fs-table`** — same
   percentage-based reasoning, tuned to that page's own content.
-- **`/admin/library-backup`'s `.backup-log-table`** is its own named
-  pixel widths (`_BACKUP_COL_WIDTH_WHEN` 150, `_BACKUP_COL_WIDTH_FILENAME`
-  236, `_BACKUP_COL_WIDTH_LOCATION` 154, `_BACKUP_COL_WIDTH_STATUS` 90), each
-  sized to its content (a backup filename and the Drive link are short
-  tokens that must not wrap; short tokens carry `white-space:nowrap`).
-  Notes has no width and takes the rest. `_BACKUP_TABLE_MIN_WIDTH` (860)
-  keeps Notes readable between the card breakpoint and a wide page, and the
-  700px mobile-card rule resets it with `min-width:0 !important`, because an
-  inline-style or table-level floor would otherwise pin the stacked card
-  wide.
+- **`/admin/library-backup`'s history table (`.backup-log-table`)** has its own
+  named pixel widths (`_BACKUP_COL_WIDTH_WHEN` 150, `_BACKUP_COL_WIDTH_ACTION` 84,
+  `_BACKUP_COL_WIDTH_FILENAME` 236, `_BACKUP_COL_WIDTH_STATUS` 116 for the Result
+  chip, `_BACKUP_COL_WIDTH_BY` 96), each sized to its content (short tokens carry
+  `white-space:nowrap`). Detail has no width and takes the rest.
+  `_BACKUP_TABLE_MIN_WIDTH` (920) keeps Detail readable between the card
+  breakpoint and a wide page. Under 700px that table and the Drive list
+  (`.drive-list-table`) share `.bk-stack`: labelled cards, one field per line with
+  its column name, `min-width:0 !important` so the floor does not pin a card wide,
+  and the sitewide cell top border removed in the sitewide block (a rule here
+  loses to it). Chosen over sideways scroll because the Restore button must never
+  sit off-screen.
 - **`/admin/checks`'s result column** (`_CHK_STATUS_COL_WIDTH`, 200px) is a
   fixed width rather than a third of the row: its widest unbreakable content
   is the Mark reviewed button (about 130px), and the explanation text takes

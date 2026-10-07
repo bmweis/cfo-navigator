@@ -99,6 +99,25 @@ def audit(db_path: str, **rec) -> None:
         f.flush()
 
 
+def read_audit(db_path: str, limit: int = 200) -> list[dict]:
+    """The newest `limit` audit lines, oldest first. A line that does not
+    parse is skipped, and a line written before started_at, articles and
+    job_id existed simply lacks those keys."""
+    out: list[dict] = []
+    try:
+        with open(paths(db_path)["audit"], "r", encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                try:
+                    rec = json.loads(ln)
+                except ValueError:
+                    continue
+                if isinstance(rec, dict):
+                    out.append(rec)
+    except OSError:
+        return []
+    return out[-limit:]
+
+
 def pid_alive(pid) -> bool:
     try:
         pid = int(pid)
