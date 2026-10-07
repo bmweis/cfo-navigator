@@ -52,6 +52,7 @@ import json
 import math
 import os
 import re
+import uuid
 import secrets
 import sys
 import threading
@@ -37133,7 +37134,10 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
       [f.name,(f.size/1048576).toFixed(1)+' MB',(f.created||'').slice(0,16).replace('T',' ')+' UTC'].forEach(function(v){{
         var td=document.createElement('td');td.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;';td.textContent=v;tr.appendChild(td);}});
       var ta=document.createElement('td');ta.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;';
-      var a=document.createElement('a');a.href='/admin/library-backup/restore/'+encodeURIComponent(f.id);a.className='btn btn-ghost';a.style.cssText='font-size:12px;padding:5px 10px;text-decoration:none;';a.textContent='Restore from backup';ta.appendChild(a);tr.appendChild(ta);
+      var wrap=document.createElement('div');wrap.className='dl-actions';wrap.style.cssText='display:flex;flex-wrap:wrap;gap:8px;';
+      var fm=document.createElement('form');fm.method='post';fm.action='/admin/library-backup/check/'+encodeURIComponent(f.id);fm.style.margin='0';
+      var cb=document.createElement('button');cb.type='submit';cb.className='btn btn-ghost';cb.style.cssText='font-size:12px;padding:5px 10px;';cb.textContent='Check this backup';fm.appendChild(cb);wrap.appendChild(fm);
+      var a=document.createElement('a');a.href='/admin/library-backup/restore/'+encodeURIComponent(f.id);a.className='btn btn-ghost';a.style.cssText='font-size:12px;padding:5px 10px;text-decoration:none;';a.textContent='Restore from backup';wrap.appendChild(a);ta.appendChild(wrap);tr.appendChild(ta);
       tb.appendChild(tr);}});
     t.appendChild(tb);
     var fr=document.createElement('div');fr.className='table-frame';fr.style.cssText='overflow-x:auto;overflow-y:hidden;';fr.appendChild(t);
@@ -39815,9 +39819,11 @@ _RESTORE_STAGE_LABELS = {
 }
 
 
-def _restore_command(snapshot_id: str, folder_id: str, mode: str, user_id) -> list[str]:
+def _restore_command(snapshot_id: str, folder_id: str, mode: str, user_id, job_id: str = "") -> list[str]:
     cmd = [sys.executable, "-m", "scripts.restore_from_drive", "--db", os.path.abspath(DB_PATH),
            "--snapshot", snapshot_id, "--audit-user", str(user_id if user_id is not None else "admin")]
+    if job_id:  # tells the script the "running" record on disk is this run's own claim
+        cmd += ["--job-id", job_id]
     if folder_id:
         cmd += ["--folder-id", folder_id]
     cmd.append("--dry-run" if mode == "check" else "--yes-replace-live")
@@ -39858,8 +39864,14 @@ def _restore_job(cmd: list[str], mode: str, file: dict, user_id) -> None:
     try:
         rc = _restore_run_process(cmd)
         st = restore_status.read_status(DB_PATH)
-        if st.get("state") == "running":  # the script died before recording a result
-            msg = "The restore script stopped without a result. The Railway logs and restore.log have the details."
+        if st.get("state") == "running":  # the script ended before recording a result
+            if mode == "check":
+                msg = ("The check ended before it recorded a result. A check never changes the database. "
+                       "The log below and the Railway logs have the details.")
+            else:
+                msg = ("The restore script ended before it recorded a result, so it is not known whether anything "
+                       "changed. Read the log below, then run ls -lh /data over railway ssh: a pre-restore file "
+                       "there means a swap may have started.")
             restore_status.write_status(DB_PATH, state="failed", stage="failed", message=msg,
                                         finished_at=restore_status.now_iso(), pid=0)
             restore_status.audit(DB_PATH, user=user_id, file_id=file["id"], file_name=file["name"],
@@ -39900,7 +39912,18 @@ def _restore_refusal(file: dict, mode: str) -> str:
 
 def _panel_msg(m: str) -> str:
     """Drop a lead-in the panel heading already says ("Restore finished.", "The restore failed.")."""
-    return re.sub(r"^(Restore finished: |The (restore|check) failed: )", "", m or "")
+    m = re.sub(r"^(Restore finished: |The (restore|check) failed: )", "", m or "")
+    return re.sub(r"\s*Nothing was changed\.\s*$", "", m)  # the refused panel says it in its own heading
+
+
+def _restore_log_this_run(lines: list[str]) -> list[str]:
+    """restore.log keeps every attempt; the panel shows only the current one, from its last
+    "requested." line, so a refusal is not shown above the lines of an earlier restore."""
+    start = 0
+    for i, ln in enumerate(lines):
+        if " requested." in ln:
+            start = i
+    return lines[start:]
 
 
 def _restore_state_view(db_path: str) -> dict:
@@ -39910,7 +39933,7 @@ def _restore_state_view(db_path: str) -> dict:
             "message": st.get("message", ""), "elapsed": restore_status.elapsed_seconds(st),
             "downloaded": st.get("downloaded_bytes", 0), "total": st.get("total_bytes", 0),
             "post_applied": st.get("post_applied"), "post_error": st.get("post_error", ""),
-            "log": restore_status.log_tail(db_path, 12)}
+            "log": _restore_log_this_run(restore_status.log_tail(db_path, 40))[-12:]}
 
 
 def _fmt_elapsed(sec: int) -> str:
@@ -39959,6 +39982,10 @@ def _restore_panel_html(db_path: str) -> str:
     elif state == "rolled_back":
         body = (f'<div id="restore-panel" data-state="rolled_back" style="{warn}"><strong>Restore failed and was '
                 f'rolled back.</strong> {_esc(v["message"])}{log_html}</div>')
+    elif state == "refused":
+        body = (f'<div id="restore-panel" data-state="refused" style="{box}"><strong>Nothing was changed.</strong> '
+                f'The {what} did not start. {_esc(_panel_msg(v["message"]))} The database is exactly as it was. '
+                f'You can try again.{log_html}</div>')
     elif state == "interrupted":
         body = (f'<div id="restore-panel" data-state="interrupted" style="{warn}"><strong>Interrupted.</strong> '
                 f'A {what} was running but its process is gone or has stopped reporting (the server may have '
@@ -40057,6 +40084,50 @@ def admin_backup_restore_page(request: Request, file_id: str):
     return _restore_confirm_page(file, _restore_refusal(file, "restore"))
 
 
+def _restore_launch(request: Request, file: dict, mode: str):
+    """Preconditions, the backup lock, the status claim, then the real script as a
+    subprocess from a watcher thread. Shared by the restore form and the per-row
+    Check button. The caller has already checked auth, the file id and (for a
+    restore) the typed phrase."""
+    refusal = _restore_refusal(file, mode)
+    if refusal:
+        return _restore_confirm_page(file, refusal + " Nothing was started.", 409)
+    if not backup.try_acquire_exclusive():
+        return _restore_confirm_page(file, "A backup or restore started a moment ago. Nothing was started.", 409)
+    lib = _lib()
+    try:
+        uid = _current_user_id(lib, request)
+    finally:
+        lib.close()
+    try:
+        job_id = uuid.uuid4().hex  # the script treats a "running" record with this id as its own claim
+        restore_status.reset_status(DB_PATH, state="running", stage="starting", mode=mode, pid=os.getpid(),
+                                    started_at=restore_status.now_iso(), message="", user=uid,
+                                    file_name=file["name"], job_id=job_id)
+        restore_status.log_line(DB_PATH, f"{'Check' if mode == 'check' else 'Restore'} of {file['name']} requested.")
+        cmd = _restore_command(file["id"], backup.known_folder_id(DB_PATH), mode, uid, job_id)
+        threading.Thread(target=_restore_job, args=(cmd, mode, file, uid), daemon=True).start()
+    except Exception:
+        backup.release_exclusive()
+        raise
+    return RedirectResponse("/admin/library-backup?restore=started", status_code=303)
+
+
+@app.post("/admin/library-backup/check/{file_id}")
+def admin_backup_check_start(request: Request, file_id: str):
+    """One-click dry run from the Drive list: download and validate, swap nothing.
+    Needs no typed phrase. Admin session only: the save token gets 401."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    file, msg = _restore_file_or_none(file_id)
+    if file is None:
+        body = ('<div class="page page-standard"><p><a href="/admin/library-backup">&larr; Archive backup</a></p>'
+                '<h1>Check this backup</h1><p>' +
+                _esc(msg or "That file is not in the list of backups in Drive, so nothing was started.") + '</p></div>')
+        return HTMLResponse(_page("Check this backup", "Admin", body, authed=True), status_code=404 if not msg else 502)
+    return _restore_launch(request, file, "check")
+
+
 @app.post("/admin/library-backup/restore/{file_id}")
 def admin_backup_restore_start(request: Request, file_id: str, mode: str = Form("restore"), confirm: str = Form("")):
     """Start a restore or a check. Admin session only: the save token gets 401."""
@@ -40072,27 +40143,8 @@ def admin_backup_restore_start(request: Request, file_id: str, mode: str = Form(
         return HTMLResponse(_page("Restore from backup", "Admin", body, authed=True), status_code=404 if not msg else 502)
     if mode == "restore" and confirm != _RESTORE_PHRASE:
         return _restore_confirm_page(file, f"Type {_RESTORE_PHRASE} exactly (all capitals) to restore. Nothing was changed.", 400)
-    refusal = _restore_refusal(file, mode)
-    if refusal:
-        return _restore_confirm_page(file, refusal + " Nothing was started.", 409)
-    if not backup.try_acquire_exclusive():
-        return _restore_confirm_page(file, "A backup or restore started a moment ago. Nothing was started.", 409)
-    lib = _lib()
-    try:
-        uid = _current_user_id(lib, request)
-    finally:
-        lib.close()
-    try:
-        restore_status.reset_status(DB_PATH, state="running", stage="starting", mode=mode, pid=os.getpid(),
-                                    started_at=restore_status.now_iso(), message="", user=uid,
-                                    file_name=file["name"])
-        restore_status.log_line(DB_PATH, f"{'Check' if mode == 'check' else 'Restore'} of {file['name']} requested.")
-        cmd = _restore_command(file["id"], backup.known_folder_id(DB_PATH), mode, uid)
-        threading.Thread(target=_restore_job, args=(cmd, mode, file, uid), daemon=True).start()
-    except Exception:
-        backup.release_exclusive()
-        raise
-    return RedirectResponse("/admin/library-backup?restore=started", status_code=303)
+    return _restore_launch(request, file, mode)
+
 
 
 @app.get("/admin/library-backup/restore-status")

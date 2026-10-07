@@ -73,6 +73,11 @@ is a mistake. Log in as admin, open `/admin/library-backup` and click
 > If the swapped file fails its checks, the script puts the previous database back
 > and the page says **rolled back**.
 >
+> Each backup row also has **Check this backup**: one click, no typed word, downloads and
+> validates and swaps nothing. If the script refuses before it changes anything, the panel
+> says **Nothing was changed** and why, and you can try again. A refusal is not a
+> failure: look at `restore.log` only if the reason is not clear.
+>
 > **Pick a quiet moment.** The site keeps serving during a restore. A request already
 > running at the instant of the swap keeps reading the old file and any save it makes
 > then is lost (the old file survives only as `pre-restore`). A request that opens the
