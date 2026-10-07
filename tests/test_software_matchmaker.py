@@ -26,6 +26,8 @@ def env(monkeypatch):
     monkeypatch.setenv("LINKLIB_DB", db)
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
     monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    from tests.matchmaker_stub import ok_answer as _mm_ok
+    monkeypatch.setattr("linklib.matchmaker._answer", _mm_ok)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     import importlib, webapp.app as appmod
     importlib.reload(appmod)

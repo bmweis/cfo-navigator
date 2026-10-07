@@ -100,6 +100,7 @@ from webapp.ask_orchestrator import (
 )
 from webapp.matchmaker_orchestrator import (
     ForbiddenConversationError as _MatchmakerForbiddenConversationError,
+    MatchmakerTurnFailed as _MatchmakerTurnFailed,
     UnknownConversationError as _MatchmakerUnknownConversationError,
     run_matchmaker,
 )
@@ -10009,6 +10010,9 @@ async def tools_software_find_chat(request: Request):
             raise HTTPException(status_code=404, detail="unknown conversation")
         except _MatchmakerForbiddenConversationError:
             raise HTTPException(status_code=403, detail="not your conversation")
+        except _MatchmakerTurnFailed as e:
+            # A plain message only; the raw error stays in the server log.
+            return JSONResponse({"detail": e.message, "failed": True}, status_code=502)
         resp = JSONResponse(body)
         _set_visitor_cookie(request, resp, session_id)
         return resp
@@ -12232,6 +12236,9 @@ async def tools_communities_find_chat(request: Request):
             raise HTTPException(status_code=404, detail="unknown conversation")
         except _MatchmakerForbiddenConversationError:
             raise HTTPException(status_code=403, detail="not your conversation")
+        except _MatchmakerTurnFailed as e:
+            # A plain message only; the raw error stays in the server log.
+            return JSONResponse({"detail": e.message, "failed": True}, status_code=502)
         resp = JSONResponse(body)
         _set_visitor_cookie(request, resp, session_id)
         return resp

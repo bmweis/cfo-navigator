@@ -23,7 +23,7 @@ an invisible fallback" as the failure mode for an emptied field. Each
 caller catches `VoicePromptMissing` and responds in whatever shape its own
 module already uses for an unavailable-precondition failure (`enrich.py`'s
 generate_* functions return `None`; `agent.py`/`matchmaker.py` return their
-own `Answer`/`MatchAnswer` with an explanatory `text`; a `webapp/app.py`
+own `Answer`/`MatchAnswer` with `failed=True` and the detail in `error` (never `text`); a `webapp/app.py`
 AJAX route returns a 503 JSON error) — this module deliberately does not
 prescribe one response shape, only the resolution contract.
 

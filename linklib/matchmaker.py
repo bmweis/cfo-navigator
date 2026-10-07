@@ -12,6 +12,7 @@ as full context on every turn rather than retrieve a subset of either.
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 
@@ -20,6 +21,8 @@ from .enrich import NEEDS_VERIFICATION
 from .gates import MATCHMAKER_COMMUNITY_NOTE, MATCHMAKER_DISCLAIMER, MATCHMAKER_FIELD_SUFFIX
 from .stop_reason import stop_reason_of
 from .voice_settings import VoicePromptMissing, require_voice_setting
+
+_log = logging.getLogger(__name__)
 
 MAX_TOKENS = 900
 
@@ -249,6 +252,12 @@ class MatchAnswer:
     # The answer call's API stop_reason ("max_tokens" = cut off by the token
     # budget); "" when the call never completed. Measurement only.
     stop_reason: str = ""
+    # A failed turn (the call raised, the SDK or key is missing, or a voice
+    # prompt is unset) carries no answer text. `error` is the raw detail for
+    # the server log only; it never reaches the asker. Same shape as
+    # linklib.agent.Answer (#700).
+    failed: bool = False
+    error: str = ""
 
 
 _client = None
@@ -300,14 +309,14 @@ def _answer(lib: Library, kind: str, question: str,
 
     import importlib.util
     if importlib.util.find_spec("anthropic") is None:
-        return MatchAnswer(text="(Install `anthropic` to enable the matchmaker.)", model=model)
+        return MatchAnswer(failed=True, error="Install `anthropic` to enable the matchmaker.", model=model)
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        return MatchAnswer(text="(Set ANTHROPIC_API_KEY to enable the matchmaker.)", model=model)
+        return MatchAnswer(failed=True, error="ANTHROPIC_API_KEY is not set.", model=model)
 
     try:
         system = _build_system(lib, kind)
     except VoicePromptMissing as e:
-        return MatchAnswer(text=f"(Voice prompt not configured: {e})", model=model)
+        return MatchAnswer(failed=True, error=f"Voice prompt not configured: {e}", model=model)
     messages = trimmed_history + [{"role": "user", "content": question}]
 
     try:
@@ -340,7 +349,8 @@ def _answer(lib: Library, kind: str, question: str,
                            cache_creation_tokens=cache_w, cache_read_tokens=cache_r, cost_usd=cost,
                            stop_reason=stop_reason_of(resp))
     except Exception as e:
-        return MatchAnswer(text=f"(Answer call failed: {e})", model=model)
+        _log.exception("Matchmaker answer call failed (kind=%s model=%s)", kind, model)
+        return MatchAnswer(failed=True, error=f"Answer call failed: {e}", model=model)
 
 
 def answer_communities_question(lib: Library, question: str,

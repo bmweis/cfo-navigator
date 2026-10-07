@@ -112,6 +112,7 @@ from webapp.ask_orchestrator import (
 )
 from webapp.matchmaker_orchestrator import (
     ForbiddenConversationError as _MatchmakerForbiddenConversationError,
+    MatchmakerTurnFailed as _MatchmakerTurnFailed,
     UnknownConversationError as _MatchmakerUnknownConversationError,
     run_matchmaker,
 )
@@ -274,5 +275,7 @@ def register_qa_tools(mcp: FastMCP, lib_factory: Callable[[], Library], opml_pat
                 raise ToolError(f"unknown conversation_id: {conversation_id!r}")
             except _MatchmakerForbiddenConversationError:
                 raise ToolError("that conversation belongs to a different user or session")
+            except _MatchmakerTurnFailed as e:
+                raise ToolError(e.message)
         finally:
             lib.close()
