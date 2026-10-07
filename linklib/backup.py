@@ -88,6 +88,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -255,7 +256,7 @@ def _list_backup_files(token: str, folder_id: str) -> list[dict]:
     return r.json().get("files", [])
 
 
-def list_snapshots(token: str, folder_id: str) -> list[dict]:
+def list_snapshots(token: str, folder_id: str, timeout: float = 30) -> list[dict]:
     """Every non-trashed file in the backup folder with its size and md5,
     newest first. Used by scripts/restore_from_drive.py. Under the
     drive.file scope this only ever returns files the app itself created
@@ -268,7 +269,7 @@ def list_snapshots(token: str, folder_id: str) -> list[dict]:
                 "fields": "files(id,name,createdTime,size,md5Checksum)",
                 "orderBy": "createdTime desc",
                 "pageSize": 1000},
-        timeout=30,
+        timeout=timeout,
     )
     r.raise_for_status()
     return r.json().get("files", [])
@@ -463,7 +464,110 @@ def _access_token() -> str:
     return r.json()["access_token"]
 
 
+# One backup at a time. A non-blocking lock, not a queue: the admin button, a
+# double click and the daily cron request must never overlap, because each run
+# builds a snapshot of the whole database (about 254 MB) and a second one
+# alongside it would double the memory and disk use. The app is a single
+# uvicorn process, so a process-level lock is enough.
+_BACKUP_LOCK = threading.Lock()
+
+
+class BackupBusy(RuntimeError):
+    """Another backup is already running in this process. Not a failure:
+    nothing is logged to backup_log for it."""
+
+
+def backup_is_running() -> bool:
+    return _BACKUP_LOCK.locked()
+
+
+class _MultipartBody:
+    """Streams the Drive multipart/related body (metadata part, the snapshot
+    file, closing boundary) without reading the file into memory. Has
+    __len__ so requests sends Content-Length instead of chunked encoding,
+    and __iter__ so requests treats it as a stream."""
+
+    def __init__(self, head: bytes, path: str, tail: bytes, chunk: int = 1 << 20):
+        self._head, self._path, self._tail, self._chunk = head, path, tail, chunk
+        self._size = os.path.getsize(path)
+
+    def __len__(self) -> int:
+        return len(self._head) + self._size + len(self._tail)
+
+    def __iter__(self):
+        yield self._head
+        with open(self._path, "rb") as f:
+            while True:
+                part = f.read(self._chunk)
+                if not part:
+                    break
+                yield part
+        yield self._tail
+
+
+def plain_error(err: str) -> str:
+    """A plain-language reading of a stored backup_log error, for the admin
+    page. The raw text stays in backup_log (and Railway's logs) for debugging;
+    the page never shows it."""
+    e = (err or "").lower()
+    if "not configured" in e:
+        return "Google Drive backup is not set up. The three GOOGLE_OAUTH variables are missing."
+    if "integrity check" in e:
+        return "The database failed its integrity check, so no backup was made. Nothing was uploaded."
+    if "timed out" in e or "timeout" in e:
+        return "Google Drive did not answer in time. Try again in a few minutes."
+    if "401" in e or "403" in e or "invalid_grant" in e or "unauthorized" in e:
+        return "Google refused the sign-in. The Drive login may need to be set up again."
+    if "404" in e:
+        return "Google could not find the backup folder."
+    if "connection" in e or "max retries" in e:
+        return "The app could not reach Google Drive. Try again in a few minutes."
+    return "The backup did not finish. The Railway logs have the details."
+
+
+def list_for_display(db_path: str, timeout: float = 10.0) -> dict:
+    """Backups the app can see in its Drive folder, for the admin page.
+    Never raises: returns {"ok": bool, "files": [...], "message": str}.
+    Short timeouts so a slow Drive cannot hang the page."""
+    if not is_configured():
+        return {"ok": False, "files": [],
+                "message": "Google Drive backup is not set up, so there is nothing to list."}
+    try:
+        folder_id = known_folder_id(db_path)
+        if not folder_id:
+            return {"ok": True, "files": [], "message": ""}
+        r = requests.post(
+            _TOKEN_URL,
+            data={"grant_type": "refresh_token",
+                  "refresh_token": os.environ["GOOGLE_OAUTH_REFRESH_TOKEN"],
+                  "client_id": os.environ["GOOGLE_OAUTH_CLIENT_ID"],
+                  "client_secret": os.environ["GOOGLE_OAUTH_CLIENT_SECRET"]},
+            timeout=timeout)
+        r.raise_for_status()
+        token = r.json()["access_token"]
+        files = list_snapshots(token, folder_id, timeout=timeout)
+    except Exception as e:
+        print(f"[backup] drive list failed: {e}")
+        return {"ok": False, "files": [],
+                "message": "Could not reach Google Drive just now. Reload the page to try again."}
+    out = [{"id": f.get("id", ""), "name": f.get("name", ""),
+            "size": int(f.get("size") or 0), "created": f.get("createdTime", "")}
+           for f in files]
+    return {"ok": True, "files": out, "message": ""}
+
+
 def backup_now(db_path: str) -> dict:
+    """Take a snapshot and upload it to Google Drive, one run at a time.
+    Raises BackupBusy (and logs nothing) if another backup is in progress."""
+    if not _BACKUP_LOCK.acquire(blocking=False):
+        raise BackupBusy("A backup is already running")
+    try:
+        return _backup_now_locked(db_path)
+    finally:
+        _BACKUP_LOCK.release()
+
+
+def _backup_now_locked(db_path: str) -> dict:
     """Take a snapshot and upload it to Google Drive.
     Returns {name, bytes, drive_file_id, row_count}.
 
@@ -507,43 +611,43 @@ def backup_now(db_path: str) -> dict:
         tmp = snapshot_to_file(db_path)
         try:
             row_count = _article_count(tmp)
-            with open(tmp, "rb") as f:
-                data = f.read()
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            name = f"library-{stamp}.db"
+
+            token = _access_token()
+            folder_id = _resolve_folder_id(db_path, token)
+            metadata = {"name": name, "parents": [folder_id]}
+
+            # Drive's multipart upload wants a metadata JSON part + a media part,
+            # joined by a boundary — there's no `requests` helper for this shape
+            # (it's multipart/related, not the multipart/form-data used elsewhere).
+            # The file part is streamed from disk, never held in memory.
+            boundary = uuid.uuid4().hex
+            head = (
+                f"--{boundary}\r\n"
+                f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+                f"{json.dumps(metadata)}\r\n"
+                f"--{boundary}\r\n"
+                f"Content-Type: application/octet-stream\r\n\r\n"
+            ).encode("utf-8")
+            body = _MultipartBody(head, tmp, f"\r\n--{boundary}--".encode("utf-8"))
+            size = os.path.getsize(tmp)
+
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": f"multipart/related; boundary={boundary}",
+            }
+            # fields=id,name pins what the response body includes — Drive's
+            # default response shape isn't guaranteed to carry `id`, and the
+            # admin UI's Drive link depends on it.
+            r = requests.post(f"{_UPLOAD_URL}&fields=id,name", headers=headers, data=body, timeout=(30, 600))
+            r.raise_for_status()
         finally:
             os.remove(tmp)
-
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        name = f"library-{stamp}.db"
-
-        token = _access_token()
-        folder_id = _resolve_folder_id(db_path, token)
-        metadata = {"name": name, "parents": [folder_id]}
-
-        # Drive's multipart upload wants a metadata JSON part + a media part,
-        # joined by a boundary — there's no `requests` helper for this shape
-        # (it's multipart/related, not the multipart/form-data used elsewhere).
-        boundary = uuid.uuid4().hex
-        body = (
-            f"--{boundary}\r\n"
-            f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
-            f"{json.dumps(metadata)}\r\n"
-            f"--{boundary}\r\n"
-            f"Content-Type: application/octet-stream\r\n\r\n"
-        ).encode("utf-8") + data + f"\r\n--{boundary}--".encode("utf-8")
-
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": f"multipart/related; boundary={boundary}",
-        }
-        # fields=id,name pins what the response body includes — Drive's
-        # default response shape isn't guaranteed to carry `id`, and the
-        # admin UI's Drive link depends on it.
-        r = requests.post(f"{_UPLOAD_URL}&fields=id,name", headers=headers, data=body, timeout=120)
-        r.raise_for_status()
         drive_file_id = r.json().get("id", "")
-        result = {"name": name, "bytes": len(data), "drive_file_id": drive_file_id, "row_count": row_count}
+        result = {"name": name, "bytes": size, "drive_file_id": drive_file_id, "row_count": row_count}
         _log_attempt(db_path, status="success", filename=name, drive_file_id=drive_file_id,
-                     size_bytes=len(data), row_count=row_count)
+                     size_bytes=size, row_count=row_count)
         prune_result = prune_old_backups(db_path)
         if prune_result["deleted"]:
             print(f"[backup] pruned {prune_result['deleted']} old snapshot(s), "

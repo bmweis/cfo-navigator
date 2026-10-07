@@ -324,7 +324,9 @@ def test_admin_backup_page_shows_amber_banner_on_last_failure(admin_client, monk
     lib.close()
     r = client.get("/admin/library-backup")
     assert "failed" in r.text.lower()
-    assert "token expired" in r.text
+    # The page shows a plain-language reading; the raw text stays in backup_log.
+    assert "The backup did not finish" in r.text
+    assert "token expired" not in r.text
 
 
 def test_admin_backup_page_folder_line_before_any_run(admin_client, monkeypatch):

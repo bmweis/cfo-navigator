@@ -33,7 +33,7 @@ Safe by default: if the destination exists it refuses to replace it
 unless --yes-replace-live is passed. A destination that does not exist
 (a scratch path, or a volume that was lost) needs no flag.
 
-Side effects of the old UI path (/admin/library-backup/upload-db) and how
+Side effects of the old UI upload path (removed 2026-10) and how
 this script handles each:
   * validate before swapping (SELECT COUNT(*) FROM articles): done, plus
     integrity_check and the FTS5 self-check.

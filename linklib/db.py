@@ -897,7 +897,7 @@ CREATE INDEX IF NOT EXISTS idx_contact_audit_created ON contact_audit_log(create
 -- populated on failure only. row_count is SELECT COUNT(*) FROM articles
 -- against the snapshot at backup time — the sanity check the Phase O
 -- investigation recommended, reusing the same check the restore path
--- (/admin/library-backup/upload-db) already runs on upload.
+-- (the old upload route, since removed) used to run on upload.
 CREATE TABLE IF NOT EXISTS backup_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     status        TEXT NOT NULL,              -- 'success' | 'failure'
