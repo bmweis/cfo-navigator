@@ -106,18 +106,14 @@ def test_tools_landing_admin_sees_reader_access_card(env):
     assert reader_start > grid_end
 
 
-def test_reader_access_card_matches_homepage_verbatim(env):
-    """PR 16: both cards share _reader_access_card_html() — same copy, same
-    markup, no target="_blank" (unlike the old /tools-only 5th tile, which
-    opened in a new tab and had different, less accurate copy)."""
-    import re
-    tools_html = _admin_client(env).get("/tools").text
+def test_homepage_no_longer_carries_the_reader_card(env):
+    """2026-10: the homepage swapped the big card for a compact .admin-only
+    "Open reader" control; /tools keeps the card (_reader_access_card_html)."""
     home_html = _admin_client(env).get("/").text
-    pattern = re.compile(r'<a href="/read".*?</a>', re.S)
-    tools_card = pattern.search(tools_html).group(0)
-    home_card = pattern.search(home_html).group(0)
-    assert tools_card == home_card
-    assert 'target="_blank"' not in tools_card
+    tools_html = _admin_client(env).get("/tools").text
+    assert "Reader access" not in home_html and "Open reader" in home_html
+    assert "Reader access" in tools_html
+    assert 'target="_blank"' not in tools_html[tools_html.index("Reader access") - 400:tools_html.index("Reader access")]
 
 
 def test_homepage_has_toolbox_teaser_section(env):

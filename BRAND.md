@@ -71,8 +71,9 @@ measured on the `#F5F4EF` canvas.
    ghost buttons stay; the outlined look is for admin-only controls on pages other people
    can see. (The edit-page action buttons moved to `.admin-only` when the old
    `.tool-admin-btn` class was retired, so they now share this one look.)
-   The Reader box (`_reader_access_card_html`) is a surface, not a control: it keeps a seafoam
-   fill with a 1px `--seafoam-deep` border.
+   The Reader box (`_reader_access_card_html`, now on `/tools` only) is a surface, not a control: it keeps a seafoam
+   fill with a 1px `--seafoam-deep` border. The homepage uses a compact `.admin-only` "Open reader" link
+   (`_reader_open_control_html`) with the visible words "Admin only" beside it.
    **On/off switch** (`.sw`, one class in the sitewide stylesheet, built by `_switch_html`): a 38x22 `role="switch"` button, `--seafoam-deep` track with a white knob when on, `--line-strong` grey when off. A disabled switch is always grey and says why in a short word beside it (In use, Locked, or a "Test first" flag), never in a tooltip. First used on the Allowed roles card of `/admin/system/ai`. The CI-quota switch on `/admin/checks` is separate markup in `admin_checks()`, not built from `_switch_html`.
    **Admin-only status:** "⊘ Hidden" on a past-question row is a status chip, not a control; see Status chips in section 5.
 
@@ -137,8 +138,9 @@ cycled seafoam/navy/coral by loop index for every card-row/tile grid sitewide �
 whichever card happened to land in the third slot "spent" the one rare accent, not by
 anyone's deliberate choice. Coral is dropped from that cycle entirely now (every such
 grid cycles seafoam/navy only); the one deliberate coral use on `/tools` and the homepage
-is the MCP capability callout (`_mcp_callout_html`), a non-clickable statement, never a
-button.
+is the MCP capability callout on `/tools` (`_mcp_callout_html`), a non-clickable statement,
+never a button. The homepage's Toolbox card carries the same idea as plain muted text
+(`_mcp_plain_note_html`, 2026-10), so the homepage has no coral background at all.
 
 **Original Content flagship-card eyebrow — semantic, not positional (2026-09).** A
 separate, unrelated cycle (`_OC_TAG_COLORS` — never shared code with `_CARD_ICON_STYLES`
@@ -1002,7 +1004,7 @@ exists to prevent:
   begin with — catalog size changes a badge number, never the layout.
 - **Homepage sidebar panel and Recent highlights** — the Toolbox panel is
   one fixed-360px card, nothing to distribute; Recent highlights is a
-  fixed 2-column grid capped at 4 hand-curated featured pieces (any mix
+  one row of three equal columns, full content width under both homepage columns (a container query: three columns at 960px of container width or more, so cards are at least about 300px, else one), capped at 3 hand-curated featured pieces (`Library.HOME_HIGHLIGHTS_CAP`), summaries shown in full, no clamp (any mix
   of types — no longer one per thought-leadership type, see CLAUDE.md's
   "Recent highlights" bullet), and collapses entirely (heading and grid
   both) rather than stretching when there's nothing to show.

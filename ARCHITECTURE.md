@@ -3941,8 +3941,8 @@ one (id 35) ever showed; id 34's checkbox had no visible effect.
 
 `get_thought_leadership_representative` is deleted outright (no other
 caller existed — confirmed by grep before removing it). In its place,
-`Library.list_thought_leadership_featured_home()` returns up to 4
-`featured_home=1` rows, **any mix of types**, `LIMIT 4` (never asserted —
+`Library.list_thought_leadership_featured_home()` returns up to 3
+(`HOME_HIGHLIGHTS_CAP`, was 4 until 2026-10) `featured_home=1` rows, **any mix of types**, `LIMIT 4` (never asserted —
 a theoretical 5th featured row, from a direct DB write or a race between
 two admin tabs, still renders as exactly 4 on the public homepage rather
 than taking the page down over an admin data condition; the cap of 4 is
@@ -11569,3 +11569,17 @@ a "Live + CI" row in the Voice and copy theme) reads that one settings row, is
 not behind `cached_static_check`, and renders no routes. The Admin badge counts it
 once, through `tasks._stale_admin_checks_reminders` (a live settings read).
 The row is a "Live + CI" row, so the failing-checks count (`_compute_failing_checks_count`) already counts it; it is deliberately not also in `_stale_admin_checks_reminders`, or it would count twice.
+
+
+**Homepage polish (2026-10).** (1) The Toolbox card's MCP line is plain muted text
+(`_mcp_plain_note_html`, in code, no settings row); `/tools` keeps the coral callout.
+(2) Recent highlights is a full-width row under both homepage columns: on desktop
+`.home-tl-section` is `display:contents`, so `.home-tl-main` (left column), the highlights
+wrap and the See-all link are placed in separate grid rows; below 1024px the section is an
+ordinary block and the phone order is unchanged. (3) Hard limits: `Library.HOME_HIGHLIGHTS_CAP`
+= 3 and `HOME_ORIGINAL_CONTENT_CAP` = 4, one named constant each, read by the write-route
+refusal, the render `LIMIT` and the admin slot line (`_home_slot_*` helpers). Only a newly
+set flag takes a slot; Original content counts the flag, not the status, so going Live is
+never blocked. (4) The hub lists Original content before Third-party content. (5) The three
+`/admin/copy/*` pages share `_ADMIN_COPY_AUTOGROW_JS` (textareas with class `copy-autogrow`).
+(6) The homepage's admin-only Reader card is a compact `.admin-only` "Open reader" link.

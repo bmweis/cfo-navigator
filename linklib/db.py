@@ -7543,36 +7543,42 @@ class Library:
     # last, display_order as tiebreaker.
     _TL_FEATURED_ORDER_SQL = "sort_key DESC, display_order ASC"
 
+    # The homepage "Recent highlights" row is one row of three columns.
+    # One named constant, read by the write-route refusal, the render query
+    # and the admin slot line, so the three can't disagree.
+    HOME_HIGHLIGHTS_CAP = 3
+
     def count_featured_home(self, exclude_id: int | None = None) -> int:
         """How many thought_leadership rows currently have featured_home=1.
         `exclude_id` (load-bearing for an edit-form save) leaves one row's
         own current state out of the count, so re-saving an already-featured
-        row while all 4 slots are full doesn't trip the cap against itself."""
+        row while every slot is full doesn't trip the cap against itself."""
+        return len(self.list_featured_home_flagged(exclude_id=exclude_id))
+
+    def list_featured_home_flagged(self, exclude_id: int | None = None) -> list[dict]:
+        """EVERY thought_leadership row flagged featured_home=1, in the
+        homepage's own order (_TL_FEATURED_ORDER_SQL), uncapped. The render
+        takes the first HOME_HIGHLIGHTS_CAP; the admin page uses the rest to
+        name what the homepage is hiding."""
+        sql = "SELECT * FROM thought_leadership WHERE featured_home = 1"
+        args: tuple = ()
         if exclude_id is not None:
-            row = self.conn.execute(
-                "SELECT COUNT(*) FROM thought_leadership WHERE featured_home = 1 AND id != ?",
-                (exclude_id,),
-            ).fetchone()
-        else:
-            row = self.conn.execute(
-                "SELECT COUNT(*) FROM thought_leadership WHERE featured_home = 1"
-            ).fetchone()
-        return row[0]
+            sql += " AND id != ?"
+            args = (exclude_id,)
+        rows = self.conn.execute(f"{sql} ORDER BY {self._TL_FEATURED_ORDER_SQL}", args).fetchall()
+        return [dict(r) for r in rows]
 
     def list_thought_leadership_featured_home(self) -> list[dict]:
-        """The homepage's "Recent highlights" set: up to 4 curated pieces,
-        any mix of types, in _TL_FEATURED_ORDER_SQL order. `LIMIT 4` here —
-        not an assert — is what makes a theoretical 5th featured row (a
-        direct DB write, a race between two admin tabs; the cap is enforced
-        at the write routes, not here) harmless: the public homepage still
-        renders exactly 4 and nothing breaks, rather than taking the page
-        down over an admin data condition. See the write routes' own
-        comments for why no lock guards the check-then-act race — it isn't
-        worth one for a single-admin tool, and this LIMIT is the actual
-        backstop."""
+        """The homepage's "Recent highlights" set: up to HOME_HIGHLIGHTS_CAP
+        curated pieces, any mix of types, in _TL_FEATURED_ORDER_SQL order.
+        The LIMIT here (not an assert) is the render backstop: a flagged row
+        beyond the cap (a direct DB write, a script, a race between two
+        admin tabs; the cap is enforced at the write routes, not here) is
+        harmless, the public homepage still renders exactly the cap and
+        nothing breaks. The admin page names whatever this hides."""
         rows = self.conn.execute(
             f"SELECT * FROM thought_leadership WHERE featured_home = 1 "
-            f"ORDER BY {self._TL_FEATURED_ORDER_SQL} LIMIT 4"
+            f"ORDER BY {self._TL_FEATURED_ORDER_SQL} LIMIT {int(self.HOME_HIGHLIGHTS_CAP)}"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -7648,6 +7654,20 @@ class Library:
         return [dict(r) for r in rows]
 
     HOME_ORIGINAL_CONTENT_CAP = 4
+
+    def list_original_content_featured_flagged(self, exclude_id: int | None = None) -> list[dict]:
+        """EVERY original_content row flagged featured_home=1, any status, in
+        the homepage's order (_OC_ORDER_SQL), uncapped. Status is ignored on
+        purpose: the slot is held by the FLAG, so going Live never changes
+        the count and can never be blocked by it. The render still shows
+        only live ones (list_original_content_for_home)."""
+        sql = "SELECT * FROM original_content WHERE featured_home = 1"
+        args: tuple = ()
+        if exclude_id is not None:
+            sql += " AND id != ?"
+            args = (exclude_id,)
+        rows = self.conn.execute(f"{sql} ORDER BY {self._OC_ORDER_SQL}", args).fetchall()
+        return [dict(r) for r in rows]
 
     def list_original_content_for_home(self) -> list[dict]:
         """The homepage's Original content block: live pieces flagged
