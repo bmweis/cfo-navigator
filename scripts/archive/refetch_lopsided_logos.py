@@ -56,10 +56,10 @@ logo_path (and, for a changed asset, the new file's own dimensions) match
 what was intended.
 
 Usage:
-    python -m scripts.refetch_lopsided_logos --db /data/library.db            # preview, zero API calls
-    python -m scripts.refetch_lopsided_logos --db /data/library.db --apply     # fetch + save for real
-    python -m scripts.refetch_lopsided_logos --db /data/library.db --apply --limit 20
-    python -m scripts.refetch_lopsided_logos --db /data/library.db --max-ratio 2.0
+    python -m scripts.archive.refetch_lopsided_logos --db /data/library.db            # preview, zero API calls
+    python -m scripts.archive.refetch_lopsided_logos --db /data/library.db --apply     # fetch + save for real
+    python -m scripts.archive.refetch_lopsided_logos --db /data/library.db --apply --limit 20
+    python -m scripts.archive.refetch_lopsided_logos --db /data/library.db --max-ratio 2.0
 
 Requires LOGODEV_API_KEY in the environment for --apply (not required for
 a preview run).
