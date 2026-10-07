@@ -93,7 +93,7 @@ def test_second_click_is_refused_while_a_backup_runs(env):
         r = admin.post("/admin/library-backup/run", follow_redirects=False)
         assert r.headers["location"] == "/admin/library-backup?busy=1"
         page = admin.get("/admin/library-backup?busy=1").text
-        assert "A backup is already running." in page
+        assert "A backup or restore is already running." in page
         assert "Backup running" in page
     finally:
         backup._BACKUP_LOCK.release()
