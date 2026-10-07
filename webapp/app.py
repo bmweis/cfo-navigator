@@ -28664,9 +28664,11 @@ def admin_system_ai_allowed_roles_confirm(model_id: str, role: str, request: Req
 
 
 
-_PRICE_W_RATE = 96   # a USD-per-million rate (a number or "empty"), header up to "Cache write 1h" wraps to two lines
-_PRICE_W_STATUS = _COL_WIDTH_STATUS_AGE
-_PRICE_W_USEDBY = 150
+_PRICE_W_MODEL = 230   # label, then the exact id on its own line; a long id wraps instead of reaching the Input column
+_PRICE_W_RATE = 84     # a USD-per-million rate (a number or "empty"), header up to "Cache write 1h" wraps to two lines
+_PRICE_W_STATUS = _COL_WIDTH_STATUS_AGE   # the Verified, Stale or Unverified chip
+_PRICE_W_AVAIL = 112   # the catalog availability chip (Available, Not using, Deactivated)
+_PRICE_W_USEDBY = 130
 _PRICE_W_EDIT = 90
 
 
@@ -28678,6 +28680,18 @@ def _pricing_chip(r) -> str:
     when = f' {_esc(r["verified_on"])}' if r["verified_on"] else ""
     return (f'<span style="display:inline-block;background:{bg};color:var(--navy);border-radius:6px;'
             f'padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap;">{word}{when}</span>')
+
+
+def _availability_chip(status: str) -> str:
+    """The catalog status (available, not using, deactivated) as its own chip. It is a different
+    fact from the Verified, Stale or Unverified pricing chip, so it uses a neutral fill and a
+    border instead of seafoam or coral (deactivated has a navy border)."""
+    word, bg, edge = {"available": ("Available", "var(--navy-wash)", "var(--line)"),
+                      "not_using": ("Not using", "var(--bg)", "var(--line)"),
+                      "deactivated": ("Deactivated", "var(--surface)", "var(--navy)")}.get(
+        status, (status.replace("_", " ").capitalize(), "var(--bg)", "var(--line)"))
+    return (f'<span style="display:inline-block;background:{bg};color:var(--navy);border:1px solid {edge};'
+            f'border-radius:6px;padding:1px 8px;font-size:11px;font-weight:600;white-space:nowrap;">{_esc(word)}</span>')
 
 
 def _pricing_flag(cat: dict) -> str:
@@ -28750,7 +28764,6 @@ def _model_pricing_card_html(rows: list[dict], status: dict, role_info: dict) ->
     for r in rows:
         mid = r["model_id"]
         cat = status.get(mid, {})
-        stat = cat.get("status", "available").replace("_", " ")
         flag = _pricing_flag(cat)
         flag_html = f'<div style="margin-top:4px;">{flag}</div>' if flag else ""
         notes = _pricing_notes_text(r, cat)
@@ -28761,16 +28774,18 @@ def _model_pricing_card_html(rows: list[dict], status: dict, role_info: dict) ->
                       + '</details>')
         body.append(
             f'<tr><td><div style="font-weight:600;">{_esc(_enrich_model_label(mid))}</div>'
-            f'<div style="font-size:12.5px;color:var(--muted);">{_esc(mid)} &middot; {_esc(stat)}</div>'
+            f'<div style="font-size:12.5px;color:var(--muted);overflow-wrap:anywhere;">{_esc(mid)}</div>'
             f'{flag_html}</td>'
             f'{_pricing_rates(r)}<td>{_pricing_chip(r)}{notes_html}</td>'
+            f'<td>{_availability_chip(cat.get("status", "available"))}</td>'
             f'<td style="font-size:13px;">{_esc(_pricing_used_by(role_info.get(mid)))}</td>'
             f'<td>{_pricing_edit(r, cat)}</td></tr>')
-    heads = [("Model", 240)] + [(lbl, _PRICE_W_RATE) for _, lbl in _PRICE_COLS] + [("Status", _PRICE_W_STATUS), ("Used by", _PRICE_W_USEDBY), ("Edit", _PRICE_W_EDIT)]
+    heads = ([("Model", _PRICE_W_MODEL)] + [(lbl, _PRICE_W_RATE) for _, lbl in _PRICE_COLS]
+             + [("Status", _PRICE_W_STATUS), ("Availability", _PRICE_W_AVAIL), ("Used by", _PRICE_W_USEDBY), ("Edit", _PRICE_W_EDIT)])
     colgroup = "<colgroup>" + "".join(f'<col style="width:{w}px;">' for _, w in heads) + "</colgroup>"
     head = "".join(f"<th>{t}</th>" for t, _ in heads)
     return (f'<div id="model-pricing" style="scroll-margin-top:16px;">{_pricing_intro()}'
-            f'<div class="table-frame" style="overflow-x:auto;"><table style="min-width:1180px;table-layout:fixed;">{colgroup}<thead><tr>{head}</tr></thead>'
+            f'<div class="table-frame" style="overflow-x:auto;"><table style="width:100%;min-width:{sum(w for _, w in heads)}px;table-layout:fixed;">{colgroup}<thead><tr>{head}</tr></thead>'
             f'<tbody>{"".join(body)}</tbody></table></div></div>')
 
 
