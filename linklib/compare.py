@@ -494,6 +494,7 @@ MCP_PARITY: dict[str, str] = {
     "tools.description_ai_confident": _ADMIN_FLAG,
     "tools.competitive_differentiation_ai_confident": _ADMIN_FLAG,
     "tools.agent_taxonomy_ai_confident": _ADMIN_FLAG,
+    "tools.research_refusal": "admin-only: why on-add research drafted nothing (issue #696)",
     "tools.description_low_confidence": _ADMIN_FLAG,
     "tools.competitive_differentiation_low_confidence": _ADMIN_FLAG,
     "tools.agent_taxonomy_low_confidence": _ADMIN_FLAG,

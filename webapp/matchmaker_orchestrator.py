@@ -33,6 +33,24 @@ _BROWSE_URLS = {
 }
 
 
+# What an asker sees when a turn fails. Plain on purpose: no exception text, no
+# model id. The raw detail is logged by linklib.matchmaker. Mirrors
+# ask_orchestrator.FAILED_TURN_MESSAGE (#700).
+FAILED_TURN_MESSAGE = "Couldn't answer that just now. Try again in a moment."
+
+
+class MatchmakerTurnFailed(Exception):
+    """The answer call did not produce an answer. Nothing was recorded: a
+    failed call has no usage to count, and a saved failure would be fed back
+    to the model as an earlier answer on the next follow-up. Each caller turns
+    this into its own error shape: a 502 for the two find/chat routes, a tool
+    error for the MCP tool."""
+
+    def __init__(self, message: str = FAILED_TURN_MESSAGE):
+        super().__init__(message)
+        self.message = message
+
+
 class UnknownConversationError(Exception):
     """`conversation_id` doesn't match any recorded matchmaker_questions rows."""
 
@@ -60,7 +78,8 @@ def run_matchmaker(
     payload-shape concern the caller owns.
 
     Raises `UnknownConversationError`/`ForbiddenConversationError` for a
-    bad `conversation_id`. Otherwise always returns a dict — either the
+    bad `conversation_id`, and `MatchmakerTurnFailed` when the answer call
+    fails (nothing is recorded). Otherwise always returns a dict — either the
     `{"capped": True, "answer": ...}` shape (dollar cap or follow-up-count
     cap hit) or the full answer shape (answer/conversation_id/
     followups_left) — matching the two routes' JSON response contract
@@ -123,6 +142,8 @@ def run_matchmaker(
         }
 
     ans = answer_fn(lib, question, history=history)
+    if ans.failed:
+        raise MatchmakerTurnFailed()
 
     row_id = lib.record_matchmaker_question(
         session_id, kind, question, ans.text, ans.model,

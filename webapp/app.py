@@ -100,6 +100,7 @@ from webapp.ask_orchestrator import (
 )
 from webapp.matchmaker_orchestrator import (
     ForbiddenConversationError as _MatchmakerForbiddenConversationError,
+    MatchmakerTurnFailed as _MatchmakerTurnFailed,
     UnknownConversationError as _MatchmakerUnknownConversationError,
     run_matchmaker,
 )
@@ -10009,6 +10010,9 @@ async def tools_software_find_chat(request: Request):
             raise HTTPException(status_code=404, detail="unknown conversation")
         except _MatchmakerForbiddenConversationError:
             raise HTTPException(status_code=403, detail="not your conversation")
+        except _MatchmakerTurnFailed as e:
+            # A plain message only; the raw error stays in the server log.
+            return JSONResponse({"detail": e.message, "failed": True}, status_code=502)
         resp = JSONResponse(body)
         _set_visitor_cookie(request, resp, session_id)
         return resp
@@ -12232,6 +12236,9 @@ async def tools_communities_find_chat(request: Request):
             raise HTTPException(status_code=404, detail="unknown conversation")
         except _MatchmakerForbiddenConversationError:
             raise HTTPException(status_code=403, detail="not your conversation")
+        except _MatchmakerTurnFailed as e:
+            # A plain message only; the raw error stays in the server log.
+            return JSONResponse({"detail": e.message, "failed": True}, status_code=502)
         resp = JSONResponse(body)
         _set_visitor_cookie(request, resp, session_id)
         return resp
@@ -20303,7 +20310,38 @@ def _on_add_note_html() -> str:
     )
 
 
+def _on_add_refusal_text(reason: str, url: str) -> str:
+    """Plain-language note stored on a tool whose on-add research drafted
+    nothing (issue #696), shown on its edit page."""
+    if reason.startswith(_UNCITED_PREFIX):
+        return _uncited_draft_message("agent_taxonomy", reason[len(_UNCITED_PREFIX):]).replace(
+            "nothing was changed: the existing text and its Sources are kept.",
+            "no draft was saved.")
+    if reason:
+        return (f"Couldn't fetch usable content from {url} ({reason}), so no {tool_labels.AGENT} draft "
+                f"was saved. Write it by hand, or fix the URL and use Generate summary.")
+    return (f"The automatic research pass for {tool_labels.AGENT} didn't complete (the AI service, "
+            f"API key or SDK may have been unavailable), so no draft was saved. Use Generate summary to retry.")
+
+
 def _run_tool_research(tool_id: int, on_add: bool = False) -> tuple[bool, str, str]:
+    """On-add wrapper (issue #696): the background job has no UI, so any
+    non-ok outcome is also stored on the tool for the admin to see."""
+    ok, reason, url = _run_tool_research_inner(tool_id, on_add)
+    if on_add and not ok:
+        lib = _lib()
+        try:
+            tool = lib.get_tool(tool_id)
+            if tool:
+                lib.set_tool_research_refusal(tool_id, _on_add_refusal_text(reason, url or tool["url"]))
+        except Exception as e:
+            print(f"[_run_tool_research:{tool_id}] could not record the refusal: {e}")
+        finally:
+            lib.close()
+    return ok, reason, url
+
+
+def _run_tool_research_inner(tool_id: int, on_add: bool = False) -> tuple[bool, str, str]:
     """Automated agent-taxonomy research for one Software entry — the shared
     drafting logic behind both trigger points confirmed for the
     search-overhaul automation follow-up: fired off-request via
@@ -20798,6 +20836,14 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
         _research_banner_html = ('<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
                                  'padding:10px 16px;font-size:14px;margin:0 0 16px;">Couldn\'t complete the research pass—'
                                  'the site may block fetches, or the Anthropic API key/SDK is unavailable. Try again later.</p>')
+    if not _research_banner_html and tool.get("research_refusal"):
+        # Issue #696: the automatic on-add research drafted nothing; say why,
+        # as visible text, until a draft or a hand-written note replaces it.
+        _research_banner_html = (
+            '<p style="background:var(--coral-wash);color:var(--navy);border-radius:10px;'
+            'padding:10px 16px;font-size:14px;margin:0 0 16px;">'
+            f'{_esc(tool["research_refusal"])}</p>'
+        )
 
     # Needs-verification badge / Mark verified button / hidden verify-form /
     # "Verified by X on Y" line — shown regardless of whether the field

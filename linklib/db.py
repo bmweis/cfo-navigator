@@ -2453,6 +2453,13 @@ class Library:
             # unchanged) — this is a second, independent admin-facing fact,
             # not a replacement for either existing mechanism.
             "ALTER TABLE tools ADD COLUMN agent_taxonomy_ai_confident INTEGER",
+            # Issue #696 (2026-10): why the on-add background research left
+            # this tool with no Agent taxonomy draft. That job has no UI, so
+            # a refusal (uncited twice, page unreadable, or any failure) only
+            # reached stdout. Plain text for the admin, '' = nothing to
+            # report. Written only by the on-add job, cleared by any
+            # successful draft or a hand-written note, never on page view.
+            "ALTER TABLE tools ADD COLUMN research_refusal TEXT NOT NULL DEFAULT ''",
             # Quality-indicator visibility (item 6, Aug 2026 UI pass) —
             # persists the OTHER signal every generate_tool_* draft already
             # returns (draft.low_confidence: "the page fetch failed / no
@@ -6405,6 +6412,13 @@ class Library:
         )
         self.conn.commit()
 
+    def set_tool_research_refusal(self, tool_id: int, message: str) -> None:
+        """Record (or, with '', clear) why on-add research drafted nothing
+        for this tool (issue #696). Counted by count_tools_needing_attention."""
+        self.conn.execute("UPDATE tools SET research_refusal=?, updated_at=? WHERE id=?",
+                          ((message or "").strip(), _now(), tool_id))
+        self.conn.commit()
+
     def update_tool_agent_taxonomy(self, tool_id: int, agent_taxonomy_note: str, source: str | None = None) -> None:
         """Narrow update for the admin full-edit form's agent-taxonomy field
         (Phase 5) — same bulk-edit-safety reasoning as update_tool_differentiation.
@@ -6439,8 +6453,9 @@ class Library:
             changed = norm_for_compare(row["agent_taxonomy_note"] if row else None) != norm_for_compare(new_note)
             self.conn.execute(
                 "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=0, "
+                "research_refusal=CASE WHEN ?<>'' THEN '' ELSE research_refusal END, "
                 "updated_at=? WHERE id=?",
-                (new_note, _now(), tool_id),
+                (new_note, new_note, _now(), tool_id),
             )
             if changed:
                 self._write_entity_citations("tool", tool_id, "agent_taxonomy", [], "")
@@ -6481,7 +6496,7 @@ class Library:
             "UPDATE tools SET agent_taxonomy_note=?, agent_taxonomy_needs_verification=?, "
             "agent_taxonomy_ai_confident=COALESCE(?, agent_taxonomy_ai_confident), "
             "agent_taxonomy_low_confidence=COALESCE(?, agent_taxonomy_low_confidence), "
-            "updated_at=? WHERE id=?",
+            "research_refusal='', updated_at=? WHERE id=?",
             (self._vf("tools", tool_id, "agent_taxonomy_note", agent_taxonomy_note.strip(), source=source),
              needs_verification, ai_confident,
              low_confidence, _now(), tool_id),
@@ -6591,7 +6606,8 @@ class Library:
                   OR needs_review=1
                   OR description_needs_verification=1
                   OR agent_taxonomy_needs_verification=1
-                  OR competitive_differentiation_needs_verification=1"""
+                  OR competitive_differentiation_needs_verification=1
+                  OR research_refusal<>''"""
         ).fetchone()[0]
 
     def update_tool_screenshot(self, tool_id: int, screenshot_url: str, screenshot_is_product: int) -> None:
