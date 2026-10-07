@@ -52,14 +52,16 @@ def test_detector_actually_catches_an_injected_second_coral_moment(env, monkeypa
     and the homepage already have) and confirm both pages are flagged."""
     orig = env._mcp_callout_html
 
-    def rigged(*, compact=False):
-        return orig(compact=compact) + '<div style="background:var(--coral-wash);">extra</div>'
+    def rigged():
+        return orig() + '<div style="background:var(--coral-wash);">extra</div>'
 
     monkeypatch.setattr(env, "_mcp_callout_html", rigged)
 
     problems = env.coral_moment_problems()
-    assert any(p.startswith("/ ") for p in problems), problems
+    # The homepage dropped the callout (plain MCP text, 2026-10), so only /tools
+    # carries the coral moment now and only /tools can be pushed over the limit.
     assert any(p.startswith("/tools ") for p in problems), problems
+    assert not any(p.startswith("/ ") for p in problems), problems
 
 
 def test_card_icon_styles_no_longer_cycles_coral(env):
@@ -72,8 +74,7 @@ def test_card_icon_styles_no_longer_cycles_coral(env):
 
 
 def test_mcp_callout_is_coral_not_navy(env):
-    """The freed-up coral moment: the MCP callout is the one deliberate
-    coral use on /tools and the homepage now, not navy."""
+    """The /tools MCP callout is that page's one deliberate coral moment."""
     html = env._mcp_callout_html()
     assert "var(--coral-wash)" in html
     assert "var(--navy-wash)" not in html

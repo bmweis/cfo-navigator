@@ -404,11 +404,11 @@ def test_hero_headline_underlines_strategic_partner_not_last_word(env):
 # --- Featured-homepage cap of 4 (any mix of types), replacing the deleted
 # per-type representative/fallback mechanism above. ---
 
-_CAP_ERROR_TEXT = "Four pieces are already featured on the homepage"
+_CAP_ERROR_TEXT = "All 3 homepage highlight slots are in use"
 
 
 def _feature_four(lib):
-    """4 already-featured rows, spread across types on purpose (the cap is
+    """(Name kept from when the cap was 4; now creates 3.) Already-featured rows, spread across types on purpose (the cap is
     on the total, not per type) — returns their ids in insertion order."""
     return [
         lib.add_thought_leadership("writing", "Feat A", "https://example.com/a",
@@ -417,8 +417,6 @@ def _feature_four(lib):
                                    "SaaStr", "Feb 2026", "2026-02", featured_home=True),
         lib.add_thought_leadership("podcast", "Feat C", "https://example.com/c",
                                    "Cash Flow Show", "Mar 2026", "2026-03", featured_home=True),
-        lib.add_thought_leadership("press", "Feat D", "https://example.com/d",
-                                   "TechCrunch", "Apr 2026", "2026-04", featured_home=True),
     ]
 
 
@@ -434,7 +432,7 @@ def test_fifth_featured_is_refused(env):
         featured_before = lib.count_featured_home()
     finally:
         lib.close()
-    assert featured_before == 4
+    assert featured_before == 3
 
     c = _admin_client(env)
     resp = c.post("/admin/thought-leadership/third-party/new", data={
@@ -465,7 +463,7 @@ def test_fifth_featured_is_refused(env):
     # DB unchanged: no row was inserted at all, and the featured count
     # didn't move.
     assert after_count == before_count
-    assert featured_after == 4
+    assert featured_after == 3
 
 
 def test_editing_already_featured_row_at_cap_succeeds(env):
@@ -498,7 +496,7 @@ def test_editing_already_featured_row_at_cap_succeeds(env):
         lib.close()
     assert it["title"] == "Feat A Renamed"
     assert it["featured_home"] == 1
-    assert featured_after == 4
+    assert featured_after == 3
 
 
 def test_zero_featured_omits_recent_highlights_section_heading(env):
@@ -558,7 +556,7 @@ def test_admin_list_shows_featured_slot_and_count(env):
     finally:
         lib.close()
     html = _admin_client(env).get("/admin/thought-leadership/third-party").text
-    assert "Homepage highlights: 2 of 4 slots used." in html
+    assert "Homepage highlights: 2 of 3 slots used." in html
     # Newest sort_key renders first (slot 1); older featured piece is slot 2.
     newest_idx = html.index("Newest Featured")
     older_idx = html.index("Older Featured")

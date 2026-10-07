@@ -2599,7 +2599,7 @@ def _page(title: str, active: str, body: str, authed: bool = False,
 # the Toolbox panel's Communities mini-tile AND the Recent Highlights grid's
 # Podcasts tile, simultaneously — two accidental coral moments on one
 # screen, worse than the one this was meant to police. The MCP callout
-# (`_mcp_callout_html`) is now the one deliberate coral moment per screen
+# (`_mcp_callout_html`) is now the one deliberate coral moment on /tools
 # instead — see that function's own docstring. Every caller below now
 # cycles seafoam/navy only (`% 2`, not `% 3`).
 _CARD_ICON_STYLES = (
@@ -4702,7 +4702,7 @@ def homepage(request: Request):
         homepage_headline = lib.get_setting("homepage_headline_copy") or _HOMEPAGE_HEADLINE_DEFAULT
         homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
         homepage_status = _homepage_status_text(lib)
-        # Up to 4 curated pieces for the "Recent highlights" grid — any mix
+        # Up to HOME_HIGHLIGHTS_CAP (3) curated pieces for the "Recent highlights" row — any mix
         # of types, Brian's own choice via the `featured_home` checkbox on
         # /admin/thought-leadership/third-party — see
         # list_thought_leadership_featured_home's docstring for the
@@ -4809,7 +4809,19 @@ def homepage(request: Request):
   .tl-featured.tl-featured-home{{grid-template-columns:repeat(2,minmax(0,1fr));}}
 }}
 .home-tl-highlights-label{{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase;margin-bottom:20px;}}
-.home-tl-highlights{{display:grid;grid-template-columns:1fr;gap:32px 40px;}}
+/* Highlights row: one row of three equal columns. Container query, not a
+   viewport breakpoint: the left column is ~560px wide at 1024px and ~820px
+   at 1280px, so the viewport says nothing about the room the cards have. At
+   640px or more of container width the three cards sit side by side (>=190px
+   each); below that they stack straight to one column, never two plus a
+   lone orphan. Rows stretch to equal height (grid default); the summary is
+   clamped to three lines so no card runs away. */
+.home-tl-highlights-wrap{{container-type:inline-size;}}
+.home-tl-highlights{{display:grid;grid-template-columns:minmax(0,1fr);gap:32px 28px;}}
+.home-hl-desc{{font-size:13px;line-height:1.55;color:var(--muted);margin:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}}
+@container (min-width:640px){{
+  .home-tl-highlights{{grid-template-columns:repeat(3,minmax(0,1fr));}}
+}}
 /* 1024px, not the sitewide-standard 900px other sections on this page use—
    deliberately wider so the mobile stacked order (and its photo-card
    placement above) holds through phone landscape too, not just portrait.
@@ -4824,9 +4836,6 @@ def homepage(request: Request):
   .home-avatar-wrap{{width:240px;height:240px;left:40px;top:-16px;}}
   .home-status{{margin-left:-30px;width:calc(100% + 30px);}}
   .home-sidebar-rest{{grid-column:2;grid-row:2;}}
-}}
-@media(min-width:560px){{
-  .home-tl-highlights{{grid-template-columns:1fr 1fr;}}
 }}
 </style>
 <div class="home-grid">
@@ -4881,7 +4890,7 @@ def homepage(request: Request):
       <p style="font-size:14px;line-height:1.5;color:var(--muted);margin:0 0 20px;">Software, benchmarks, books, communities, and an AI research buddy.</p>
       <div class="home-toolbox-rows">{toolbox_rows}</div>
       <a href="/tools" style="display:inline-block;margin-top:22px;font-family:var(--font-body);font-weight:600;font-size:14px;color:var(--navy);text-decoration:none;">See the full toolbox &rarr;</a>
-      {_mcp_callout_html(compact=True)}
+      {_mcp_plain_note_html()}
     </div>
 
     {reader_access_box}
@@ -8769,34 +8778,36 @@ _TOOLS_INTRO_HTML = """<div>
 </div>"""
 
 
-def _mcp_callout_html(*, compact: bool = False) -> str:
-    """Statement of capability, not a CTA — no link, no button, since MCP
-    tokens are minted manually (scripts/mint_api_token.py, via `railway
-    ssh`) with no self-serve flow to send anyone to.
+def _mcp_callout_html() -> str:
+    """The /tools page's MCP capability callout. Statement of capability, not
+    a CTA — no link, no button, since MCP tokens are minted manually
+    (scripts/mint_api_token.py, via `railway ssh`) with no self-serve flow to
+    send anyone to.
 
-    Coral, not navy (reversed, PR 16, 2026-09): this was navy at launch
-    specifically because coral was already spent elsewhere on both call
-    sites — `_CARD_ICON_STYLES` cycled seafoam/navy/coral by array index,
-    and Communities always landed on the coral slot (on /tools directly; on
-    the homepage twice over, via both the Toolbox panel's Communities
-    mini-tile and the "Recent highlights" grid's Podcasts tile). That cycle
-    is gone now (coral dropped from it entirely — see _CARD_ICON_STYLES's
-    own comment), which frees coral up for the placement it was always
-    meant to have: this callout is the one deliberate coral moment per
-    screen on both /tools and the homepage. Same sanctioned coral-wash
-    fill + navy text pairing used throughout this codebase (BRAND.md
-    §2.6's "Navy text on seafoam-wash / coral-wash" row) — never coral-deep text under
-    18px. `compact` tightens padding/font-size for the homepage's Toolbox
-    panel, where the callout sits inside an already-dense card rather than
-    open page whitespace."""
-    pad = "10px 14px" if compact else "14px 18px"
-    size = "13px" if compact else "14px"
-    margin = "margin-top:16px;" if compact else "margin:0 0 24px;"
+    Coral, not navy (reversed, PR 16, 2026-09): this is the one deliberate
+    coral moment on /tools (see _CARD_ICON_STYLES's own comment for why coral
+    left the icon cycle). Same sanctioned coral-wash fill + navy text pairing
+    used throughout this codebase (BRAND.md §2.6) — never coral-deep text
+    under 18px. The homepage no longer uses this: its Toolbox card carries
+    plain text instead (_mcp_plain_note_html, 2026-10)."""
     return (
-        f'<p style="background:var(--coral-wash);border:1px solid var(--coral);'
-        f'border-radius:10px;padding:{pad};font-size:{size};line-height:1.5;color:var(--navy);'
-        f'{margin}">Use it here, or connect it to your own AI assistant. '
-        f'The whole toolbox runs over MCP.</p>'
+        '<p style="background:var(--coral-wash);border:1px solid var(--coral);'
+        'border-radius:10px;padding:14px 18px;font-size:14px;line-height:1.5;color:var(--navy);'
+        'margin:0 0 24px;">Use it here, or connect it to your own AI assistant. '
+        'The whole toolbox runs over MCP.</p>'
+    )
+
+
+def _mcp_plain_note_html() -> str:
+    """The homepage Toolbox card's MCP line (2026-10): plain muted body text,
+    no tint, no coral, no border box. A plain top divider (the card's own
+    --line) keeps it from reading as orphaned under the link. Copy lives in
+    code, not in a settings row, so there is nothing to edit by hand."""
+    return (
+        '<p style="margin:18px 0 0;padding-top:16px;border-top:1px solid var(--line);'
+        'font-size:14px;line-height:1.5;color:var(--muted);">'
+        'Access the toolbox here directly or connect it to your own AI assistant '
+        'with the CFO Navigator MCP.</p>'
     )
 
 
@@ -16801,7 +16812,7 @@ _TL_COLUMN_CSS = (
 
 
 def _tl_recent_highlight_item(index: int, icon_svg: str, type_label: str, item: dict | None) -> str:
-    """One tile of the homepage's "Recent highlights" 2-column grid
+    """One tile of the homepage's "Recent highlights" row of three
     (Homepage Restructure design file) — one representative entry per type:
     a small icon + type-label row, the title (linked when a URL exists),
     venue/date metadata, and the entry's own description. Collapses to
@@ -16818,7 +16829,9 @@ def _tl_recent_highlight_item(index: int, icon_svg: str, type_label: str, item: 
                   if item.get("url") else
                   f'<div style="font-family:var(--font-head);font-weight:600;font-size:15px;color:var(--ink);'
                   f'line-height:1.4;margin-bottom:4px;">{_esc(item["title"])}</div>')
-    desc_html = (f'<p style="font-size:13px;line-height:1.55;color:var(--muted);margin:0;">{_esc(item["description"])}</p>'
+    # Clamped to three lines (home-hl-desc). Nothing is lost: the full text
+    # stays on /thought-leadership, and the title attribute carries it here.
+    desc_html = (f'<p class="home-hl-desc" title="{_esc(item["description"])}">{_esc(item["description"])}</p>'
                  if item.get("description") else "")
     # Badge built inline rather than via _card_icon() — that helper's
     # margin-bottom:14px (meant for a badge stacked above a title) would
@@ -16972,7 +16985,8 @@ def admin_thought_leadership(request: Request, type: str = ""):
         # why a control that edits/reflects an ordering has to show that
         # ordering, not just membership in it.
         featured_slot = {it["id"]: i + 1 for i, it in enumerate(lib.list_thought_leadership_featured_home())}
-        featured_count = lib.count_featured_home()
+        featured_flagged = lib.list_featured_home_flagged()
+        featured_count = len(featured_flagged)
     finally:
         lib.close()
 
@@ -17022,7 +17036,8 @@ def admin_thought_leadership(request: Request, type: str = ""):
   <a href="/admin/thought-leadership/third-party/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add entry</a>
 </div>
 <p style="margin:0 0 4px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site →</a></p>
-<p style="margin:0 0 16px;font-size:13px;color:var(--muted);">Homepage highlights: {featured_count} of 4 slots used.</p>
+{_home_slot_line_html("highlights", featured_count, Library.HOME_HIGHLIGHTS_CAP)}
+{_home_slot_notice_html("Recent highlights", featured_flagged[Library.HOME_HIGHLIGHTS_CAP:], Library.HOME_HIGHLIGHTS_CAP)}
 <div style="margin-bottom:16px;">{filters}</div>
 {_ADMIN_SCROLL_HINT_HTML}
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
@@ -17049,6 +17064,49 @@ initAdminScrollHint();
 </p>
 </div>"""
     return HTMLResponse(_page("Third-party content—Admin", "", body, authed=True))
+
+
+def _home_slot_titles(rows: list[dict]) -> str:
+    return ", ".join(
+        r["title"] + (" (draft)" if r.get("status") == "draft" else "") for r in rows
+    )
+
+
+def _home_slot_line_html(label: str, used: int, cap: int) -> str:
+    """The "N of M slots used" line under an admin page heading. One shape
+    for both homepage sections (Recent highlights, Original content)."""
+    return (f'<p style="margin:0 0 16px;font-size:13px;color:var(--muted);">'
+            f'Homepage {label}: {used} of {cap} slots used.</p>')
+
+
+def _home_slot_notice_html(label: str, hidden: list[dict], cap: int) -> str:
+    """Visible notice when more rows are flagged than the homepage has slots
+    for (rows set outside the UI: a script, a direct write). Names what is
+    hidden. Nothing is unflagged for the admin."""
+    if not hidden:
+        return ""
+    n = len(hidden)
+    return (
+        f'<p style="margin:0 0 16px;padding:12px 16px;background:var(--alert-wash);color:var(--alert);'
+        f'border-radius:10px;font-size:14px;line-height:1.55;">'
+        f'{n} flagged {"piece is" if n == 1 else "pieces are"} not showing on the homepage: '
+        f'the {label} section has {cap} slots and shows the first {cap} in its order. '
+        f'Hidden: {_esc(_home_slot_titles(hidden))}. Unflag another piece to bring '
+        f'{"it" if n == 1 else "them"} back. Nothing was unflagged for you.</p>'
+    )
+
+
+def _home_slot_refused(new_flag: bool, was_flagged: bool, others: list[dict], cap: int) -> bool:
+    """True when this save would take a slot the homepage doesn't have.
+    Only a NEWLY set flag takes a slot: re-saving a row that already holds
+    one is never refused, even if the section is already over its limit
+    from an outside write. `others` excludes the row being saved."""
+    return bool(new_flag) and not was_flagged and len(others) >= cap
+
+
+def _home_slot_refusal_message(label: str, others: list[dict], cap: int) -> str:
+    return (f"All {cap} homepage {label} slots are in use: {_home_slot_titles(others)}. "
+            f"Unflag one of them first, then flag this one.")
 
 
 def _tl_form_page(heading: str, action: str, values: dict, error: str, submit_label: str) -> str:
@@ -17124,9 +17182,6 @@ def _tl_form_values(form) -> dict:
     }
 
 
-_TL_FEATURED_CAP_ERROR = "Four pieces are already featured on the homepage. Uncheck one before featuring this piece."
-
-
 @app.post("/admin/thought-leadership/third-party/new")
 async def admin_thought_leadership_new_submit(request: Request):
     if not _is_authed(request):
@@ -17135,9 +17190,11 @@ async def admin_thought_leadership_new_submit(request: Request):
     v = _tl_form_values(form)
     lib = _lib()
     try:
-        if v["featured_home"] and lib.count_featured_home() >= 4:
+        _others = lib.list_featured_home_flagged()
+        if _home_slot_refused(v["featured_home"], False, _others, Library.HOME_HIGHLIGHTS_CAP):
             body = _tl_form_page("Add a thought leadership entry", "/admin/thought-leadership/third-party/new",
-                                  v, _TL_FEATURED_CAP_ERROR, "Add entry")
+                                  v, _home_slot_refusal_message("highlight", _others, Library.HOME_HIGHLIGHTS_CAP),
+                                  "Add entry")
             return HTMLResponse(_page("Add thought leadership entry—Admin", "", body, authed=True), status_code=400)
         # display_order left as None (blank on the add form) auto-assigns
         # the next value for this type — see Library.add_thought_leadership.
@@ -17183,10 +17240,13 @@ async def admin_thought_leadership_edit_submit(request: Request, item_id: int):
         # full would be refused against itself. This is the case most
         # likely to be built wrong; see
         # test_editing_already_featured_row_at_cap_succeeds.
-        if v["featured_home"] and lib.count_featured_home(exclude_id=item_id) >= 4:
+        _others = lib.list_featured_home_flagged(exclude_id=item_id)
+        _was = bool((lib.get_thought_leadership(item_id) or {}).get("featured_home"))
+        if _home_slot_refused(v["featured_home"], _was, _others, Library.HOME_HIGHLIGHTS_CAP):
             body = _tl_form_page("Edit thought leadership entry",
                                   f"/admin/thought-leadership/third-party/{item_id}/edit",
-                                  v, _TL_FEATURED_CAP_ERROR, "Save changes")
+                                  v, _home_slot_refusal_message("highlight", _others, Library.HOME_HIGHLIGHTS_CAP),
+                                  "Save changes")
             return HTMLResponse(_page("Edit thought leadership entry—Admin", "", body, authed=True), status_code=400)
         # The edit form always prefills display_order with the current
         # value, so a blank submission here is a deliberate clear — treat
@@ -17548,16 +17608,16 @@ def admin_original_content(request: Request, status: str = ""):
         f'/thought-leadership/&lt;slug&gt; page once it&rsquo;s live.</p>'
     ) if no_body_count else ""
 
-    # The homepage shows at most Library.HOME_ORIGINAL_CONTENT_CAP flagged live
-    # pieces; all_items is already in the same display order the homepage
-    # query uses, so anything past the cap is exactly what gets dropped.
-    _home_flagged = [it for it in all_items if it["status"] == "live" and it["featured_home"]]
-    _home_hidden = _home_flagged[Library.HOME_ORIGINAL_CONTENT_CAP:]
+    # Slots are held by the FLAG (any status), so going Live never changes
+    # the count. The homepage shows only the first CAP LIVE flagged rows, in
+    # the same order the query uses, so any live flagged row past the cap is
+    # exactly what gets dropped.
+    _oc_flagged = [it for it in all_items if it["featured_home"]]
+    _oc_hidden = [it for it in all_items if it["status"] == "live" and it["featured_home"]][Library.HOME_ORIGINAL_CONTENT_CAP:]
     home_cap_note = (
-        f'<p style="font-size:12px;color:var(--muted);margin:16px 0 0;">'
-        f'Only the first {Library.HOME_ORIGINAL_CONTENT_CAP}, by display order, appear on the homepage. '
-        f'Not shown: {", ".join(_esc(it["title"]) for it in _home_hidden)}.</p>'
-    ) if _home_hidden else ""
+        _home_slot_line_html("original content", len(_oc_flagged), Library.HOME_ORIGINAL_CONTENT_CAP)
+        + _home_slot_notice_html("Original content", _oc_hidden, Library.HOME_ORIGINAL_CONTENT_CAP)
+    )
 
     def _filter_link(s: str, label: str) -> str:
         active = s == status
@@ -17573,7 +17633,8 @@ def admin_original_content(request: Request, status: str = ""):
   <h1>Original content</h1>
   <a href="/admin/thought-leadership/original/new" class="btn" style="font-size:14px;padding:8px 18px;">+ Add piece</a>
 </div>
-<p style="margin:0 0 16px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
+<p style="margin:0 0 4px;"><a href="/thought-leadership" style="font-size:13px;color:var(--muted);">View on public site &rarr;</a></p>
+{home_cap_note}
 <div style="margin-bottom:16px;">{filters}</div>
 {_ADMIN_SCROLL_HINT_HTML}
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
@@ -17594,7 +17655,6 @@ def admin_original_content(request: Request, status: str = ""):
 initAdminScrollHint();
 </script>
 {no_body_note}
-{home_cap_note}
 </div>"""
     return HTMLResponse(_page("Original content—Admin", "", body, authed=True))
 
@@ -17637,6 +17697,10 @@ async def admin_original_content_new_submit(request: Request):
         gate_error = _oc_publish_gate_error(v["status"], v["slug"])
         if gate_error:
             return _reject(gate_error)
+        if _home_slot_refused(v["featured_home"], False, lib.list_original_content_featured_flagged(),
+                              Library.HOME_ORIGINAL_CONTENT_CAP):
+            return _reject(_home_slot_refusal_message(
+                "original content", lib.list_original_content_featured_flagged(), Library.HOME_ORIGINAL_CONTENT_CAP))
 
         new_id = lib.add_original_content(
             v["slug"], v["title"], v["teaser"], v["tag_label"], v["link_label"],
@@ -17710,6 +17774,12 @@ async def admin_original_content_edit_submit(request: Request, item_id: int):
         gate_error = _oc_publish_gate_error(v["status"], v["slug"])
         if gate_error:
             return _reject(gate_error)
+
+        _oc_others = lib.list_original_content_featured_flagged(exclude_id=item_id)
+        if _home_slot_refused(v["featured_home"], bool(lib.get_original_content(item_id)["featured_home"]),
+                              _oc_others, Library.HOME_ORIGINAL_CONTENT_CAP):
+            return _reject(_home_slot_refusal_message(
+                "original content", _oc_others, Library.HOME_ORIGINAL_CONTENT_CAP))
 
         # The edit form always prefills display_order with the current
         # value, so a blank submission here is a deliberate clear — same
@@ -26226,8 +26296,8 @@ _ADMIN_GROUPS = [
         ("/admin/inbox/email-failures", "Email delivery",        "Failed sends across contact, tool submissions, welcome emails, and password resets—so a broken send never goes unnoticed."),
     ]),
     ("Thought leadership", "Writing, Speaking and Events, Podcasts, and Press for the public /thought-leadership page.", [
-        ("/admin/thought-leadership/third-party", "Third-party content", "Add, edit, or delete entries in any of the four columns—Writing, Speaking and Events, Podcasts, Press."),
         ("/admin/thought-leadership/original", "Original content", "Add, edit, or delete the flagship pieces and any new article you write directly in admin—markdown body, published at its own /thought-leadership page."),
+        ("/admin/thought-leadership/third-party", "Third-party content", "Add, edit, or delete entries in any of the four columns—Writing, Speaking and Events, Podcasts, Press."),
         ("/admin/thought-leadership/game-settings", "Sail, don't row settings", "Tune pace, wind, obstacle density, and the collision rule for each difficulty rank."),
     ]),
     ("CFO Toolbox", "Everything behind the public /tools directory.", _TOOLBOX_TOOLS),
