@@ -157,10 +157,18 @@ def _failing_checks_count() -> int:
         _checks_computing = True
     try:
         count = _compute_failing_checks_count()
-    finally:
+    except BaseException:
+        # Release the sentinel and let the REAL exception propagate. The old
+        # `finally` wrote `count` into the cache, which is unbound when the
+        # compute raised, so an UnboundLocalError replaced the real error
+        # (#602). Nothing is cached on failure: a failed pass is not a count.
         with _checks_cache_lock:
-            _checks_cache = (time.time(), count)
             _checks_computing = False
+        _logger.exception("failing-checks count: run_all() raised")
+        raise
+    with _checks_cache_lock:
+        _checks_cache = (time.time(), count)
+        _checks_computing = False
     return count
 
 
