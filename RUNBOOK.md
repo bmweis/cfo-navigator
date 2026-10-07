@@ -861,3 +861,24 @@ through the old fallback, and any legacy role-less cookie, stops working.
 
 Only session cookies are signed with this key (`webapp/app.py` `_sign`/`_session_claims`).
 MCP tokens and reset tokens are plain sha256 hashes in the database, not keyed to it.
+
+---
+
+## 10. CI is down and `main` needs a merge
+
+**When:** GitHub Actions can't run `tests` or `secret-scan` (quota exhausted,
+outage), so the `main-protection` ruleset's required checks can never go green.
+Since 2026-10-07 the ruleset has no admin bypass, so nothing merges until you
+add one back temporarily.
+
+1. Verify the PR locally instead of by CI: run the full suite single-threaded,
+   pyflakes and a secret scan, and put the counts and the head SHA in the PR body.
+2. On `/admin/checks`, switch on "GitHub Actions quota exhausted" and set the PR
+   link, so the CI-only rows stop reading as broken.
+3. GitHub, repo Settings, Rules, Rulesets, `main-protection`, Bypass list, Add
+   bypass, Repository admin, Always allow. Save.
+4. Merge the PR.
+5. Remove the bypass entry again and confirm the Bypass list is empty.
+6. When Actions works again, switch the `/admin/checks` flag off.
+
+This section is prose and UI steps only; there are no commands to run.
