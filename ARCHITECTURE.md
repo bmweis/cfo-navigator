@@ -8426,7 +8426,7 @@ changes.
 | `/admin/library/enrich` (+ `/start`, `/status`) | `/admin/reader/enrich` |
 | `/admin/library/dedupe` (+ `/remove`, `/not-dupe`, `/remove-older`) | `/admin/reader/dedupe` |
 | `/admin/library/bulk-delete` (+ `/template.csv`, `/preview`, `/commit`) | `/admin/reader/bulk-delete` |
-| `/admin/library/backup` (+ `/upload-db`, `/download-db`) | `/admin/library-backup` |
+| `/admin/library/backup` (+ `/download-db`; `/upload-db` removed 2026-10) | `/admin/library-backup` |
 
 **`/admin/library-backup` deliberately keeps the word "library," breaking
 the otherwise-uniform `/admin/reader/*` pattern above it — this is
@@ -11466,8 +11466,8 @@ follow-up textarea (`.fu textarea`) is a separate rule. See `tests/test_buddy_re
 ### Restore from Drive on the container (2026-10)
 
 `scripts/restore_from_drive.py` is the disaster-recovery path. The browser path
-(`POST /admin/library-backup/upload-db`) is capped by Cloudflare's 100 MB request
-body limit and cannot carry the roughly 254 MB database. Flow: Drive
+(the old upload route, removed) was capped by Cloudflare's 100 MB request
+body limit and could not carry the roughly 254 MB database. Flow: Drive
 (`linklib.backup.list_snapshots`/`download_snapshot`, same OAuth client as the
 daily backup) streams to a temp file beside the destination, is validated
 (size, md5, `check_integrity`, article count), the current file is hard-linked
@@ -11476,13 +11476,22 @@ are removed. The Drive folder id comes from `--folder-id`, `GOOGLE_DRIVE_FOLDER_
 the `settings` row (`backup_drive_folder_id`) if the old file still opens, or a
 search by folder name. See RUNBOOK.md §1 Path C and §4.
 
-`POST /admin/library-backup/upload-db` is **admin-session only** (2026-10): it
-swaps the live `library.db` after checking only that an `articles` table
-exists, so a file bringing its own `users` table would be a takeover. The
-shared save token (header or `?token=`) and a member session are both refused
-with the same 401 as an anonymous request. `POST /admin/backup-now` is
-unchanged and still accepts the token (the Railway cron calls it). The handler
-writes no audit record: a log row in the live DB would be destroyed by the swap.
+**Archive backup page, Phase 1 of #714 (2026-10).** The upload form and
+`POST /admin/library-backup/upload-db` are removed; a browser upload cannot pass
+Cloudflare at this size, so restore is only the script above. `/admin/library-backup`
+now has: `POST /admin/library-backup/run` (admin session only, the save token gets
+401) starts `_backup_job` in a daemon thread and redirects; the page shows "Backup
+running" while `backup.backup_is_running()` and reads the result from `backup_log`.
+`GET /admin/library-backup/drive-list` (admin only, JSON, 10 second timeouts, never
+raises) feeds the "Backups in Drive" list, loaded by the page after it renders;
+`list_snapshots` lists every non-trashed file in the folder, so a button backup (named
+like the nightly ones) appears, and under `drive.file` a hand-placed file does not.
+`backup_now` holds a non-blocking `threading.Lock`: an overlap raises `BackupBusy`,
+logs nothing, and `/admin/backup-now` answers 200 "already running" (not 409, which
+shows red in Railway's cron history). The upload to Drive streams the snapshot from
+disk (`_MultipartBody`, with Content-Length) instead of reading it into memory.
+The page shows `backup.plain_error()` text; the raw error stays in `backup_log`.
+`POST /admin/backup-now` is unchanged otherwise and still accepts the token.
 
 
 ### Admin badge counts failing checks (2026-10)

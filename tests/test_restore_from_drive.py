@@ -194,33 +194,6 @@ def app_module(monkeypatch, tmp_path):
     return appmod
 
 
-def test_upload_note_helper_threshold(app_module, tmp_path):
-    big = tmp_path / "big.db"
-    with open(big, "wb") as f:
-        f.truncate(101_000_000)  # sparse
-    small = tmp_path / "small.db"
-    small.write_bytes(b"x" * 1000)
-    note = app_module._upload_limit_note_html(str(big))
-    assert "Uploading through this page fails above 100 MB. See RUNBOOK §1 for the restore script." in note
-    assert "101.0 MB" in note
-    assert app_module._upload_limit_note_html(str(small)) == ""
-    edge = tmp_path / "edge.db"
-    with open(edge, "wb") as f:
-        f.truncate(100_000_000)
-    assert app_module._upload_limit_note_html(str(edge)) == ""
-
-
-def test_upload_note_on_page_only_when_over_limit(app_module, monkeypatch):
-    from fastapi.testclient import TestClient
-    c = TestClient(app_module.app)
-    c.post("/login", data={"username": "admin", "password": "adminpass"})
-    html = c.get("/admin/library-backup").text
-    assert "upload-limit-note" not in html
-    monkeypatch.setattr(app_module, "_UPLOAD_LIMIT_BYTES", 1)
-    html = c.get("/admin/library-backup").text
-    assert "Uploading through this page fails above 100 MB" in html
-
-
 # --- the Drive helpers added to linklib/backup.py -----------------------------
 
 class _FakeResp:

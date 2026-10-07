@@ -44,56 +44,26 @@ priority — normally left unset. The override is read fresh on every backup
 attempt (not cached at startup), so setting or clearing it in Railway takes
 effect on the very next attempt — no redeploy needed.
 
-### Path A — the app is up (normal case)
+### Before any restore — download the current database
 
-> **Path A cannot restore the production database any more.** bmweis.com is
+Do this first, even if the database is damaged. It may hold saves newer than
+the Drive backup you restore from, and it is the only way back if the restore
+is a mistake. Log in as admin, open `/admin/library-backup` and click
+**Download library.db** (or open `/admin/library-backup/download-db`).
+
+> **There is no restore through the web app.** The upload form and
+> `POST /admin/library-backup/upload-db` were removed in 2026-10. bmweis.com is
 > behind Cloudflare, which rejects request bodies over 100 MB on the Free plan,
-> and `library.db` is about 254 MB. The 2026-10-06 rehearsal ran for about 55
-> minutes and the app never logged the POST (§4). Path A still works for a
-> database under 100 MB (a scratch rehearsal, a fresh start). For production,
-> use **Path C**.
-
-The app has a built-in restore endpoint: `POST /admin/library-backup/upload-db` validates
-the upload is a real library DB, then swaps it onto the volume atomically
-and clears stale WAL/SHM sidecars. **No restart or redeploy is needed** —
-the app opens a fresh DB connection per request, so the very next request
-reads the restored file.
-
-1. **Snapshot the current state first**, even if it's damaged — it may hold
-   saves newer than the Drive snapshot that you'll want to merge back later:
-
-   - Browser: log in as admin → `/admin/library-backup` → **Download library.db**
-     (or hit `/admin/library-backup/download-db` directly).
-
-2. **Download the snapshot from Google Drive** you want to restore
-   (normally the newest `library-*.db`).
-
-3. **Upload it.** The route accepts an **admin session only**: the save token
-   (`X-Save-Token` or `?token=`) is refused with `401`, as is a non-admin
-   login. Use the upload form on `/admin/library-backup` (admin login), or from
-   a terminal reuse an admin session cookie (the `cfo_session` value from your
-   browser after logging in):
-
-   ```bash
-   curl -si -X POST "https://bmweis.com/admin/library-backup/upload-db" \
-        -H "Cookie: cfo_session=<your admin session cookie>" \
-        -F "file=@library-YYYYMMDD-HHMMSS.db"
-   ```
-
-   Expect `HTTP/1.1 303 See Other` with
-   `location: /admin/library-backup?uploaded=<N>` — **N is the article count the
-   server found in the uploaded file** (it runs
-   `SELECT COUNT(*) FROM articles` before swapping anything). Sanity-check
-   it: production should be ~1,500+. A `400` means the file didn't parse as
-   a library DB and **nothing was touched** — the live DB is only replaced
-   after validation, via an atomic `os.replace`.
-
-4. **Validate** (see the checklist below).
+> and `library.db` is about 254 MB, so a browser upload could never work at
+> production size (the 2026-10-06 rehearsal ran about 55 minutes and the app never
+> logged the POST, §4). All restores run on the container with **Path C**.
+> `/admin/library-backup` can make a Drive backup on demand (**Back up to Drive
+> now**), lists what is in Drive, and shows the Path C commands.
 
 ### Path B — the app is down or won't boot
 
 If the DB is so broken the app crashes on boot (rare — the schema script is
-additive and re-runnable), Path A's endpoint isn't reachable and you need a
+additive and re-runnable), the admin page isn't reachable and you need a
 shell on the volume:
 
 1. In the Railway dashboard, confirm the crash is DB-related from the deploy
@@ -106,8 +76,7 @@ shell on the volume:
    file aside (`mv library.db library.db.broken`), don't delete it. Also
    move aside `library.db-wal` / `library.db-shm` if present.
 4. Get the snapshot onto the volume with Path C's script (it works with the
-   destination missing, so no restart or empty schema is needed first). Path A's
-   upload does not work at production size.
+   destination missing, so no restart or empty schema is needed first).
 
 ### Path C — restore from Drive on the container (works at any size)
 
@@ -141,7 +110,7 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
   the same directory as the destination. If links are unsupported, add the size
   of the current database. The script refuses before downloading if it is short.
 - It validates before swapping, uses `os.replace`, and removes `-wal` and `-shm`,
-  the same as the old upload route. No restart is needed.
+  the same as the old upload route did. See the restart step in the checklist below.
 - The script needs `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and
   `GOOGLE_OAUTH_REFRESH_TOKEN` in the container's environment. Check with
   `railway ssh` then `env | grep -c GOOGLE_OAUTH` (expect 3).
@@ -152,6 +121,7 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
 
 ### Post-restore validation checklist
 
+- [ ] **Restart the service in Railway first.** The restore swaps the file under the running app, which keeps three things in memory: the admin badge's check cache (about 2 minutes), the web-search site list (`preferred_domains`, cached until restart), and `preferred_sites.opml`, which is rewritten from the `feeds` table only at boot. Without a restart, a restored feed list is not reflected in FP&A Buddy's web search.
 - [ ] `https://bmweis.com/health` returns `{"ok": true}`
 - [ ] Log in as admin, open `/read?view=saved` — article count and recent items look right
 - [ ] FTS search works (search something specific on `/read?view=saved`, or
@@ -336,22 +306,17 @@ paths against scratch files.
    `LINKLIB_DB=.../live.db LINKLIB_SAVE_TOKEN=<anything> uvicorn webapp.app:app --port 8123`
 4. Confirm the pre-restore state through the API
    (`GET /api/search?q=&limit=50&token=…` shows only the live DB's rows).
-5. Restore with section 1's curl (`POST /admin/library-backup/upload-db`). It
-   needs an admin session, so log in to this local instance as admin first
-   (`LINKLIB_PASSWORD`) and send that cookie.
-6. Validate: the 303 redirect's `uploaded=<N>` matches the good DB's
-   article count; `/api/search` now returns the snapshot's rows (including
-   an FTS query that missed before); the stale row is gone; on the file
-   itself, `PRAGMA integrity_check` says `ok` and
-   `INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')`
-   doesn't raise; `/health` still 200s — all **without restarting the app**.
+5. The web upload route this step used was removed in 2026-10. Restore with section 1's
+   Path C script against a scratch path instead (see the production-size procedure below).
+6. Validate the scratch file: `PRAGMA integrity_check` says `ok` and
+   `INSERT INTO articles_fts(articles_fts) VALUES('integrity-check')` doesn't raise.
 
 ### Record: rehearsal run 2026-10-06 ❌ (production size)
 
 - Restored through `/admin/library-backup` (Path A) with the real 253.8 MB
   `library.db`. The spinner ran about 55 minutes. Railway logs for the whole
   window showed the `GET /admin/library-backup/download-db` (200) and no
-  `POST /admin/library-backup/upload-db` line, no errors and no restarts. The
+  upload POST line, no errors and no restarts. The
   handler logs on completion, and the body is read in full before it runs, so
   the upload never completed.
 - Cause: Cloudflare caps request bodies at 100 MB on Free and Pro (larger
@@ -381,7 +346,7 @@ paths against scratch files.
 - `POST /admin/library-backup/upload-db` with `X-Save-Token` → `303` (the route
   has been admin-session-only since 2026-10; the token is now refused),
   `location: /admin/library-backup?uploaded=5` (count matched the snapshot).
-- Post-restore, **no restart**: API listed the snapshot's 5 rows; `netsuite`
+- Post-restore, **no restart** (this was the old upload route; after the Path C script, restart, see the checklist): API listed the snapshot's 5 rows; `netsuite`
   → 1 hit; stale row unfindable; `PRAGMA integrity_check` = `ok`; FTS
   self-check passed; `/health` → `{"ok": true}`.
 - Conclusion: the in-app restore path works end-to-end exactly as section 1

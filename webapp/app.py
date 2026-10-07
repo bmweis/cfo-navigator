@@ -26272,7 +26272,7 @@ _ADMIN_GROUPS = [
         ("/admin/system/database", "Database",            "A live, self-updating diagram of library.db's tables, key columns, and row counts."),
         ("/admin/system/page-index", "Page index",        "A live, self-updating map of every route and its width tier."),
         ("/admin/system/scripts",   "Scripts",             "The recurring CLI scripts still worth running&mdash;purpose, cadence, env vars, and how to invoke each."),
-        ("/admin/library-backup",  "Archive backup",      "An on-demand snapshot for right before something risky&mdash;not your safety net day to day. Automated backups already run daily to Google Drive; reach for this when you specifically want one more, right before an operation you'd want to roll back from."),
+        ("/admin/library-backup",  "Archive backup",      "Download a snapshot, back up to Google Drive now, see what is in Drive, and find the restore commands. Automated backups already run daily."),
     ]),
 ]
 
@@ -26471,8 +26471,8 @@ _SCRIPT_REGISTRY = [
     ("restore_from_drive.py", "scripts.restore_from_drive", "Recurring and actively useful",
      "Disaster-recovery restore: downloads a Drive snapshot straight onto the volume, validates it "
      "(integrity check, FTS5 check, article count), keeps the current database as a "
-     "pre-restore copy, and swaps the snapshot in atomically. Exists because the UI upload cannot "
-     "pass Cloudflare's 100 MB request limit at the current database size. Refuses to replace an "
+     "pre-restore copy, and swaps the snapshot in atomically. Runs on the container because a "
+     "browser upload cannot pass Cloudflare's 100 MB request limit at the current database size. Refuses to replace an "
      "existing file without --yes-replace-live; --dry-run downloads and validates only.",
      "Disaster-only, plus a yearly rehearsal against a scratch path (RUNBOOK.md section 4).",
      ["GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN (same as the daily backup)"],
@@ -36954,8 +36954,8 @@ def _backup_status_banner(backup_rows: list[dict]) -> str:
     elif last and last["status"] == "failure":
         bg, border, color = amber_wash, amber_border, amber_text
         when = _esc(last["created_at"][:16].replace("T", " "))
-        err = _esc(last["error"]) or "no error message recorded"
-        html = f'Backups are configured, but the most recent attempt ({when} UTC) <strong>failed</strong>: {err}'
+        err = _esc(backup.plain_error(last["error"]))
+        html = f'Backups are configured, but the most recent attempt ({when} UTC) <strong>failed</strong>. {err}'
     elif not last:
         bg, border, color = amber_wash, amber_border, amber_text
         html = 'Backups are configured, but none have run yet.'
@@ -37002,7 +37002,7 @@ def _integrity_status_banner(integrity_rows: list[dict]) -> str:
 
 
 @app.get("/admin/library-backup", response_class=HTMLResponse)
-def admin_backup(request: Request, uploaded: str = ""):
+def admin_backup(request: Request, started: str = "", busy: str = ""):
     if not _is_authed(request):
         return _login_redirect(request)
     lib = _lib()
@@ -37016,16 +37016,22 @@ def admin_backup(request: Request, uploaded: str = ""):
     folder_line = (
         f'Daily consistent snapshots, uploaded automatically to '
         f'<a href="https://drive.google.com/drive/folders/{quote(folder_id)}" target="_blank" rel="noopener">'
-        f'&ldquo;{_esc(backup.FOLDER_NAME)}&rdquo; in Drive</a>. See RUNBOOK.md §1 to restore from one.'
+        f'&ldquo;{_esc(backup.FOLDER_NAME)}&rdquo; in Drive</a>. The newest 14 are kept, plus one a week for 8 more weeks.'
         if folder_id else
-        'Daily consistent snapshots, uploaded automatically&mdash;the destination folder is created on the '
-        'first successful run (see RUNBOOK.md §1 to restore from one).'
+        'Daily consistent snapshots, uploaded automatically. The destination folder is created on the '
+        'first successful run.'
     )
-    uploaded_banner = (
-        f'<p style="background:#d1fae5;color:#065f46;border-radius:10px;padding:10px 16px;'
-        f'font-size:14px;margin:-6px 0 16px;">Database replaced—{_esc(uploaded)} articles now live.</p>'
-        if uploaded else ''
-    )
+    running = backup.backup_is_running()
+    run_note = ""
+    if running:
+        run_note = ('<p style="background:var(--seafoam-wash);border:1px solid var(--seafoam);border-radius:10px;'
+                    'padding:10px 16px;font-size:14px;margin:0 0 16px;"><strong>Backup running.</strong> '
+                    'It takes a few minutes. This page checks again on its own, and the result appears in the '
+                    'history table below.</p>'
+                    '<script>setTimeout(function(){location.reload();},8000);</script>')
+    if busy:
+        run_note += ('<p style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:10px;'
+                    'padding:10px 16px;font-size:14px;margin:0 0 16px;">A backup is already running.</p>')
     backup_log_rows_html = "".join(
         f"""<tr>
           <td data-label="When" style="padding:8px 12px;border-bottom:1px solid var(--line);white-space:nowrap;font-size:13px;">{_esc(b['created_at'][:16].replace('T',' '))}</td>
@@ -37039,7 +37045,7 @@ def admin_backup(request: Request, uploaded: str = ""):
             else '<span style="color:var(--alert);font-weight:600;">Failed</span>'
           }</td>
           <td data-label="Notes" style="padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-soft);">{
-            _esc(f"{b['bytes']:,} bytes · {b['row_count']:,} articles") if b['status'] == 'success' else _esc(b['error'])
+            _esc(f"{b['bytes']:,} bytes · {b['row_count']:,} articles") if b['status'] == 'success' else _esc(backup.plain_error(b['error']))
           }</td>
         </tr>"""
         for b in backup_rows
@@ -37074,24 +37080,21 @@ def admin_backup(request: Request, uploaded: str = ""):
 </style>
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Archive backup</h1>
-{uploaded_banner}
+{run_note}
 <p style="color:var(--muted);margin:-6px 0 24px;">Currently <strong>{count:,}</strong> articles in the live database.</p>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px;margin-bottom:40px;">
   <div class="backup-actions">
     <div>
       <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Download backup</p>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Download a consistent snapshot of the live database. Do this before uploading a replacement so you can recover if something goes wrong.</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Saves a snapshot of the live database to your computer. Do this before any restore. It may hold saves newer than the latest Drive backup.</p>
       <a href="/admin/library-backup/download-db" class="btn" style="font-size:14px;padding:9px 20px;display:inline-block;text-decoration:none;width:202px;text-align:center;box-sizing:border-box;">Download library.db</a>
     </div>
     <div class="backup-action-divider">
-      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Upload replacement database</p>
-      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Quit your local app first so the file is fully written, then upload <code>library.db</code>. Takes effect immediately—no restart needed. Uploads through this page are limited to 100 MB by Cloudflare.</p>
-      {_upload_limit_note_html()}
-      <form method="post" action="/admin/library-backup/upload-db" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:10px;">
-        <input type="file" name="file" accept=".db,.sqlite,.sqlite3,application/octet-stream" required
-          style="font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);">
-        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;align-self:flex-start;width:202px;text-align:center;box-sizing:border-box;">Upload and replace</button>
+      <p style="font-weight:600;font-size:15px;margin:0 0 6px;">Back up to Drive now</p>
+      <p style="font-size:13px;color:var(--muted);margin:0 0 14px;">Runs the integrity check, then uploads a snapshot to Google Drive. It takes a few minutes and you can leave this page. The daily backup keeps running either way.</p>
+      <form method="post" action="/admin/library-backup/run">
+        <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;width:202px;text-align:center;box-sizing:border-box;"{' disabled' if running else ''}>{'Backup running' if running else 'Back up to Drive now'}</button>
       </form>
     </div>
   </div>
@@ -37099,8 +37102,49 @@ def admin_backup(request: Request, uploaded: str = ""):
 
 <h2 style="font-size:16px;margin:0 0 4px;">Off-site backup (Google Drive)</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">{folder_line}</p>
-<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Setting <code>GOOGLE_DRIVE_FOLDER_ID</code> in Railway overrides this and points backups at that folder instead, starting with the next attempt. Leave it unset to keep using the folder above.</p>
+<p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Leave <code>GOOGLE_DRIVE_FOLDER_ID</code> unset in Railway. The app creates and remembers its own folder. Setting it sends backups to that folder instead, starting with the next attempt.</p>
 {_backup_status_banner(backup_rows)}
+<h2 style="font-size:16px;margin:24px 0 4px;">Backups in Drive</h2>
+<div id="drive-list"><p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Loading the list from Google Drive&hellip;</p></div>
+<p style="color:var(--muted);font-size:13px;margin:8px 0 0;">Only backups made by this app appear here: the daily ones and the ones from the button. A file placed in the Drive folder by hand does not show. The newest 14 are kept, so extra manual backups push the oldest out.</p>
+<script>
+(function(){{
+  var box=document.getElementById('drive-list');
+  function say(t){{box.innerHTML='';var p=document.createElement('p');p.style.cssText='color:var(--muted);font-size:13px;margin:0 0 8px;';p.textContent=t;box.appendChild(p);}}
+  var ctl=new AbortController();var timer=setTimeout(function(){{ctl.abort();}},15000);
+  fetch('/admin/library-backup/drive-list',{{signal:ctl.signal,credentials:'same-origin'}}).then(function(r){{return r.json();}}).then(function(d){{
+    clearTimeout(timer);
+    if(!d.ok){{say(d.message||'Could not load the list.');return;}}
+    if(!d.files.length){{say('No backups in Drive yet. The first one appears after the next backup.');return;}}
+    var t=document.createElement('table');t.className='drive-list-table';t.style.width='100%';t.style.minWidth='{_TABLE_FLOOR_NARROW}px';
+    t.innerHTML='<thead><tr style="background:var(--accent-light);"><th style="padding:8px 12px;text-align:left;font-size:13px;">Name</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Size</th><th style="padding:8px 12px;text-align:left;font-size:13px;">Made</th></tr></thead>';
+    var tb=document.createElement('tbody');
+    d.files.forEach(function(f){{
+      var tr=document.createElement('tr');
+      [f.name,(f.size/1048576).toFixed(1)+' MB',(f.created||'').slice(0,16).replace('T',' ')+' UTC'].forEach(function(v){{
+        var td=document.createElement('td');td.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap;';td.textContent=v;tr.appendChild(td);}});
+      tb.appendChild(tr);}});
+    t.appendChild(tb);
+    var fr=document.createElement('div');fr.className='table-frame';fr.style.cssText='overflow-x:auto;overflow-y:hidden;';fr.appendChild(t);
+    box.innerHTML='';box.appendChild(fr);
+  }}).catch(function(){{clearTimeout(timer);say('Could not reach Google Drive just now. The rest of this page still works. Reload to try again.');}});
+}})();
+</script>
+
+<h2 style="font-size:16px;margin:32px 0 4px;">Restore from a Drive backup</h2>
+<p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Restoring happens on the server, not on this page. Download a backup first (above), then open a shell with the Railway CLI and run:</p>
+<pre style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:13px;overflow-x:auto;margin:0 0 8px;">railway ssh
+cd /app
+python -m scripts.restore_from_drive --db /data/library.db --list
+python -m scripts.restore_from_drive --db /data/library.db --dry-run
+python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live</pre>
+<ul style="color:var(--muted);font-size:13px;margin:0 0 8px;padding-left:20px;line-height:1.6;">
+  <li><code>--list</code> shows the backups. <code>--dry-run</code> downloads and checks the newest one and changes nothing. The last command replaces the live database. To pick a different backup, add <code>--snapshot</code> and its name.</li>
+  <li>Before replacing, the script keeps the current file as <code>/data/library.db.pre-restore-&lt;timestamp&gt;</code>. It never deletes it. Each restore leaves one on the volume, about 254 MB each, so clear old ones by hand once you are sure.</li>
+  <li>After the last command, restart the service in Railway. The running app keeps some things in memory, including the web-search site list, which is rebuilt from the database only on start.</li>
+  <li>Then check <code>https://bmweis.com/health</code> and run the post-restore checklist in <code>RUNBOOK.md</code> section 1.</li>
+</ul>
+
 <h2 style="font-size:16px;margin:24px 0 4px;">Pre-backup integrity check</h2>
 <p style="color:var(--muted);font-size:13px;margin:0 0 4px;">Runs automatically against the live database right before every backup attempt&mdash;<code>PRAGMA integrity_check</code> plus an FTS5 self-check. A failure blocks that night&rsquo;s upload so corruption is never captured into a retained snapshot.</p>
 {_integrity_status_banner(integrity_rows)}
@@ -39712,67 +39756,36 @@ async def admin_emails_save(section_id: str, request: Request):
     return JSONResponse({"ok": True})
 
 
-_UPLOAD_LIMIT_BYTES = 100_000_000  # Cloudflare Free/Pro request-body cap (100 MB)
-
-
-def _upload_limit_note_html(db_path: str | None = None) -> str:
-    """Visible warning beside the upload form once the live database is too
-    big for any browser upload to get through Cloudflare. Empty at or below
-    the limit. See RUNBOOK.md section 1, Path C."""
+def _backup_job() -> None:
+    """Background thread for the "Back up to Drive now" button. The result
+    (success or failure) lands in backup_log, which the page reads."""
     try:
-        size = os.path.getsize(db_path or DB_PATH)
-    except OSError:
-        return ""
-    if size <= _UPLOAD_LIMIT_BYTES:
-        return ""
-    return (f'<p class="upload-limit-note" style="font-size:13px;color:var(--alert);font-weight:600;margin:0 0 14px;">'
-            f'The live database is {size / 1_000_000:,.1f} MB. Uploading through this page fails above 100 MB. '
-            f'See RUNBOOK §1 for the restore script.</p>')
+        backup.backup_now(DB_PATH)
+    except backup.BackupBusy:
+        pass
+    except Exception as e:  # backup_now already logged it to backup_log
+        print(f"[backup] button backup failed: {e}")
 
 
-@app.post("/admin/library-backup/upload-db", response_class=HTMLResponse)
-async def upload_db(request: Request, file: UploadFile = File(...)):
-    # Admin session only. This route atomically replaces the live library.db
-    # and validates only that an `articles` table exists, so a file carrying
-    # its own `users` table would be a full takeover: the shared bookmarklet
-    # token (LINKLIB_SAVE_TOKEN) and a member session are both refused, with
-    # the same 401 an anonymous request gets. /admin/backup-now keeps the token.
+@app.post("/admin/library-backup/run")
+def admin_backup_run(request: Request):
+    """Start a Drive backup in the background. Admin session only: the
+    shared save token gets 401 here (the cron uses /admin/backup-now)."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
-    import sqlite3
-    import tempfile
+    if backup.backup_is_running():
+        return RedirectResponse("/admin/library-backup?busy=1", status_code=303)
+    threading.Thread(target=_backup_job, daemon=True).start()
+    return RedirectResponse("/admin/library-backup?started=1", status_code=303)
 
-    dest = os.path.abspath(DB_PATH)
-    dest_dir = os.path.dirname(dest) or "."
-    fd, tmp = tempfile.mkstemp(dir=dest_dir, suffix=".upload")
-    try:
-        with os.fdopen(fd, "wb") as out:
-            while True:
-                chunk = await file.read(1 << 20)
-                if not chunk:
-                    break
-                out.write(chunk)
-        # Validate it's a real library DB before swapping anything in.
-        try:
-            check = sqlite3.connect(tmp)
-            n = check.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
-            check.close()
-        except Exception as e:
-            raise HTTPException(status_code=400,
-                                detail=f"That doesn't look like a valid database: {e}")
-        # Atomic swap, then clear any stale WAL sidecars from the old file.
-        os.replace(tmp, dest)
-        tmp = None
-        for sidecar in ("-wal", "-shm"):
-            try:
-                os.remove(dest + sidecar)
-            except FileNotFoundError:
-                pass
-    finally:
-        if tmp and os.path.exists(tmp):
-            os.remove(tmp)
 
-    return RedirectResponse(f"/admin/library-backup?uploaded={n}", status_code=303)
+@app.get("/admin/library-backup/drive-list")
+def admin_backup_drive_list(request: Request):
+    """JSON for the "Backups in Drive" list, loaded by the page after it
+    renders so a slow Drive cannot hang the admin page."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return JSONResponse(backup.list_for_display(DB_PATH))
 
 
 @app.get("/admin/library-backup/download-db")
@@ -39806,6 +39819,11 @@ def backup_now_route(request: Request, token: str | None = None):
         result = backup.backup_now(DB_PATH)
         msg = (f"Uploaded <strong>{result['name']}</strong> ({result['bytes']:,} bytes, "
                f"{result['row_count']:,} articles) to Google Drive.")
+        status_code = 200
+    except backup.BackupBusy:
+        # 200, not 409: Railway shows a non-2xx cron run as failed, and a
+        # backup already in progress is not a failure.
+        msg = "A backup is already running, so this request did nothing."
         status_code = 200
     except Exception as e:
         # backup.backup_now() logs every failure to backup_log before it

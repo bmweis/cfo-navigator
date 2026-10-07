@@ -118,7 +118,7 @@ def test_backup_now_post_route_is_unaffected(env):
 
 
 def test_backup_sub_routes_moved_with_their_parent(env):
-    """download-db and upload-db live under the new /admin/library-backup
+    """download-db lives under the new /admin/library-backup
     prefix now, and are gone from the old /admin/library/backup one."""
     with _admin_client(env) as client:
         ok = client.get("/admin/library-backup/download-db", follow_redirects=False)
