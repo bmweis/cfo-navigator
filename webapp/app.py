@@ -66,7 +66,7 @@ import markdown as _markdown
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-from linklib import compare, gates, tool_labels
+from linklib import compare, gates, homepage_status as _hs, tool_labels
 from linklib.citations import citation_problem
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.voice_mechanics import norm_for_compare
@@ -892,6 +892,20 @@ def _seed_model_catalog():
     try:
         lib.seed_model_catalog()
         lib.seed_model_roles()
+    except Exception:
+        pass
+    finally:
+        lib.close()
+
+
+@app.on_event("startup")
+def _seed_homepage_status_clock():
+    """Start the Status staleness clock once, so the first deploy counts as
+    confirmed today instead of failing on day one. Never overwrites a stamp."""
+    lib = _lib()
+    try:
+        if not lib.get_setting(_hs.STATUS_REVISED_KEY):
+            lib.set_setting(_hs.STATUS_REVISED_KEY, datetime.now(timezone.utc).isoformat())
     except Exception:
         pass
     finally:
@@ -4635,6 +4649,37 @@ None of that's abstract. I led finance through two acquisitions—Ansible to Red
 I'm looking for the next place to put that to work. Could be early stage. Could be growth. Could be something I haven't done yet."""
 
 
+_hs_warn_style = ("background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:10px;"
+                  "padding:10px 14px;margin:12px 0 0;font-size:14px;line-height:1.5;")
+
+
+def _hero_og_description(headline: str, subhead: str) -> str:
+    """og:description for the homepage: the hero headline as plain text (tags
+    stripped), else the subhead's first paragraph; "" when both are empty so
+    _page() falls back to _OG_DEFAULT_DESCRIPTION. Static on purpose: the
+    Status note never feeds it. The headline is a complete sentence; the
+    subhead's first paragraph can end on a cliffhanger in a card. og:title is
+    "Home", so the card never shows the same sentence twice."""
+    for text in (headline, subhead):
+        first = (text.strip().split("\n\n") or [""])[0]
+        plain = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", first)).strip()
+        if plain:
+            return plain
+    return ""
+
+
+def _homepage_status_text(lib) -> str:
+    """The Status note's effective text. One key now; until its first save the
+    two legacy keys (lead line, rest of the bio), or their defaults, joined by
+    a blank line. The legacy keys are left in place and never deleted."""
+    stored = lib.get_setting("homepage_status_copy")
+    if stored.strip():
+        return stored
+    teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
+    expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
+    return f"{teaser}\n\n{expanded}"
+
+
 def _copy_paragraphs_html(text: str, style: str = "") -> str:
     """Render admin-edited plain-text copy (blank-line-separated paragraphs) as escaped <p>
     tags — the one place admin copy fields should ever reach the page, so a field that's
@@ -4655,8 +4700,7 @@ def homepage(request: Request):
     try:
         homepage_headline = lib.get_setting("homepage_headline_copy") or _HOMEPAGE_HEADLINE_DEFAULT
         homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
-        homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
-        homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
+        homepage_status = _homepage_status_text(lib)
         # Up to 4 curated pieces for the "Recent highlights" grid — any mix
         # of types, Brian's own choice via the `featured_home` checkbox on
         # /admin/thought-leadership/third-party — see
@@ -4736,6 +4780,8 @@ def homepage(request: Request):
    flow height minus the old 150px/190px top = -50px at both breakpoints)
    — so .home-photo-wrap's height now genuinely reflects its content and
    the grid row sizes itself correctly regardless of status copy length. */
+.home-status-body p{{font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;}}
+.home-status-body a{{color:var(--navy);}}
 .home-status{{position:relative;margin-top:-50px;background:#fff;border:2px solid var(--ink-graffiti);border-radius:14px;padding:20px 22px;transform:rotate(-1.5deg);box-shadow:3px 3px 0 var(--ink-graffiti);box-sizing:border-box;z-index:2;}}
 .home-toolbox-panel,.home-reader-slot{{width:100%;}}
 .home-toolbox-panel{{background:#fff;border:1.5px solid rgba(0,41,117,.15);border-radius:16px;padding:26px;box-sizing:border-box;position:relative;}}
@@ -4797,8 +4843,7 @@ def homepage(request: Request):
     </div>
     <div class="home-status">
       <div style="font:700 16px var(--font-wordmark);color:var(--seafoam-deep);margin-bottom:10px;">Status:</div>
-      {_copy_paragraphs_html(homepage_teaser, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
-      {_copy_paragraphs_html(homepage_expanded, style="font-size:14px;line-height:1.55;color:var(--ink-soft);margin:0 0 10px;")}
+      <div class="home-status-body">{_render_original_content_markdown(homepage_status)}</div>
     </div>
   </div>
 
@@ -4843,7 +4888,7 @@ def homepage(request: Request):
 </div>
 </div>"""
     return HTMLResponse(_page("Home", "Home", body, role=_role(request), request=request,
-                               og_description=_esc_attr_normalize(homepage_teaser)))
+                               og_description=_esc_attr_normalize(_hero_og_description(homepage_headline, homepage_subhead))))
 
 
 @app.get("/about", response_class=HTMLResponse)
@@ -26098,7 +26143,7 @@ _FPA_BUDDY_TOOLS = [
 # _SOFTWARE_TOOLS/_COMMUNITIES_TOOLS/_FPA_BUDDY_TOOLS above — see the
 # splice-in inside admin_page() and _hub_nav_all_hrefs()'s own line for it.
 _CONTENT_TOOLS = [
-    ("/admin/copy/homepage", "Homepage",            "Edit the hero headline/subhead and bio-box copy on the homepage—plain text, changes go live immediately."),
+    ("/admin/copy/homepage", "Homepage",            "Edit the hero headline and subhead, and the Status note under your photo. Changes go live immediately."),
     ("/admin/copy/about",    "About",               "Edit the bio on the About page—markdown plus raw HTML for links, with a Preview. Changes go live immediately."),
     ("/admin/copy/how-this-is-built", "How this is built", "Edit the origin story and rules copy on /how-this-is-built, in two fields split at the surface cards—raw HTML for links, unlike Homepage, plus a Preview."),
     ("/admin/ai-surfaces",   "AI surfaces",         "Add, edit, or delete the explainer cards on /how-this-is-built—markdown body, or an external link when the explainer lives elsewhere."),
@@ -29305,6 +29350,7 @@ _LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Voice guide's permitted ampersand terms are honored",
         "Voice guide follows its own typography rules",
         "Voice review queue",
+        "Homepage status is current",
     )),
     ("Brand and design", (
         "Brand standards",
@@ -38944,16 +38990,17 @@ def admin_copy_homepage_page(request: Request):
     try:
         homepage_headline = lib.get_setting("homepage_headline_copy") or _HOMEPAGE_HEADLINE_DEFAULT
         homepage_subhead = lib.get_setting("homepage_subhead_copy") or _HOMEPAGE_SUBHEAD_DEFAULT
-        homepage_teaser = lib.get_setting("homepage_teaser_copy") or _HOMEPAGE_TEASER_DEFAULT
-        homepage_expanded = lib.get_setting("homepage_expanded_copy") or _HOMEPAGE_EXPANDED_DEFAULT
+        homepage_status = _homepage_status_text(lib)
+        status_stamp = lib.get_setting(_hs.STATUS_REVISED_KEY)
     finally:
         lib.close()
 
+    age = _hs.status_age(status_stamp)
     prose = _ADMIN_COPY_PROSE_STYLE
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Homepage copy</h1>
-<p style="color:var(--muted);margin:4px 0 26px;">Edit the text on <a href="/">the homepage</a>&mdash;plain text, no links. Changes save straight to the live site.</p>
+<p style="color:var(--muted);margin:4px 0 26px;">Edit the text on <a href="/">the homepage</a>. The headline and subhead are plain text; the Status takes markdown and links. Changes save straight to the live site.</p>
 
 <div style="max-width:900px;margin:0 auto;">
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
@@ -38968,15 +39015,19 @@ def admin_copy_homepage_page(request: Request):
 <span id="headline-status" style="font-size:13px;color:var(--muted);"></span></div></div>
 
 <div style="background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:0 0 18px;">
-<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Bio box</div>
-<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The card below the hero, above the 3-card row&mdash;a short lead line, then the rest of your bio, both always visible (under a fixed "STATUS:" label that isn't editable here).</p>
-<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Lead line</label>
-<textarea id="home-teaser" rows="2" style="{prose}margin-bottom:14px;">{_esc(homepage_teaser)}</textarea>
-<label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px;">Rest of the bio</label>
-<textarea id="home-expanded" rows="8" style="{prose}">{_esc(homepage_expanded)}</textarea>
-<div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
-<button id="home-save-btn" onclick="saveHomepage()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
-<span id="home-status" style="font-size:13px;color:var(--muted);"></span></div></div>
+<div style="font:600 12px var(--font-body);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">Status</div>
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;">The note under your photo on the homepage, below a fixed "Status:" label. Separate paragraphs with a blank line.</p>
+<textarea id="home-status-copy" rows="9" style="{prose}">{_esc(homepage_status)}</textarea>
+<p style="font-size:12px;color:var(--muted);margin:8px 0 0;line-height:1.5;">Markdown works. For a link to another site, write a raw tag: <code>&lt;a href="https://example.com" target="_blank" rel="noopener"&gt;text&lt;/a&gt;</code>. Use Preview to check it before saving.</p>
+<div id="status-warning" role="status" style="{_hs_warn_style}display:{"block" if age["stale"] else "none"};">{_esc(_hs.warning_text(age["days"]))}</div>
+<p id="status-revised" style="font-size:13px;color:var(--muted);margin:12px 0 0;">{_status_revised_label(status_stamp)}</p>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap;">
+<button id="status-save-btn" onclick="saveStatus()" class="btn" style="font-size:14px;padding:9px 22px;">Save</button>
+<button type="button" onclick="previewCopy('home-status-copy','status-preview')" class="btn btn-ghost" style="font-size:14px;padding:9px 22px;">Preview</button>
+<button id="status-reviewed-btn" type="button" onclick="markStatusReviewed()" class="btn btn-ghost" style="font-size:14px;padding:9px 22px;">Mark reviewed</button>
+<span id="status-msg" style="font-size:13px;color:var(--muted);"></span></div>
+<div id="status-preview" style="display:none;border:1px dashed var(--line);border-radius:10px;padding:16px;margin-top:14px;"></div>
+</div></div>
 </div>
 </div>
 
@@ -38997,21 +39048,33 @@ async function saveHeadline() {{
   }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
 }}
 
-async function saveHomepage() {{
-  var teaser = document.getElementById('home-teaser').value.trim();
-  var expanded = document.getElementById('home-expanded').value.trim();
-  var btn = document.getElementById('home-save-btn'), status = document.getElementById('home-status');
-  if (!teaser || !expanded) {{ status.textContent = "Can't save empty copy."; status.style.color = '#b91c1c'; return; }}
+function statusApply(d) {{
+  document.getElementById('status-revised').textContent = d.label;
+  document.getElementById('status-warning').style.display = 'none';
+}}
+async function statusPost(url, payload, btnId, idle) {{
+  var btn = document.getElementById(btnId), msg = document.getElementById('status-msg');
   btn.disabled = true; btn.textContent = 'Saving…';
   try {{
-    var r = await fetch('/admin/copy/homepage', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify({{homepage_teaser_copy: teaser, homepage_expanded_copy: expanded}})}});
+    var r = await fetch(url, {{method:'POST', headers:{{'Content-Type':'application/json'}}, body: JSON.stringify(payload)}});
     if (!r.ok) throw new Error();
-    status.textContent = 'Saved.'; status.style.color = '#065f46';
-    setTimeout(function() {{ status.textContent = ''; }}, 3000);
+    statusApply(await r.json());
+    msg.textContent = 'Saved.'; msg.style.color = '#065f46';
+    setTimeout(function() {{ msg.textContent = ''; }}, 3000);
   }} catch(e) {{
-    status.textContent = 'Save failed—try again.'; status.style.color = '#b91c1c';
-  }} finally {{ btn.disabled = false; btn.textContent = 'Save'; }}
+    msg.textContent = 'Save failed—try again.'; msg.style.color = '#b91c1c';
+  }} finally {{ btn.disabled = false; btn.textContent = idle; }}
 }}
+function saveStatus() {{
+  var text = document.getElementById('home-status-copy').value.trim();
+  var msg = document.getElementById('status-msg');
+  if (!text) {{ msg.textContent = "Can't save empty copy."; msg.style.color = '#b91c1c'; return; }}
+  statusPost('/admin/copy/homepage', {{homepage_status_copy: text}}, 'status-save-btn', 'Save');
+}}
+function markStatusReviewed() {{
+  statusPost('/admin/copy/homepage/status-reviewed', {{}}, 'status-reviewed-btn', 'Mark reviewed');
+}}
+{_ADMIN_COPY_PREVIEW_JS}
 </script>"""
     return HTMLResponse(_page("Homepage copy—Admin", "Admin", body, authed=True))
 
@@ -39200,24 +39263,46 @@ async def admin_copy_save_about(request: Request):
     return JSONResponse({"ok": True})
 
 
+def _status_revised_label(stamp: str) -> str:
+    when = _fmt_log_time(stamp) if stamp else "not recorded yet"
+    return f"Last revised or confirmed {when}"
+
+
+def _status_stamp_response(lib) -> JSONResponse:
+    return JSONResponse({"ok": True, "label": _status_revised_label(lib.get_setting(_hs.STATUS_REVISED_KEY))})
+
+
 @app.post("/admin/copy/homepage")
 async def admin_copy_save_homepage(request: Request):
-    """Save the homepage bio copy. Rejects blank content so a mistaken empty
-    save can't wipe out existing copy."""
+    """Save the homepage Status note and stamp the revision time. Rejects
+    blank content so a mistaken empty save can't wipe out existing copy. The
+    two legacy keys (lead line, rest of the bio) are left untouched."""
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
     payload = await request.json()
-    teaser = (payload.get("homepage_teaser_copy") or "").strip()
-    expanded = (payload.get("homepage_expanded_copy") or "").strip()
-    if not teaser or not expanded:
-        raise HTTPException(status_code=400, detail="homepage_teaser_copy and homepage_expanded_copy required")
+    status = (payload.get(_hs.STATUS_COPY_KEY) or "").strip()
+    if not status:
+        raise HTTPException(status_code=400, detail="homepage_status_copy required")
     lib = _lib()
     try:
-        lib.set_setting("homepage_teaser_copy", teaser, source="admin-edit")
-        lib.set_setting("homepage_expanded_copy", expanded, source="admin-edit")
+        lib.set_setting(_hs.STATUS_COPY_KEY, status, source="admin-edit")
+        lib.set_setting(_hs.STATUS_REVISED_KEY, datetime.now(timezone.utc).isoformat())
+        return _status_stamp_response(lib)
     finally:
         lib.close()
-    return JSONResponse({"ok": True})
+
+
+@app.post("/admin/copy/homepage/status-reviewed")
+async def admin_copy_status_reviewed(request: Request):
+    """Restart the staleness clock without changing the text. Manual only."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    lib = _lib()
+    try:
+        lib.set_setting(_hs.STATUS_REVISED_KEY, datetime.now(timezone.utc).isoformat())
+        return _status_stamp_response(lib)
+    finally:
+        lib.close()
 
 
 @app.post("/admin/copy/preview")

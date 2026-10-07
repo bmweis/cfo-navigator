@@ -11492,3 +11492,26 @@ label, so the failing-checks term of the `/admin/checks` badge was always 0.
 It now matches `"Live + CI"` with `ok is False`; `ok=None` rows and CI-only
 rows stay uncounted. The cache, the `_checks_computing` sentinel, the
 static-check cache and the background refresher are unchanged.
+
+### Homepage Status note (2026-10)
+
+The "Status:" card under the homepage photo is one `settings` key,
+`homepage_status_copy`, rendered with `_render_original_content_markdown`
+(trusted admin text: markdown plus raw HTML, so an outbound link is a raw
+`<a target="_blank" rel="noopener">`). It replaces the two legacy keys
+`homepage_teaser_copy` and `homepage_expanded_copy`, which are left in place
+and never deleted; until the first save the page and the admin box read them
+(or their code defaults) joined by a blank line (`_homepage_status_text`).
+`og:description` does not use the Status. It is the hero headline (tags stripped), else the subhead's first paragraph, else the site default (`_hero_og_description`). `og:title` is "Home", so a card never repeats the sentence.
+
+Staleness lives in `linklib/homepage_status.py` (`STATUS_STALE_DAYS = 14`).
+`settings.homepage_status_revised_at` is a UTC ISO stamp, written only by
+`POST /admin/copy/homepage` (save) and `POST /admin/copy/homepage/status-reviewed`
+(Mark reviewed, text unchanged), shown on the card as "Last revised or confirmed",
+in UTC like the other admin log times. A startup hook writes the stamp once if
+it is missing, so the first deploy counts as confirmed today. The
+"Homepage status is current" row on `/admin/checks` (`checks.homepage_status_check`,
+a "Live + CI" row in the Voice and copy theme) reads that one settings row, is
+not behind `cached_static_check`, and renders no routes. The Admin badge counts it
+once, through `tasks._stale_admin_checks_reminders` (a live settings read).
+The row is a "Live + CI" row, so the failing-checks count (`_compute_failing_checks_count`) already counts it; it is deliberately not also in `_stale_admin_checks_reminders`, or it would count twice.

@@ -124,7 +124,7 @@ _SCAN_TABLES: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] = (
 # needs to reach.
 _SCAN_SETTINGS_KEYS = (
     "homepage_headline_copy", "homepage_subhead_copy", "homepage_teaser_copy",
-    "homepage_expanded_copy", "about_page_copy", "htib_before_copy", "htib_after_copy",
+    "homepage_expanded_copy", "homepage_status_copy", "about_page_copy", "htib_before_copy", "htib_after_copy",
 )
 
 

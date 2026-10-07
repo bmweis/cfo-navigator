@@ -353,6 +353,24 @@ def original_content_mirror_problems() -> list[str]:
 # (the /admin/checks summary) can label the two counts apart, rather than a
 # real discrepancy between them reading as identical-looking-but-mismatched
 # numbers for the same thing.
+def homepage_status_check(now=None) -> dict:
+    """Is the homepage Status note current? One settings read, no route
+    renders, and deliberately not behind cached_static_check: the answer
+    changes with the clock, not with the source tree."""
+    from linklib import homepage_status as hs
+    from webapp.app import _lib
+    lib = _lib()
+    try:
+        stamp = lib.get_setting(hs.STATUS_REVISED_KEY)
+    finally:
+        lib.close()
+    age = hs.status_age(stamp, now)
+    return {"name": "Homepage status is current", "where": "Live + CI", "ok": not age["stale"],
+            "what": f"The Status note under your photo was revised or confirmed in the last {hs.STATUS_STALE_DAYS} days. "
+                    "Edit it at /admin/copy/homepage.",
+            "detail": hs.check_detail(age)}
+
+
 def voice_review_queue_status() -> dict:
     from webapp.app import _lib
     lib = _lib()
@@ -742,6 +760,7 @@ def run_all() -> list[dict]:
         "detail": "; ".join(og) if og else "Every Live piece has its own share card."})
 
     results.append(voice_review_queue_status())
+    results.append(homepage_status_check())
 
     cm = coral_moment_problems()
     results.append({
