@@ -232,3 +232,76 @@ def test_drive_list_when_not_configured_is_plain(env):
 def test_json_route_is_not_a_hub_nav_orphan(env):
     appmod, _, _, _ = env
     assert "/admin/library-backup/drive-list" not in appmod.hub_nav_orphans()
+
+
+# --- the streamed upload (nightly cron shares this path) ----------------------
+
+def _fake_drive(monkeypatch, post):
+    monkeypatch.setattr(backup, "_access_token", lambda: "t")
+    monkeypatch.setattr(backup, "_resolve_folder_id", lambda *a: "folder")
+    monkeypatch.setattr(backup.requests, "post", post)
+    monkeypatch.setattr(backup, "prune_old_backups", lambda p: {"deleted": 0, "kept": 0, "error": ""})
+
+
+def test_streamed_body_has_a_content_length_equal_to_its_real_size_and_reads_in_chunks(tmp_path):
+    import requests
+    f = tmp_path / "snap.db"
+    f.write_bytes(os.urandom(3 * (1 << 20) + 123))
+    head, tail = b"HEAD\r\n", b"\r\nTAIL"
+    body = backup._MultipartBody(head, str(f), tail, chunk=1 << 20)
+    parts = list(body)                                   # what requests/http.client would send
+    assert parts[0] == head and parts[-1] == tail
+    assert len(parts) == 1 + 4 + 1                       # 3 full chunks + remainder, not one read
+    assert max(len(p) for p in parts[1:-1]) <= 1 << 20
+    real_size = sum(len(p) for p in parts)
+    assert real_size == len(head) + f.stat().st_size + len(tail)
+    prepared = requests.Request("POST", "https://example.invalid/upload", data=body,
+                                headers={"Content-Type": "multipart/related; boundary=b"}).prepare()
+    assert prepared.headers["Content-Length"] == str(real_size)
+    assert "Transfer-Encoding" not in prepared.headers   # not chunked-encoded
+
+
+def test_failure_inside_the_streamed_upload_is_logged_and_raised(env, monkeypatch):
+    _, _, _, db = env
+    _configure(monkeypatch)
+    Library(db).close()
+
+    def failing_post(url, headers=None, data=None, timeout=None, **kw):
+        next(iter(data))                                  # start streaming, then the connection dies
+        raise RuntimeError("connection reset while streaming")
+
+    _fake_drive(monkeypatch, failing_post)
+    with pytest.raises(RuntimeError, match="connection reset"):
+        backup.backup_now(db)
+    lib = Library(db)
+    try:
+        rows = lib.list_backup_log()
+    finally:
+        lib.close()
+    assert rows[0]["status"] == "failure" and "connection reset" in rows[0]["error"]
+    assert not backup.backup_is_running()                 # lock released after a failure
+
+
+def test_cron_path_success_response_shape_through_the_real_backup_now(env, monkeypatch):
+    """Same status code and message shape the cron has always received, with
+    only Drive mocked (this test also passes against the pre-streaming code)."""
+    appmod, _, anon, db = env
+    _configure(monkeypatch)
+    Library(db).close()
+
+    class Resp:
+        def raise_for_status(self): pass
+        def json(self): return {"id": "fid", "name": "n"}
+
+    def post(url, headers=None, data=None, timeout=None, **kw):
+        if isinstance(data, (bytes, bytearray)):
+            pass
+        else:
+            b"".join(data)
+        return Resp()
+
+    _fake_drive(monkeypatch, post)
+    r = anon.post("/admin/backup-now", headers={"X-Save-Token": TOKEN})
+    assert r.status_code == 200
+    import re
+    assert re.search(r"Uploaded <strong>library-\d{8}-\d{6}\.db</strong> \([\d,]+ bytes, [\d,]+ articles\) to Google Drive\.", r.text)
