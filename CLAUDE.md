@@ -11957,13 +11957,14 @@ must pass. **Mechanically enforced** by a GitHub ruleset (`main-protection`) on
 `main`, created 2026-09-26: requires a PR before merging (0 required approvals —
 solo repo), requires the `tests` and `secret-scan` status checks to pass, requires
 the PR branch to be up to date with `main` before merge, blocks force pushes, and
-restricts branch deletion. The ruleset carries "Repository admin — Always allow" on
-its bypass list — a deliberate escape hatch so a GitHub Actions quota outage can't
-lock Brian out when required checks can never go green, not an oversight. It guards
-against an accidental direct push, not a gate on the sole committer. Issue #631
-tracks removing that bypass once the repo is public and Actions minutes are
-unrestricted; that's Brian's call, on his own timeline, once CI has run green for a
-week. (Before this ruleset existed, "requires a PR and passing checks" was
+restricts branch deletion. There is no bypass: on 2026-10-07 Brian removed the "Repository admin — Always allow"
+entry from the bypass list (issue #631, closed), so every merge to `main` needs a PR
+with `tests` and `secret-scan` green, admin included. The bypass used to exist so a
+GitHub Actions quota outage couldn't lock him out. If CI is down, Brian temporarily
+re-adds it (repo Settings, Rules, Rulesets, `main-protection`, Bypass list, Add
+bypass, Repository admin, Always allow), merges with the local-verification
+substitutes in the PR body, then removes it again; RUNBOOK §10 has the steps. (This
+paragraph states Brian's account of the ruleset; it can't be verified from the repo.) (Before this ruleset existed, "requires a PR and passing checks" was
 convention only, not a real gate — worth knowing if a future investigation finds a
 commit that looks like it skipped review; anything from before 2026-09-26 could
 have.)
