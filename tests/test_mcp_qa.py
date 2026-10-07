@@ -37,6 +37,9 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from linklib.db import Library
+from linklib import matchmaker as _mm_module
+
+_REAL_MATCHMAKER_ANSWER = _mm_module._answer  # captured before any test patches it
 
 
 def _mint(lib: Library, username: str, role: str = "user", active: int = 1):
@@ -64,6 +67,8 @@ def live_server(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     from tests.ask_stub import ok_answer_question
     monkeypatch.setattr("linklib.agent.answer_question", ok_answer_question)
+    from tests.matchmaker_stub import ok_answer as _mm_ok
+    monkeypatch.setattr("linklib.matchmaker._answer", _mm_ok)
     import importlib
     import webapp.app as appmod
     importlib.reload(appmod)
@@ -426,3 +431,28 @@ def test_ask_fpa_buddy_failed_turn_is_a_tool_error_and_spend_is_recorded(live_se
         assert lib.list_recent_conversations(live_server.member_id_) == []
     finally:
         lib.close()
+
+
+def test_ask_matchmaker_failed_turn_is_a_plain_tool_error_and_not_recorded(live_server, monkeypatch):
+    """#703: a model-call failure is a tool error with a plain message, never
+    answer text carrying the raw exception, and nothing is recorded."""
+    raw = "upstream 529 overloaded"
+
+    def boom():
+        raise RuntimeError(raw)
+
+    monkeypatch.setattr("linklib.matchmaker._answer", _REAL_MATCHMAKER_ANSWER)
+    monkeypatch.setattr("linklib.matchmaker._get_client", boom)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
+    lib = Library(os.environ["LINKLIB_DB"])
+    lib.seed_voice_prompts()
+    lib.close()
+    result = _call_tool(live_server.base_url, live_server.member, "ask_matchmaker",
+                        {"kind": "tools", "question": "close automation software"})
+    text = _error_text(result)
+    assert text == "Couldn't answer that just now. Try again in a moment."
+    assert raw not in text and "Answer call failed" not in text
+    lib = Library(os.environ["LINKLIB_DB"])
+    n = lib.conn.execute("SELECT COUNT(*) FROM matchmaker_questions").fetchone()[0]
+    lib.close()
+    assert n == 0
