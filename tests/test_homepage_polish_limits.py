@@ -248,6 +248,19 @@ def test_open_reader_control_is_admin_only(env):
     assert "/read" in adm
 
 
+def test_open_reader_control_absent_for_a_signed_in_member(env):
+    lib = env._lib()
+    try:
+        lib.create_user("member1", "supersecret", role="user")
+    finally:
+        lib.close()
+    from fastapi.testclient import TestClient
+    c = TestClient(env.app)
+    c.post("/login", data={"username": "member1", "password": "supersecret"}, follow_redirects=False)
+    html = c.get("/").text
+    assert "Open reader" not in html and 'href="/read"' not in html
+
+
 def test_tools_page_keeps_the_reader_card(env):
     assert "Reader access" in _client(env, admin=True).get("/tools").text
 
