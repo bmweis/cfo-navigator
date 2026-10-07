@@ -102,13 +102,14 @@ def _admin_page(appmod):
 def test_admin_notes_hidden_pieces_when_more_than_four_flagged(env):
     _seed(env, 5)
     html = _admin_page(env)
-    assert "Only the first 4, by display order, appear on the homepage." in html
-    assert "Not shown: Piece 4." in html
+    assert "not showing on the homepage" in html
+    assert "the Original content section has 4 slots and shows the first 4" in html
+    assert "Hidden: Piece 4." in html
 
 
 def test_admin_has_no_cap_note_at_four_or_fewer(env):
     _seed(env, 4)
-    assert "appear on the homepage" not in _admin_page(env)
+    assert "not showing on the homepage" not in _admin_page(env)
 
 
 def test_admin_cap_note_ignores_drafts_and_unflagged(env):
@@ -121,4 +122,4 @@ def test_admin_cap_note_ignores_drafts_and_unflagged(env):
                                  "b", "live", False, "", "", 10)
     finally:
         lib.close()
-    assert "appear on the homepage" not in _admin_page(env)
+    assert "not showing on the homepage" not in _admin_page(env)
