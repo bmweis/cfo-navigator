@@ -723,7 +723,7 @@ def test_mcp_setup_copy_covers_all_four_steps(env):
     assert "unlimited" in body
     assert "python -m scripts.mint_api_token --db /data/library.db --username" in body
     assert "https://mcp.bmweis.com/mcp" in body
-    assert "authorization" in body
+    assert "<strong>Authorization</strong>" in body
     assert "Bearer &lt;token&gt;" in body
     assert "railway ssh" in body
     # Brian's approved addition: how the temp password actually reaches
