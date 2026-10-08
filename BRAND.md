@@ -902,7 +902,7 @@ constants:
   Last restore), `_BACKUP_COL_WIDTH_WHEN` (132, Check date and Restore date, with "by <user>"
   on a second line), `_BACKUP_COL_WIDTH_DETAILS` (240, the reasons). The columns are Made (UTC),
   Backup, Size, Articles, Last check, Check date, Last restore, Restore date, Details, Actions.
-  The two row buttons, Check backup and Restore backup, share `_BACKUP_BTN_WIDTH` (116).
+  The two row buttons, Check backup and Restore backup, share `_BACKUP_BTN_WIDTH` (116) and sit side by side on one row; the Actions column has a `_BACKUP_COL_WIDTH_ACTIONS` (264) floor and `nowrap`, so they never wrap.
   `_BACKUP_TABLE_MIN_WIDTH` (1560) keeps ten columns readable between the card breakpoint
   and a wide page; the `.table-frame` scrolls sideways when the page is narrower. Under 700px the table is `.bk-stack`:
   labelled cards, one field per line with its column name, `min-width:0 !important` so

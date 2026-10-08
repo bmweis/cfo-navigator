@@ -2148,6 +2148,7 @@ _BACKUP_COL_WIDTH_CHIP = 104      # Last check / Last restore: a chip, or a shor
 _BACKUP_COL_WIDTH_WHEN = 132      # Check date / Restore date: "2026-10-08 09:00 UTC", "by <user>" beneath
 _BACKUP_COL_WIDTH_DETAILS = 240   # Details: the plain-language reasons
 _BACKUP_BTN_WIDTH = 116           # Check backup and Restore backup share this width
+_BACKUP_COL_WIDTH_ACTIONS = 2 * _BACKUP_BTN_WIDTH + 8 + 24   # two buttons, the gap, cell padding: side by side, never wrapped
 _BACKUP_TABLE_MIN_WIDTH = 1560
 # A finished or failed restore, check or backup panel stays at the top of the
 # page this long, then a failure stays as a row in the backups table.
@@ -37184,6 +37185,7 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 .bk-table .col-chip{{min-width:{_BACKUP_COL_WIDTH_CHIP}px;white-space:nowrap;}}
 .bk-table .col-when{{min-width:{_BACKUP_COL_WIDTH_WHEN}px;white-space:nowrap;}}
 .bk-table .col-details{{min-width:{_BACKUP_COL_WIDTH_DETAILS}px;}}
+.bk-table .col-actions{{min-width:{_BACKUP_COL_WIDTH_ACTIONS}px;white-space:nowrap;}}
 .bk-table .col-details div{{margin:0 0 3px;}}
 .bk-btn{{box-sizing:border-box;width:{_BACKUP_BTN_WIDTH}px;font-size:12px;padding:5px 10px;line-height:1.3;text-align:center;text-decoration:none;white-space:nowrap;display:inline-block;}}
 /* Phones: the table becomes labelled cards, one field per line with its column name.
@@ -37276,8 +37278,8 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
     if(f.check&&f.check.result!=='Succeeded')lines.push('Check: '+(f.check.reason||f.check.result));
     if(f.restored&&f.restored.result!=='Succeeded')lines.push('Restore: '+(f.restored.reason||f.restored.result));
     tr.appendChild(detailsCell(lines));
-    var ta=cell('Actions');
-    var wrap=el('div','dl-actions');wrap.style.cssText='display:flex;flex-wrap:wrap;gap:8px;';
+    var ta=cell('Actions');ta.classList.add('col-actions');
+    var wrap=el('div','dl-actions');wrap.style.cssText='display:flex;flex-wrap:nowrap;gap:8px;';
     var fm=document.createElement('form');fm.method='post';fm.action='/admin/library-backup/check/'+encodeURIComponent(f.id);fm.style.margin='0';
     var cb=el('button','btn btn-ghost bk-btn','Check backup');cb.type='submit';fm.appendChild(cb);wrap.appendChild(fm);
     var a=el('a','btn btn-ghost bk-btn','Restore backup');a.href='/admin/library-backup/restore/'+encodeURIComponent(f.id);wrap.appendChild(a);

@@ -519,6 +519,12 @@ def test_row_buttons_are_renamed_and_exactly_as_wide_on_desktop_and_phone(world)
             assert cb and rb, width
             assert cb["width"] == rb["width"], (width, cb, rb)
             assert abs(cb["height"] - rb["height"]) < 1, (width, cb, rb)
+            if width > 700:   # desktop: side by side on one line, never wrapped
+                assert abs(cb["y"] - rb["y"]) < 1 and cb["x"] + cb["width"] <= rb["x"], (cb, rb)
+            if width > 700:   # the rule itself, since a wide test table would not wrap either way
+                st = row.locator("td.col-actions").evaluate(
+                    "td=>[getComputedStyle(td).whiteSpace,getComputedStyle(td.firstElementChild).flexWrap,parseFloat(getComputedStyle(td).minWidth)]")
+                assert st[0] == "nowrap" and st[1] == "nowrap" and st[2] >= 2 * 116 + 8, st
             assert pg.locator("text=Check this backup").count() == 0 and pg.locator("text=Restore from backup").count() == 0
         finally:
             b.close()
