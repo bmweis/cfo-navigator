@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 from datetime import datetime, timezone
 
 STATUS_FILE = "restore-status.json"
@@ -116,6 +117,34 @@ def read_audit(db_path: str, limit: int = 200) -> list[dict]:
     except OSError:
         return []
     return out[-limit:]
+
+
+_INTERRUPT_LOCK = threading.Lock()
+
+
+def record_interrupted(db_path: str) -> bool:
+    """Turn an interrupted run into a durable audit line, once per job.
+
+    A run killed mid-way never reaches its own audit write, and the next run
+    wipes the status record, so without this the evidence would vanish. Call it
+    wherever a stale "running" record is about to be superseded or read: the
+    next run's start (page route and script) and the admin page. Idempotent:
+    a job id (or the start time, for a record without one) that already has an
+    "interrupted" line writes nothing. Returns True when it wrote a line."""
+    with _INTERRUPT_LOCK:
+        st = read_status(db_path)
+        if effective_state(st) != "interrupted":
+            return False
+        key = st.get("job_id") or st.get("started_at") or st.get("updated_at") or ""
+        for rec in read_audit(db_path, limit=1000):
+            if rec.get("result") == "interrupted" and (rec.get("job_id") or rec.get("started_at") or "") == key:
+                return False
+        audit(db_path, time=st.get("updated_at") or st.get("started_at") or now_iso(),
+              user=st.get("user"), file_id=st.get("file_id", ""), file_name=st.get("file_name", ""),
+              mode=st.get("mode", "restore"), result="interrupted",
+              message="The process stopped before it finished.",
+              started_at=st.get("started_at", ""), articles=None, job_id=st.get("job_id", ""))
+        return True
 
 
 def pid_alive(pid) -> bool:

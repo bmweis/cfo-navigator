@@ -284,9 +284,9 @@ def test_both_buttons_fit_and_stay_tappable_at_390px(world, tmp_path):
             pg.fill("input[name=password]", "adminpass")
             pg.click("button[type=submit]")
             pg.goto(base + "/admin/library-backup")
-            pg.wait_for_selector(".drive-list-table")
+            pg.wait_for_selector(".bk-table")
             for sel in ("button:has-text('Check this backup')", "a:has-text('Restore from backup')"):
-                box = pg.locator(".drive-list-table " + sel).first.bounding_box()
+                box = pg.locator(".bk-table " + sel).first.bounding_box()
                 assert box and box["x"] >= 0 and box["x"] + box["width"] <= 390, (sel, box)
                 assert box["height"] >= 24
             assert pg.evaluate("document.documentElement.scrollWidth") <= 390
