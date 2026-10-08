@@ -278,6 +278,7 @@ def test_starting_a_run_records_the_stale_one_first(world, monkeypatch):
     monkeypatch.setattr(world["app"].threading, "Thread", lambda *a, **k: type("T", (), {"start": lambda self: None})())
     r = world["admin"].post("/admin/library-backup/check/f1", follow_redirects=False)
     assert r.status_code == 303
+    backup.release_exclusive()  # the stubbed thread never ran, so it would never release the backup lock
     lines = [x for x in rs.read_audit(db) if x.get("result") == "interrupted"]
     assert [x["job_id"] for x in lines] == ["job-old"]
 
