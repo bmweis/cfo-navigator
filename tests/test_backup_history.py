@@ -76,15 +76,16 @@ def test_finished_panel_shows_within_thirty_minutes(world):
     assert 'id="restore-panel"' in _page(world)
 
 
-def test_failed_panel_expires_too_and_the_failure_stays_in_the_table(world):
+def test_failed_panel_expires_too_and_the_failure_stays_on_the_files_row(world):
     db = world["db"]
     rs.write_status(db, state="failed", mode="check", message="Boom.", started_at=_iso(200), finished_at=_iso(190))
     rs.audit(db, user="admin", file_id="f1", file_name=FILES[0]["name"], mode="check", result="failed",
              message="The check failed: md5 does not match Drive's checksum.")
     assert 'id="restore-panel"' not in _page(world)
     _, rows = _rows(world)
-    fail = next(r for r in rows if r["kind"] == "failure")
-    assert "md5 does not match Drive" in fail["detail"] and fail["result"] == "Failed"
+    assert [r for r in rows if r["kind"] == "failure"] == []
+    c = _file(rows, "f1")["check"]
+    assert "md5 does not match Drive" in c["reason"] and c["result"] == "Failed"
 
 
 def test_a_running_job_always_shows(world):
@@ -157,9 +158,9 @@ def test_failures_get_one_row_each_with_plain_reasons(world):
     lib = Library(db)
     lib.record_backup_attempt("failure", error="HTTP 404")
     lib.close()
-    rs.audit(db, user="admin", file_id="f1", file_name=FILES[0]["name"], mode="check", result="failed",
+    rs.audit(db, user="admin", file_id="gone1", file_name="old1.db", mode="check", result="failed",
              message="The check failed: md5 does not match Drive's checksum. Nothing was changed.")
-    rs.audit(db, user="admin", file_id="f2", file_name=FILES[1]["name"], mode="restore", result="refused",
+    rs.audit(db, user="admin", file_id="gone2", file_name="old2.db", mode="restore", result="refused",
              message="Another restore or check is already running. Nothing was changed.")
     _, rows = _rows(world)
     fails = [r for r in rows if r["kind"] == "failure"]
@@ -243,7 +244,7 @@ def _stale_running(db, job_id="job-stale"):
                     file_id="f1", file_name=FILES[0]["name"], user="1", stage="downloading")
 
 
-def test_an_interrupted_run_becomes_a_failure_row_exactly_once(world):
+def test_an_interrupted_restore_of_a_drive_file_shows_on_its_row_and_is_audited_exactly_once(world):
     db = world["db"]
     _stale_running(db)
     for _ in range(3):                                  # three page loads and three list loads
@@ -252,8 +253,8 @@ def test_an_interrupted_run_becomes_a_failure_row_exactly_once(world):
     lines = [r for r in rs.read_audit(db) if r.get("result") == "interrupted"]
     assert len(lines) == 1 and lines[0]["job_id"] == "job-stale" and lines[0]["file_id"] == "f1"
     _, rows = _rows(world)
-    fails = [r for r in rows if r["kind"] == "failure"]
-    assert [(r["action"], r["result"], r["file"]) for r in fails] == [("Restore", "Interrupted", FILES[0]["name"])]
+    assert [r for r in rows if r["kind"] == "failure"] == []        # f1 is in Drive: it shows on its own row
+    assert _file(rows, "f1")["restored"]["result"] == "Interrupted"
 
 
 def test_an_interrupted_run_is_kept_when_the_next_run_wipes_the_status(world):
@@ -263,7 +264,7 @@ def test_an_interrupted_run_is_kept_when_the_next_run_wipes_the_status(world):
     rs.reset_status(db, state="running", pid=os.getpid(), job_id="job-next", started_at=_iso(0))   # the next run starts
     assert rs.record_interrupted(db) is False                                   # live process: nothing to record
     _, rows = _rows(world)
-    assert [r["result"] for r in rows if r["kind"] == "failure"] == ["Interrupted"]
+    assert _file(rows, "f1")["restored"]["result"] == "Interrupted"
 
 
 def test_a_live_run_is_not_recorded_as_interrupted(world):
@@ -285,16 +286,18 @@ def test_starting_a_run_records_the_stale_one_first(world, monkeypatch):
 
 # --- C: the Restored cell and the Drive failure message ---------------------------------
 
-def test_a_failed_restore_never_fills_the_restored_cell(world):
+def test_a_failed_restore_shows_in_the_last_restore_cell_with_its_reason(world):
     db = world["db"]
-    rs.audit(db, user="admin", file_id="f1", file_name=FILES[0]["name"], mode="restore", result="failed", message="x")
+    rs.audit(db, user="admin", file_id="f1", file_name=FILES[0]["name"], mode="restore", result="failed",
+             message="The restore failed: disk is full. Nothing was changed.")
     _, rows = _rows(world)
-    assert _file(rows, "f1")["restored"] is None
+    r = _file(rows, "f1")["restored"]
+    assert (r["result"], r["reason"], r["by"]) == ("Failed", "disk is full.", "admin")
 
 
 def test_the_script_renders_the_cells(world):
     page = _page(world)
-    for head in ("Made (UTC)", "Backup", "Size", "Articles", "Last check", "Restored", "Actions"):
+    for head in ("Made (UTC)", "Backup", "Size", "Articles", "Last check", "Last restore", "Actions"):
         assert f"'{head}'" in page
     assert "Not checked" in page
 
@@ -347,6 +350,8 @@ def test_the_table_is_labelled_cards_without_stray_lines_on_a_phone(world):
                  result="finished", message="x", articles=1)
         rs.audit(world["db"], user="admin", file_id="f1", file_name=FILES[0]["name"], mode="check",
                  result="failed", message="The check failed: md5 does not match Drive's checksum.")
+        rs.audit(world["db"], user="admin", file_id="gone", file_name="old.db", mode="check",
+                 result="failed", message="The check failed: gone.")
         ctx = b.new_context(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True)
         pg = ctx.new_page()
         _serve(pg, world["admin"])
@@ -360,7 +365,7 @@ def test_the_table_is_labelled_cards_without_stray_lines_on_a_phone(world):
             display:getComputedStyle(t.querySelector('tbody tr')).display,
             failVisibleCells:[...fail.children].filter(td=>getComputedStyle(td).display!=='none').map(td=>td.getAttribute('data-label')),
             overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,
-            restored:[...t.querySelectorAll('td[data-label=Restored]')].some(td=>td.textContent.includes('UTC'))};}""")
+            restored:[...t.querySelectorAll('td[data-label="Last restore"]')].some(td=>td.textContent.includes('UTC'))};}""")
         assert not m["overflow"], m
         assert m["restored"], m
         assert m["borders"] == ["0px"], m          # no line between every cell
@@ -392,3 +397,61 @@ def test_page_does_not_overflow_with_a_long_finished_panel(world):
     finally:
         b.close()
         pw.stop()
+
+
+# --- a failure on a file in Drive belongs on that file's row -------------------------------
+
+def test_a_failed_check_of_a_drive_file_shows_in_last_check_and_makes_no_row(world):
+    db = world["db"]
+    rs.audit(db, user="admin", file_id="f1", file_name=FILES[0]["name"], mode="check", result="failed",
+             message="The check failed: md5 does not match Drive's checksum. Nothing was changed.")
+    _, rows = _rows(world)
+    c = _file(rows, "f1")["check"]
+    assert (c["result"], c["reason"]) == ("Failed", "md5 does not match Drive's checksum.")
+    assert [r for r in rows if r["kind"] == "failure"] == []
+
+
+def test_a_refused_restore_shows_in_last_restore_and_makes_no_row(world):
+    db = world["db"]
+    rs.audit(db, user="admin", file_id="f2", file_name=FILES[1]["name"], mode="restore", result="refused",
+             message="Another restore or check is already running. Nothing was changed.")
+    _, rows = _rows(world)
+    r = _file(rows, "f2")["restored"]
+    assert (r["result"], r["reason"], r["by"]) == ("Refused", "Another restore or check is already running.", "admin")
+    assert [x for x in rows if x["kind"] == "failure"] == []
+
+
+def test_a_failed_backup_still_gets_its_own_row(world):
+    lib = Library(world["db"])
+    lib.record_backup_attempt("failure", error="HTTP 404")
+    lib.close()
+    _, rows = _rows(world)
+    assert [(r["action"], r["result"]) for r in rows if r["kind"] == "failure"] == [("Backup", "Failed")]
+
+
+def test_check_and_restore_attempts_on_a_file_no_longer_in_drive_still_get_rows(world):
+    db = world["db"]
+    rs.audit(db, user="admin", file_id="gone", file_name="old.db", mode="check", result="failed", message="The check failed: x.")
+    rs.audit(db, user="admin", file_id="gone", file_name="old.db", mode="restore", result="refused", message="y")
+    rs.audit(db, user="admin", file_id="", file_name="", mode="restore", result="failed", message="The restore failed: z.")  # unknown file
+    _, rows = _rows(world)
+    assert sorted((r["action"], r["result"]) for r in rows if r["kind"] == "failure") == \
+        [("Check", "Failed"), ("Restore", "Failed"), ("Restore", "Refused")]
+
+
+def test_a_file_with_a_good_restore_and_a_later_failed_check_shows_both(world):
+    db = world["db"]
+    rs.audit(db, time=_iso(30), user="admin", file_id="f1", file_name=FILES[0]["name"], mode="restore", result="finished", message="x")
+    rs.audit(db, time=_iso(5), user="admin", file_id="f1", file_name=FILES[0]["name"], mode="check", result="failed",
+             message="The check failed: md5 does not match.")
+    _, rows = _rows(world)
+    f1 = _file(rows, "f1")
+    assert f1["restored"]["result"] == "Succeeded" and f1["restored"]["reason"] == ""
+    assert f1["check"]["result"] == "Failed" and f1["check"]["reason"]
+    assert [r for r in rows if r["kind"] == "failure"] == []
+
+
+def test_the_script_shows_the_reason_and_the_new_labels(world):
+    page = _page(world)
+    assert "'Last restore'" in page and "'Restored'" not in page and "Not used" in page
+    assert "a.reason" in page

@@ -37223,16 +37223,23 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 {_backup_status_banner(backup_rows)}
 <h2 style="font-size:16px;margin:24px 0 4px;">Backups in Drive</h2>
 <div id="drive-list"><p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Loading the list from Google Drive&hellip;</p></div>
-<p style="color:var(--muted);font-size:13px;margin:8px 0 0;">One row per backup file, newest first, times in UTC. Only backups made by this app appear: the daily ones and the ones from the button. A file placed in the Drive folder by hand does not show. The newest 14 are kept, so extra manual backups push the oldest out. Failures get a row of their own (the newest 20 show). Every check and restore is also kept in a log file beside the database, but this table shows only the latest of each per backup. Articles come from the database&rsquo;s backup log, so a restore to an older backup removes that number for backups made after it. Their buttons stay.</p>
+<p style="color:var(--muted);font-size:13px;margin:8px 0 0;">One row per backup file, newest first, times in UTC. Only backups made by this app appear: the daily ones and the ones from the button. A file placed in the Drive folder by hand does not show. The newest 14 are kept, so extra manual backups push the oldest out. A failed backup, and a failed check or restore of a backup that is no longer listed, get a row of their own (the newest 20 show). A backup in the list shows its latest check and latest restore, whatever the outcome, on its own row. Every attempt is also kept in a log file beside the database. Articles come from the database&rsquo;s backup log, so a restore to an older backup removes that number for backups made after it. Their buttons stay.</p>
 <script>
 (function(){{
   var box=document.getElementById('drive-list');
-  var TH=['Made (UTC)','Backup','Size','Articles','Last check','Restored','Actions'];
+  var TH=['Made (UTC)','Backup','Size','Articles','Last check','Last restore','Actions'];
   function say(t){{var p=document.createElement('p');p.style.cssText='color:var(--muted);font-size:13px;margin:0 0 8px;';p.textContent=t;box.appendChild(p);}}
   function el(tag,cls,text){{var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}}
   function cell(label,na){{var td=document.createElement('td');td.setAttribute('data-label',label);td.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;';if(na)td.className='bk-na';return td;}}
   function chip(text,kind){{return el('span','bk-chip bk-chip-'+kind,text);}}
   function dash(td){{td.textContent='\u2014';return td;}}
+  function attempt(c,a,none,showBy){{
+    if(!a){{var nc=el('span',null,none);nc.style.color='var(--muted)';c.appendChild(nc);return;}}
+    c.appendChild(chip(a.result,a.result==='Succeeded'?'ok':(a.result==='Refused'?'grey':'bad')));
+    c.appendChild(el('div','bk-sub',a.when+' UTC'));
+    if(showBy&&a.by)c.appendChild(el('div','bk-sub','by '+a.by));
+    if(a.reason)c.appendChild(el('div','bk-sub',a.reason));
+  }}
   function fileRow(f){{
     var tr=document.createElement('tr');
     var c=cell('Made');c.style.whiteSpace='nowrap';c.textContent=f.made+' UTC';tr.appendChild(c);
@@ -37240,11 +37247,10 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
     c=cell('Size');c.style.whiteSpace='nowrap';c.textContent=(f.size/1048576).toFixed(1)+' MB';tr.appendChild(c);
     c=cell('Articles');c.style.whiteSpace='nowrap';if(f.articles==null)dash(c);else c.textContent=Number(f.articles).toLocaleString('en-US');tr.appendChild(c);
     c=cell('Last check');c.classList.add('col-check');
-    if(f.check){{c.appendChild(chip(f.check.result,f.check.result==='Succeeded'?'ok':'bad'));c.appendChild(el('div','bk-sub',f.check.when+' UTC'));}}
-    else{{var nc=el('span',null,'Not checked');nc.style.color='var(--muted)';c.appendChild(nc);}}
+    attempt(c,f.check,'Not checked',false);
     tr.appendChild(c);
-    c=cell('Restored');c.classList.add('col-restored');
-    if(f.restored){{c.appendChild(el('div',null,f.restored.when+' UTC'));if(f.restored.by)c.appendChild(el('div','bk-sub','by '+f.restored.by));}}else dash(c);
+    c=cell('Last restore');c.classList.add('col-restored');
+    attempt(c,f.restored,'Not used',true);
     tr.appendChild(c);
     var ta=cell('Actions');
     var wrap=el('div','dl-actions');wrap.style.cssText='display:flex;flex-wrap:wrap;gap:8px;';
@@ -37264,7 +37270,7 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
     var d=(r.detail||'')+(r.by?(r.detail?' ':'')+'(by '+r.by+')':'');
     if(d)c.appendChild(el('div','bk-sub',d));
     tr.appendChild(c);
-    tr.appendChild(dash(cell('Restored',true)));tr.appendChild(cell('Actions',true));
+    tr.appendChild(dash(cell('Last restore',true)));tr.appendChild(cell('Actions',true));
     return tr;
   }}
   var ctl=new AbortController();var timer=setTimeout(function(){{ctl.abort();}},15000);

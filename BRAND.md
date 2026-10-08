@@ -899,7 +899,7 @@ constants:
 - **`/admin/library-backup`'s one table (`.bk-table`)** has one named width:
   `_BACKUP_COL_WIDTH_FILENAME` (236, the file name; 211px of text plus cell padding, so
   the name never wraps). The other six columns (Made, Size, Articles, Last check,
-  Restored, Actions) take what is left; short tokens carry `white-space:nowrap` and the
+  Last restore, Actions) take what is left; short tokens carry `white-space:nowrap` and the
   Actions buttons wrap. `_BACKUP_TABLE_MIN_WIDTH` (900) keeps seven columns readable
   between the card breakpoint and a wide page. Under 700px the table is `.bk-stack`:
   labelled cards, one field per line with its column name, `min-width:0 !important` so
