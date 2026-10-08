@@ -597,14 +597,13 @@ TABLE_OVERRIDE_ALLOWLIST = {
     ".oc-body .ger-table-wrap,.oc-body .ns-table-wrap":
         "removes the frame stored on article table wrappers so the table's own frame is the only one",
     ".admin-table-responsive tr": "mobile card layout, where a table's rows become stacked cards",
-    ".backup-log-table td": "mobile card layout for the backup history table",
-    ".drive-list-table td": "mobile card layout for the Drive backups list on /admin/library-backup",
+    ".bk-stack td": "mobile card layout for the history table and Drive list on /admin/library-backup",
     # Refs 655, B1. The generic td border rule is !important, so the rule that
     # drops cell borders in a stacked card has to be too; the earlier
     # non-lifted version never applied (see _CSS). Two entries, one per card
     # breakpoint.
     ".site-main.site-main table.admin-table-responsive.admin-table-responsive td, "
-    ".site-main.site-main table.backup-log-table.backup-log-table td":
+    ".site-main.site-main table.bk-stack.bk-stack td":
         "mobile card layout: cells carry no top border (replaces the specificity-losing rule below)",
     ".site-main.site-main table.ff-table.ff-table td, .site-main.site-main table.fs-table.fs-table td":
         "mobile card layout for the feeds tables: cells carry no top border",
