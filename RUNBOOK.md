@@ -58,15 +58,15 @@ is a mistake. Log in as admin, open `/admin/library-backup` and click
 > production size (the 2026-10-06 rehearsal ran about 55 minutes and the app never
 > logged the POST, §4).
 >
-> **Path D (new, 2026-10): the Restore from backup button.** On
-> `/admin/library-backup`, each backup in the Drive list has **Restore from backup**.
-> It opens a confirmation page (**Check this backup** downloads and validates only;
+> **Path D (new, 2026-10): the Restore backup button.** On
+> `/admin/library-backup`, each backup in the Drive list has **Restore backup**.
+> It opens a confirmation page (**Check this backup** on that page downloads and validates only;
 > restoring needs you to type `RESTORE`). The server downloads the backup from Drive
 > itself, so nothing passes through Cloudflare. It runs the same script as Path C.
 > The result panel at the top of the page shows a running job, or a finished or failed
 > one for 30 minutes; after that it disappears. The **Backups in Drive** table is the
-> record: one row per backup file, with its article count, its latest check and the
-> date of its latest restore, plus a red row for each failed or interrupted run.
+> record: one row per backup file, with its article count, its latest check and
+> latest restore (each with its date and who ran it, and the reason when it did not succeed), plus a red row for each failed or interrupted run.
 > The page shows the stage, elapsed time and the last log lines, and says
 > **Interrupted** with recovery steps if the process dies. Use Path C (the terminal)
 > when the app is down or the page will not load.
@@ -77,7 +77,7 @@ is a mistake. Log in as admin, open `/admin/library-backup` and click
 > If the swapped file fails its checks, the script puts the previous database back
 > and the page says **rolled back**.
 >
-> Each backup row also has **Check this backup**: one click, no typed word, downloads and
+> Each backup row also has **Check backup**: one click, no typed word, downloads and
 > validates and swaps nothing. If the script refuses before it changes anything, the panel
 > says **Nothing was changed** and why, and you can try again. A refusal is not a
 > failure: look at `restore.log` only if the reason is not clear.

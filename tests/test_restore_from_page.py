@@ -289,7 +289,7 @@ def test_confirmation_page_is_not_a_hub_nav_orphan(world):
 
 
 def test_drive_list_stacks_on_a_phone_so_the_restore_button_is_never_off_screen(world):
-    """At 390px the table used to scroll sideways and hide Restore from backup."""
+    """At 390px the table used to scroll sideways and hide Restore backup."""
     page = world["admin"].get("/admin/library-backup").text
     assert "el('table','bk-table bk-stack')" in page
     assert ".bk-stack td{border-bottom:none !important;" in page and ".bk-stack, .bk-stack tbody" in page

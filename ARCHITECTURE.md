@@ -11588,14 +11588,17 @@ never blocked. (4) The hub lists Original content before Third-party content. (5
   rows of the single "Backups in Drive" table. Drive is the base: one `file` row per backup the
   Drive list returns, because a restore of an older snapshot deletes the newer `backup_log` rows
   and those files must keep their Check and Restore buttons. A file row takes its Articles from
-  the newest successful `backup_log` row (Drive file id, then file name), its Last check from the
-  newest `checked` or `failed` check, and Restored (time and user) from the newest `finished`
-  restore, all from `restore-audit.jsonl` (matched on file id, then file name). Each failed backup,
-  failed or refused check or restore, and interrupted run is a `failure` row of its own (newest
-  `FAILURE_LIMIT` = 20), ordered by time with the file rows; a successful check or restore of a file
-  no longer in Drive is dropped, since there is no row to attach it to. `GET /admin/library-backup/drive-list`
+  the newest successful `backup_log` row (Drive file id, then file name), its Last check
+  and Last restore from the newest check and the newest restore of any outcome (succeeded, failed,
+  refused or interrupted, with the short reason and, for a restore, the user), all from
+  `restore-audit.jsonl` (matched on file id, then file name), so a failure on a file in Drive shows on
+  that file's own row and makes no row of its own. A `failure` row (newest `FAILURE_LIMIT` = 20,
+  ordered by time with the file rows) is made only for a failed backup, and for a failed, refused or
+  interrupted check or restore whose file is not in the Drive list or whose file id and name are
+  unknown; a successful check or restore of a file no longer in Drive is dropped, since there is no
+  row to attach it to. `GET /admin/library-backup/drive-list`
   returns `{ok, message, rows}`; failure rows come back even when Drive cannot be reached, and the
-  page script builds the table (`.bk-table .bk-stack`) from them. An interrupted run used to
+  page script builds the table (`.bk-table .bk-stack`) from them. The table has ten columns: Made (UTC), Backup, Size, Articles, Last check (a result chip, or "Not checked"), Check date (UTC time, "by <user>" beneath, a dash when none), Last restore (chip, or "Not used"), Restore date, Details and Actions. Details holds the plain-language reason for the latest check and the latest restore when either did not succeed, one line each prefixed "Check:" or "Restore:"; reasons appear nowhere else. A failure row uses the same columns: a failed backup shows a "Backup failed" chip in the Backup cell, its time in Made and "Backup: <reason>" in Details; a check or restore of a file not in Drive puts its chip and date in the Check or Restore pair, with Made, Last/date of the other action and Size and Articles as dashes. The audit line's `user` is written by `Reporter.end` for both modes, so a check records who ran it exactly as a restore does; an older line without `user` shows a dash. The row buttons are "Check backup" and "Restore backup", both `_BACKUP_BTN_WIDTH` wide and kept side by side on one row (`_BACKUP_COL_WIDTH_ACTIONS` floor, `nowrap`) (the confirmation page keeps its own headings and buttons). An interrupted run used to
   appear only while its status record lasted, because it never reached its own audit write and the
   next run wipes the record. `restore_status.record_interrupted()` now writes one `interrupted`
   audit line per `job_id` (the start time when a record has none) when it sees a "running" record

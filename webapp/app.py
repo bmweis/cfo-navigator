@@ -2144,7 +2144,12 @@ _COL_WIDTH_EMAIL = 220        # Email address
 # columns take what is left. The floor keeps the seven columns readable between
 # the card breakpoint (700px) and a full desktop; Actions wraps its two buttons.
 _BACKUP_COL_WIDTH_FILENAME = 236
-_BACKUP_TABLE_MIN_WIDTH = 900
+_BACKUP_COL_WIDTH_CHIP = 104      # Last check / Last restore: a chip, or a short "Not checked"
+_BACKUP_COL_WIDTH_WHEN = 132      # Check date / Restore date: "2026-10-08 09:00 UTC", "by <user>" beneath
+_BACKUP_COL_WIDTH_DETAILS = 240   # Details: the plain-language reasons
+_BACKUP_BTN_WIDTH = 116           # Check backup and Restore backup share this width
+_BACKUP_COL_WIDTH_ACTIONS = 2 * _BACKUP_BTN_WIDTH + 8 + 24   # two buttons, the gap, cell padding: side by side, never wrapped
+_BACKUP_TABLE_MIN_WIDTH = 1560
 # A finished or failed restore, check or backup panel stays at the top of the
 # page this long, then a failure stays as a row in the backups table.
 _RESULT_PANEL_MINUTES = 30
@@ -26579,7 +26584,7 @@ _SCRIPT_REGISTRY = [
      "pre-restore copy, and swaps the snapshot in atomically. Runs on the container because a "
      "browser upload cannot pass Cloudflare's 100 MB request limit at the current database size. Refuses to replace an "
      "existing file without --yes-replace-live; --dry-run downloads and validates only. Also what the "
-     "Restore from backup button on /admin/library-backup runs (as a subprocess): it records its stage in "
+     "Restore backup button on /admin/library-backup runs (as a subprocess): it records its stage in "
      "restore-status.json and restore.log beside the database, appends restore-audit.jsonl, puts the kept "
      "copy back if the swapped file fails its checks, and deletes older pre-restore copies and stale downloads.",
      "Disaster-only, plus a yearly rehearsal against a scratch path (RUNBOOK.md section 4).",
@@ -37177,8 +37182,12 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 .bk-chip-bad{{background:var(--alert-wash);color:var(--alert);}}
 .bk-chip-grey{{background:var(--line);color:var(--ink);}}
 .bk-sub{{font-size:12px;color:var(--ink-soft);margin-top:3px;}}
-.bk-table .col-check{{min-width:200px;}}
-.bk-table .col-restored{{white-space:nowrap;}}
+.bk-table .col-chip{{min-width:{_BACKUP_COL_WIDTH_CHIP}px;white-space:nowrap;}}
+.bk-table .col-when{{min-width:{_BACKUP_COL_WIDTH_WHEN}px;white-space:nowrap;}}
+.bk-table .col-details{{min-width:{_BACKUP_COL_WIDTH_DETAILS}px;}}
+.bk-table .col-actions{{min-width:{_BACKUP_COL_WIDTH_ACTIONS}px;white-space:nowrap;}}
+.bk-table .col-details div{{margin:0 0 3px;}}
+.bk-btn{{box-sizing:border-box;width:{_BACKUP_BTN_WIDTH}px;font-size:12px;padding:5px 10px;line-height:1.3;text-align:center;text-decoration:none;white-space:nowrap;display:inline-block;}}
 /* Phones: the table becomes labelled cards, one field per line with its column name.
    The sitewide td top border is !important, so it is removed in the sitewide block (.bk-stack),
    not here. Cells that do not apply to a failure row are hidden. */
@@ -37188,8 +37197,11 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
   .bk-stack, .bk-stack tbody, .bk-stack tr, .bk-stack td{{display:block;width:100%;}}
   .bk-stack tr{{border-bottom:1px solid var(--line);padding:10px 12px;}}
   .bk-stack tr:last-child{{border-bottom:0;}}
-  .bk-stack td{{border-bottom:none !important;padding:3px 0 !important;white-space:normal !important;overflow-wrap:anywhere;}}
-  .bk-stack td[data-label]::before{{content:attr(data-label);font-weight:600;display:inline-block;min-width:84px;color:var(--ink-soft);}}
+  .bk-stack td{{border-bottom:none !important;padding:3px 0 3px 104px !important;text-indent:-104px;white-space:normal !important;overflow-wrap:anywhere;}}
+  .bk-stack td>*{{text-indent:0;}}
+  .bk-stack td[data-label]::before{{content:attr(data-label);font-weight:600;display:inline-block;width:104px;text-indent:0;color:var(--ink-soft);}}
+  .bk-stack td.col-details div:first-child{{display:inline;}}
+  .bk-stack td[data-label="Actions"]{{padding-left:0 !important;text-indent:0;}}
   .bk-stack td.bk-na{{display:none;}}
 }}
 </style>
@@ -37223,48 +37235,78 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 {_backup_status_banner(backup_rows)}
 <h2 style="font-size:16px;margin:24px 0 4px;">Backups in Drive</h2>
 <div id="drive-list"><p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Loading the list from Google Drive&hellip;</p></div>
-<p style="color:var(--muted);font-size:13px;margin:8px 0 0;">One row per backup file, newest first, times in UTC. Only backups made by this app appear: the daily ones and the ones from the button. A file placed in the Drive folder by hand does not show. The newest 14 are kept, so extra manual backups push the oldest out. Failures get a row of their own (the newest 20 show). Every check and restore is also kept in a log file beside the database, but this table shows only the latest of each per backup. Articles come from the database&rsquo;s backup log, so a restore to an older backup removes that number for backups made after it. Their buttons stay.</p>
+<p style="color:var(--muted);font-size:13px;margin:8px 0 0;">One row per backup file, newest first, times in UTC. Only backups made by this app appear: the daily ones and the ones from the button. A file placed in the Drive folder by hand does not show. The newest 14 are kept, so extra manual backups push the oldest out. A failed backup, and a failed check or restore of a backup that is no longer listed, get a row of their own (the newest 20 show). A backup in the list shows its latest check and latest restore, whatever the outcome, on its own row. Every attempt is also kept in a log file beside the database. Articles come from the database&rsquo;s backup log, so a restore to an older backup removes that number for backups made after it. Their buttons stay.</p>
 <script>
 (function(){{
   var box=document.getElementById('drive-list');
-  var TH=['Made (UTC)','Backup','Size','Articles','Last check','Restored','Actions'];
+  var TH=['Made (UTC)','Backup','Size','Articles','Last check','Check date','Last restore','Restore date','Details','Actions'];
   function say(t){{var p=document.createElement('p');p.style.cssText='color:var(--muted);font-size:13px;margin:0 0 8px;';p.textContent=t;box.appendChild(p);}}
   function el(tag,cls,text){{var e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e;}}
   function cell(label,na){{var td=document.createElement('td');td.setAttribute('data-label',label);td.style.cssText='padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;';if(na)td.className='bk-na';return td;}}
   function chip(text,kind){{return el('span','bk-chip bk-chip-'+kind,text);}}
   function dash(td){{td.textContent='\u2014';return td;}}
+  function resultChip(res){{return chip(res,res==='Succeeded'?'ok':(res==='Refused'?'grey':'bad'));}}
+  function resultCell(label,a,none){{
+    var c=cell(label);c.classList.add('col-chip');
+    if(!a){{var nc=el('span',null,none);nc.style.color='var(--muted)';c.appendChild(nc);}}else c.appendChild(resultChip(a.result));
+    return c;
+  }}
+  function whenCell(label,a){{
+    var c=cell(label);c.classList.add('col-when');
+    if(!a||!a.when)return dash(c);
+    c.appendChild(document.createTextNode(a.when+' UTC'));
+    if(a.by)c.appendChild(el('div','bk-sub','by '+a.by));
+    return c;
+  }}
+  function detailsCell(lines){{
+    var c=cell('Details');c.classList.add('col-details');
+    if(!lines.length)return dash(c);
+    lines.forEach(function(l){{c.appendChild(el('div',null,l));}});
+    return c;
+  }}
   function fileRow(f){{
     var tr=document.createElement('tr');
     var c=cell('Made');c.style.whiteSpace='nowrap';c.textContent=f.made+' UTC';tr.appendChild(c);
     c=cell('Backup');c.className='col-name';c.textContent=f.name;tr.appendChild(c);
     c=cell('Size');c.style.whiteSpace='nowrap';c.textContent=(f.size/1048576).toFixed(1)+' MB';tr.appendChild(c);
     c=cell('Articles');c.style.whiteSpace='nowrap';if(f.articles==null)dash(c);else c.textContent=Number(f.articles).toLocaleString('en-US');tr.appendChild(c);
-    c=cell('Last check');c.classList.add('col-check');
-    if(f.check){{c.appendChild(chip(f.check.result,f.check.result==='Succeeded'?'ok':'bad'));c.appendChild(el('div','bk-sub',f.check.when+' UTC'));}}
-    else{{var nc=el('span',null,'Not checked');nc.style.color='var(--muted)';c.appendChild(nc);}}
-    tr.appendChild(c);
-    c=cell('Restored');c.classList.add('col-restored');
-    if(f.restored){{c.appendChild(el('div',null,f.restored.when+' UTC'));if(f.restored.by)c.appendChild(el('div','bk-sub','by '+f.restored.by));}}else dash(c);
-    tr.appendChild(c);
-    var ta=cell('Actions');
-    var wrap=el('div','dl-actions');wrap.style.cssText='display:flex;flex-wrap:wrap;gap:8px;';
+    tr.appendChild(resultCell('Last check',f.check,'Not checked'));
+    tr.appendChild(whenCell('Check date',f.check));
+    tr.appendChild(resultCell('Last restore',f.restored,'Not used'));
+    tr.appendChild(whenCell('Restore date',f.restored));
+    var lines=[];
+    if(f.check&&f.check.result!=='Succeeded')lines.push('Check: '+(f.check.reason||f.check.result));
+    if(f.restored&&f.restored.result!=='Succeeded')lines.push('Restore: '+(f.restored.reason||f.restored.result));
+    tr.appendChild(detailsCell(lines));
+    var ta=cell('Actions');ta.classList.add('col-actions');
+    var wrap=el('div','dl-actions');wrap.style.cssText='display:flex;flex-wrap:nowrap;gap:8px;';
     var fm=document.createElement('form');fm.method='post';fm.action='/admin/library-backup/check/'+encodeURIComponent(f.id);fm.style.margin='0';
-    var cb=el('button','btn btn-ghost','Check this backup');cb.type='submit';cb.style.cssText='font-size:12px;padding:5px 10px;white-space:nowrap;';fm.appendChild(cb);wrap.appendChild(fm);
-    var a=el('a','btn btn-ghost','Restore from backup');a.href='/admin/library-backup/restore/'+encodeURIComponent(f.id);a.style.cssText='font-size:12px;padding:5px 10px;text-decoration:none;white-space:nowrap;';wrap.appendChild(a);
+    var cb=el('button','btn btn-ghost bk-btn','Check backup');cb.type='submit';fm.appendChild(cb);wrap.appendChild(fm);
+    var a=el('a','btn btn-ghost bk-btn','Restore backup');a.href='/admin/library-backup/restore/'+encodeURIComponent(f.id);wrap.appendChild(a);
     ta.appendChild(wrap);tr.appendChild(ta);
     return tr;
   }}
   function failRow(r){{
     var tr=document.createElement('tr');tr.className='bk-failure';
-    var c=cell('Made');c.style.whiteSpace='nowrap';c.textContent=r.when+' UTC';tr.appendChild(c);
-    c=cell('Backup');c.className='col-name';if(r.file)c.textContent=r.file;else dash(c);tr.appendChild(c);
-    tr.appendChild(dash(cell('Size',true)));tr.appendChild(dash(cell('Articles',true)));
-    c=cell('Last check');c.classList.add('col-check');
-    c.appendChild(chip(r.action+' '+r.result.toLowerCase(),r.result==='Refused'?'grey':'bad'));
-    var d=(r.detail||'')+(r.by?(r.detail?' ':'')+'(by '+r.by+')':'');
-    if(d)c.appendChild(el('div','bk-sub',d));
+    var isBackup=r.action==='Backup',isCheck=r.action==='Check';
+    var c=cell('Made');c.style.whiteSpace='nowrap';if(isBackup)c.textContent=r.when+' UTC';else dash(c);tr.appendChild(c);
+    c=cell('Backup');c.className='col-name';
+    if(isBackup){{c.appendChild(chip('Backup failed','bad'));if(r.file)c.appendChild(el('div','bk-sub',r.file));}}
+    else if(r.file)c.textContent=r.file;else dash(c);
     tr.appendChild(c);
-    tr.appendChild(dash(cell('Restored',true)));tr.appendChild(cell('Actions',true));
+    tr.appendChild(dash(cell('Size',true)));tr.appendChild(dash(cell('Articles',true)));
+    var none={{result:r.result,when:r.when,by:r.by}};
+    if(isBackup){{
+      tr.appendChild(dash(cell('Last check',true)));tr.appendChild(dash(cell('Check date',true)));
+      tr.appendChild(dash(cell('Last restore',true)));tr.appendChild(dash(cell('Restore date',true)));
+    }}else{{
+      tr.appendChild(isCheck?resultCell('Last check',none,''):dash(cell('Last check',true)));
+      tr.appendChild(isCheck?whenCell('Check date',none):dash(cell('Check date',true)));
+      tr.appendChild(isCheck?dash(cell('Last restore',true)):resultCell('Last restore',none,''));
+      tr.appendChild(isCheck?dash(cell('Restore date',true)):whenCell('Restore date',none));
+    }}
+    tr.appendChild(detailsCell(r.detail?[r.action+': '+r.detail]:[]));
+    tr.appendChild(cell('Actions',true));
     return tr;
   }}
   var ctl=new AbortController();var timer=setTimeout(function(){{ctl.abort();}},15000);
@@ -37288,7 +37330,7 @@ def admin_backup(request: Request, started: str = "", busy: str = ""):
 </script>
 
 <h2 style="font-size:16px;margin:32px 0 4px;">Restore from a Drive backup</h2>
-<p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Use <strong>Restore from backup</strong> in the list above. It opens a confirmation page, then the server downloads that backup from Drive, checks it, and swaps it in. It takes several minutes and you can leave the page. Download a backup first (above).</p>
+<p style="color:var(--muted);font-size:13px;margin:0 0 8px;">Use <strong>Restore backup</strong> in the list above. It opens a confirmation page, then the server downloads that backup from Drive, checks it, and swaps it in. It takes several minutes and you can leave the page. Download a backup first (above).</p>
 <p style="color:var(--muted);font-size:13px;margin:0 0 8px;"><strong>Use the terminal instead when the app is down</strong> or this page will not load. Open a shell with the Railway CLI and run:</p>
 <pre style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:13px;overflow-x:auto;margin:0 0 8px;">railway ssh
 cd /app
