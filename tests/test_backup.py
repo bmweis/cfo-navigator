@@ -369,7 +369,8 @@ def test_admin_backup_page_shows_green_banner_when_healthy(admin_client, monkeyp
     r = client.get("/admin/library-backup")
     assert "backups are <strong>on</strong>" in r.text.lower()
     assert "library-20260810-090000.db" in r.text
-    assert 'href="https://drive.google.com/file/d/abc123/view"' in r.text
+    # The Drive link now lives in the "Backups in Drive" list; the history table lists the file name.
+    assert "Backup and restore history" in r.text
 
 
 def test_admin_backup_page_history_table_shows_no_backups_yet(admin_client, monkeypatch):
@@ -379,7 +380,7 @@ def test_admin_backup_page_history_table_shows_no_backups_yet(admin_client, monk
     monkeypatch.setenv("GOOGLE_OAUTH_REFRESH_TOKEN", "rtoken")
     monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "folder123")
     r = client.get("/admin/library-backup")
-    assert "no off-site backups recorded yet" in r.text.lower()
+    assert "nothing recorded yet" in r.text.lower()
 
 
 # --- prune_old_backups / _select_backups_to_delete — daily-cadence retention -

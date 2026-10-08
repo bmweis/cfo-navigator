@@ -11517,7 +11517,7 @@ State lives in **files on the volume next to the database**, never in it
 (`linklib/restore_status.py`): `restore-status.json` (state `running`, `finished`,
 `checked`, `failed` or `rolled_back`; stage; pid; a heartbeat the script refreshes every
 5 seconds; download progress), `restore.log` (one flushed line per step) and
-`restore-audit.jsonl` (time, admin user id, Drive file id and name, mode, result).
+`restore-audit.jsonl` (time, admin user id, Drive file id and name, mode, result, and since 2026-10 `started_at`, `articles` and `job_id`; older lines without them still parse).
 `effective_state()` reports `interrupted` when a record says `running` but the pid is
 gone or the heartbeat is older than 60 seconds. `GET /admin/library-backup/restore-status`
 (admin only, JSON) feeds the panel on `/admin/library-backup`, which polls every 3
@@ -11583,3 +11583,17 @@ set flag takes a slot; Original content counts the flag, not the status, so goin
 never blocked. (4) The hub lists Original content before Third-party content. (5) The three
 `/admin/copy/*` pages share `_ADMIN_COPY_AUTOGROW_JS` (textareas with class `copy-autogrow`).
 (6) The homepage's admin-only Reader card is a compact `.admin-only` "Open reader" link.
+
+- **Archive backup page: history, restore marker, expiring panel, phone layout (2026-10).**
+  `linklib/backup_history.py` (HTML-free) merges `backup_log` rows with `restore-audit.jsonl` lines
+  (and a current status record whose process is gone, shown as Interrupted, since it wrote no audit
+  line) into one list, newest first, last `HISTORY_LIMIT` (50). The audit file is the source for
+  checks and restores because it lives beside the database and survives a restore; the backup rows
+  come from the database, so a restore drops backups made after the restored snapshot, and the page
+  says so. The staleness badge (`BACKUP_STALE_HOURS` 26) reads the same table, so after a restore to
+  an older snapshot it can read stale until the next backup. `Reporter.end` adds `started_at`,
+  `articles` and `job_id` to the audit line (additive). `GET /admin/library-backup/drive-list` adds a
+  `restored` time per file (latest successful restore, matched on Drive file id, then file name;
+  checks never count). The result panel shows a running job, or a finished or failed one for
+  `_RESULT_PANEL_MINUTES` (30). Both tables use `.bk-stack` for the phone card layout. No new route,
+  no schema change, no behavior change to backup, check or restore.
