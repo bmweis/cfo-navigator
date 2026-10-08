@@ -123,43 +123,51 @@ def test_checks_result_column_measures_200px_in_chromium(app_module, admin):
 
 # --- /admin/library-backup ---------------------------------------------------
 
+_FILES = [{"id": "f1", "name": "library-20261002-000224.db", "size": 90_123_456, "created": "2026-10-02T00:02:24Z"}]
+
+
+def _use_fake_drive(monkeypatch):
+    from linklib import backup
+    monkeypatch.setattr(backup, "list_for_display",
+                        lambda db_path, timeout=10.0: {"ok": True, "message": "", "files": [dict(f) for f in _FILES]})
+
+
 def test_backup_columns_are_named_constants(app_module, admin):
     a = app_module
-    _seed_backups()
     html = admin.get("/admin/library-backup").text
-    assert f".backup-log-table .col-filename{{width:{a._BACKUP_COL_WIDTH_FILENAME}px;}}" in html
-    assert f".backup-log-table .col-action{{width:{a._BACKUP_COL_WIDTH_ACTION}px;}}" in html
-    assert f".backup-log-table .col-by{{width:{a._BACKUP_COL_WIDTH_BY}px;}}" in html
     assert f"min-width:{a._BACKUP_TABLE_MIN_WIDTH}px" in html
-    assert a._BACKUP_COL_WIDTH_FILENAME > 200   # the filename column grew past its old width
-    for label in ("Backup file", "Result", "Action"):
-        assert f'data-label="{label}" class="nw"' in html
+    assert f".bk-table .col-name{{min-width:{a._BACKUP_COL_WIDTH_FILENAME}px;overflow-wrap:anywhere;}}" in html
+    assert a._BACKUP_COL_WIDTH_FILENAME > 200   # the file name column is wider than a 26-character name needs
+    for head in ("Made (UTC)", "Backup", "Size", "Articles", "Last check", "Restored", "Actions"):
+        assert f"'{head}'" in html
     # The stacked card layout drops the desktop floor so the card is not pinned wide.
     assert ".bk-stack{min-width:0 !important;}" in html
 
 
-def test_backup_row_is_one_line_in_chromium(app_module, admin):
+def test_backup_row_is_one_line_in_chromium(app_module, admin, monkeypatch):
     launched = _launch()
     if launched is None:
         pytest.skip("no Chromium available")
     pw, browser = launched
+    _use_fake_drive(monkeypatch)
     try:
-        _seed_backups()
-        import tempfile as _t
-        p = pathlib.Path(_t.mkdtemp()) / "backup.html"
-        p.write_text(admin.get("/admin/library-backup").text, encoding="utf-8")
+        def handler(route):
+            r = admin.get(route.request.url.replace("http://t.test", ""))
+            route.fulfill(status=r.status_code, content_type=r.headers.get("content-type", "text/html"), body=r.content)
         for width, one_line in ((1280, True), (390, None)):
             page = browser.new_page(viewport={"width": width, "height": 900})
-            page.goto(p.as_uri())
-            res = page.evaluate("""()=>{const t=document.querySelector('.backup-log-table');
-              const tr=t.querySelector('tbody tr'); const tds=[...tr.children];
+            page.route("**/*", handler)
+            page.goto("http://t.test/admin/library-backup")
+            page.wait_for_selector(".bk-table td")
+            res = page.evaluate("""()=>{const t=document.querySelector('.bk-table');
+              const tr=t.querySelector('tbody tr'); const name=tr.querySelector('td.col-name');
               return {h:Math.round(tr.getBoundingClientRect().height),
-                      fnW:tds[1].getBoundingClientRect().width, fnScroll:tds[1].scrollWidth,
-                      docOverflow:document.documentElement.scrollWidth>window.innerWidth}}""")
+                      fnW:name.getBoundingClientRect().width, fnScroll:name.scrollWidth,
+                      docOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth}}""")
             assert not res["docOverflow"]
             if one_line:
-                assert res["h"] < 50                      # single line, was 60 with the wrapped filename
-                assert res["fnScroll"] <= res["fnW"] + 1  # the filename fits its column
+                assert res["h"] < 90                      # buttons and chips fit on the row; the name does not wrap
+                assert res["fnScroll"] <= res["fnW"] + 1  # the file name fits its column
             page.close()
     finally:
         browser.close()

@@ -136,7 +136,7 @@ Notes on the edges:
   unchanged and still fire opportunistically as a harmless bonus trigger.
   Every attempt from either path — success or failure — is logged to the
   `backup_log` table (see the Site operations table below) and surfaced on
-  `/admin/library-backup`'s status banner + history table; the cron
+  `/admin/library-backup`'s status banner + backups table; the cron
   service's own run history in the Railway dashboard is a second,
   independent signal that catches the case where the site itself is
   unreachable and there's no in-app record at all.
@@ -788,8 +788,8 @@ site):
   named-class pixel widths, and can't sensibly mix either with these
   constants: Resources' percentage-width table (PR 11);
   `/admin/reader/feeds`'s `.ff-table`/`.fs-table` (own percentage widths,
-  same reasoning); `/admin/library-backup`'s `.backup-log-table` (own
-  small named-class pixel widths tuned to its 700px mobile-card
+  same reasoning); `/admin/library-backup`'s `.bk-table` (one
+  named file-name width tuned to its 700px mobile-card
   breakpoint, found during a full-inventory sweep, not part of the
   original hypothesis).
 - **Diagnostic and reference tables aren't entity lists** — the three pages
@@ -11584,16 +11584,26 @@ never blocked. (4) The hub lists Original content before Third-party content. (5
 `/admin/copy/*` pages share `_ADMIN_COPY_AUTOGROW_JS` (textareas with class `copy-autogrow`).
 (6) The homepage's admin-only Reader card is a compact `.admin-only` "Open reader" link.
 
-- **Archive backup page: history, restore marker, expiring panel, phone layout (2026-10).**
-  `linklib/backup_history.py` (HTML-free) merges `backup_log` rows with `restore-audit.jsonl` lines
-  (and a current status record whose process is gone, shown as Interrupted, since it wrote no audit
-  line) into one list, newest first, last `HISTORY_LIMIT` (50). The audit file is the source for
-  checks and restores because it lives beside the database and survives a restore; the backup rows
-  come from the database, so a restore drops backups made after the restored snapshot, and the page
-  says so. The staleness badge (`BACKUP_STALE_HOURS` 26) reads the same table, so after a restore to
-  an older snapshot it can read stale until the next backup. `Reporter.end` adds `started_at`,
-  `articles` and `job_id` to the audit line (additive). `GET /admin/library-backup/drive-list` adds a
-  `restored` time per file (latest successful restore, matched on Drive file id, then file name;
-  checks never count). The result panel shows a running job, or a finished or failed one for
-  `_RESULT_PANEL_MINUTES` (30). Both tables use `.bk-stack` for the phone card layout. No new route,
-  no schema change, no behavior change to backup, check or restore.
+- **Archive backup page: one table (2026-10).** `linklib/backup_history.py` (HTML-free) builds the
+  rows of the single "Backups in Drive" table. Drive is the base: one `file` row per backup the
+  Drive list returns, because a restore of an older snapshot deletes the newer `backup_log` rows
+  and those files must keep their Check and Restore buttons. A file row takes its Articles from
+  the newest successful `backup_log` row (Drive file id, then file name), its Last check from the
+  newest `checked` or `failed` check, and Restored (time and user) from the newest `finished`
+  restore, all from `restore-audit.jsonl` (matched on file id, then file name). Each failed backup,
+  failed or refused check or restore, and interrupted run is a `failure` row of its own (newest
+  `FAILURE_LIMIT` = 20), ordered by time with the file rows; a successful check or restore of a file
+  no longer in Drive is dropped, since there is no row to attach it to. `GET /admin/library-backup/drive-list`
+  returns `{ok, message, rows}`; failure rows come back even when Drive cannot be reached, and the
+  page script builds the table (`.bk-table .bk-stack`) from them. An interrupted run used to
+  appear only while its status record lasted, because it never reached its own audit write and the
+  next run wipes the record. `restore_status.record_interrupted()` now writes one `interrupted`
+  audit line per `job_id` (the start time when a record has none) when it sees a "running" record
+  whose process is gone or whose heartbeat stopped; it is called at the next run's start (the page
+  route and `scripts/restore_from_drive.py`) and on each read of the page and the list, and is
+  idempotent. The status record also carries `file_id` and `file_name`. The staleness badge
+  (`BACKUP_STALE_HOURS` 26) still reads `backup_log`, so after a restore to an older snapshot it can
+  read stale until the next backup. `Reporter.end` adds `started_at`, `articles` and `job_id` to the
+  audit line (additive). The result panel shows a running job, or a finished or failed one for
+  `_RESULT_PANEL_MINUTES` (30). No new route, no schema change, no behavior change to backup,
+  check or restore.

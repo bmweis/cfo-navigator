@@ -318,6 +318,7 @@ def _run(args, rep: Reporter, dest: str, dest_dir: str) -> int:
     files = backup.list_snapshots(token, folder_id)
     snap = pick(files, args.snapshot)
     rep.snap = snap
+    rs.write_status(dest, file_id=snap.get("id", ""), file_name=snap.get("name", ""))
     size = int(snap.get("size") or 0)
     exists = os.path.exists(dest)
     free = shutil.disk_usage(dest_dir).free
@@ -437,6 +438,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.exit("Another restore or check is already running. Wait for it to finish, then try again. "
                  "Nothing was changed.")
 
+    if not mine:
+        rs.record_interrupted(dest)   # a killed earlier run leaves a durable line before its status is wiped
     rep = Reporter(dest, "check" if args.dry_run else "restore", args.audit_user, args.job_id)
     rep.begin()
     try:

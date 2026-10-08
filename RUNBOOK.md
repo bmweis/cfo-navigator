@@ -64,9 +64,9 @@ is a mistake. Log in as admin, open `/admin/library-backup` and click
 > restoring needs you to type `RESTORE`). The server downloads the backup from Drive
 > itself, so nothing passes through Cloudflare. It runs the same script as Path C.
 > The result panel at the top of the page shows a running job, or a finished or failed
-> one for 30 minutes; after that it disappears and the **Backup and restore history**
-> table (last 50 backups, checks and restores) is the record. The Drive list marks the
-> backup a restore last used ("Restored <date> UTC").
+> one for 30 minutes; after that it disappears. The **Backups in Drive** table is the
+> record: one row per backup file, with its article count, its latest check and the
+> date of its latest restore, plus a red row for each failed or interrupted run.
 > The page shows the stage, elapsed time and the last log lines, and says
 > **Interrupted** with recovery steps if the process dies. Use Path C (the terminal)
 > when the app is down or the page will not load.
@@ -153,7 +153,7 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
 - It does not run the post-restore checklist below. Do that by hand.
 - It writes `restore-status.json`, `restore.log` and `restore-audit.jsonl` beside the
   database (one line per attempt, now with the start time and article count), with
-  `--audit-user terminal` unless told otherwise. The history table on the page reads it.
+  `--audit-user terminal` unless told otherwise. The table on the page reads it.
 
 ### Post-restore validation checklist
 
@@ -178,8 +178,8 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
       Phase O) bypasses that debounce, so it isn't the only path back to a
       fresh snapshot.
 - [ ] Confirm that snapshot on `/admin/library-backup` — the status banner
-      should read green with this restore's timestamp, and the history table's
-      top row should show `status=success` with a row count matching what you
+      should read green with this restore's timestamp, and the top row of **Backups in
+      Drive** should be the new snapshot with an Articles count matching what you
       just validated above (not just that the request returned 200).
 
 ---
@@ -679,8 +679,8 @@ one-time setup procedure.
      `/admin/backup-now` (`Uploaded <name> (...) to Google Drive.`) and
      `HTTP status: 200`, and the run itself should show as succeeded.
    - Then confirm the backup actually landed: check `/admin/library-backup`
-     for a fresh green banner entry and a new row in the history table with
-     a timestamp matching the run, and spot-check the Drive folder link on
+     for a fresh green banner entry and a new row at the top of **Backups in Drive**
+     with a Made time matching the run, and spot-check the Drive folder link on
      that page shows a new snapshot file.
 7. Once a manual run is confirmed working end-to-end, leave the schedule
    in place and stop checking it manually — `/admin/library-backup`'s

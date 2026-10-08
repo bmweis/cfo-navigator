@@ -571,7 +571,7 @@ graffiti marks on admin tables, forms, or the chat UI.
   - **Every scroller around a table is a frame.** A scroller div that holds a table carries `.table-frame` (`tests/test_table_frame_mobile_polish.py` fails on a bare one). The only tables left without one are those that never scroll: the checks summary tables and the Sections table.
   - **A table whose last column holds row buttons heads it "Actions".** Never blank, never "Tools", never a variant. Build the cell with `_actions_th()`; a header with a checkbox or an `aria-label` is not blank. A column that mixes a count with buttons is split (Software categories: Tools, then Actions). `linklib.brand_check.actions_header_problems()` scans source for a blank header, or a button column headed otherwise, with an empty `ACTIONS_HEADER_ALLOWLIST` for any exception that needs a reason. It cannot see a table whose body rows are built in a different string than its header, so rule 2 is a floor; rule 1 (no blank header) holds everywhere. Shown on `/admin/checks`.
   - **Stacked cards** (the `.admin-table-responsive`, `.ff-table`/`.fs-table`
-    and `.backup-log-table` layouts under 700px, 820px for the feeds tables):
+    and `.bk-stack` (the archive backup table) layouts under 700px, 820px for the feeds tables):
     cells carry no top border, cards are separated by a 1px `--line` rule with
     none under the last one, and a checkbox shares its row with the name. The
     "no cell border" rule is written with the table's class and `.site-main`
@@ -896,18 +896,17 @@ constants:
   markup line up regardless of content length.
 - **`/admin/reader/feeds`'s `.ff-table`/`.fs-table`** — same
   percentage-based reasoning, tuned to that page's own content.
-- **`/admin/library-backup`'s history table (`.backup-log-table`)** has its own
-  named pixel widths (`_BACKUP_COL_WIDTH_WHEN` 150, `_BACKUP_COL_WIDTH_ACTION` 84,
-  `_BACKUP_COL_WIDTH_FILENAME` 236, `_BACKUP_COL_WIDTH_STATUS` 116 for the Result
-  chip, `_BACKUP_COL_WIDTH_BY` 96), each sized to its content (short tokens carry
-  `white-space:nowrap`). Detail has no width and takes the rest.
-  `_BACKUP_TABLE_MIN_WIDTH` (920) keeps Detail readable between the card
-  breakpoint and a wide page. Under 700px that table and the Drive list
-  (`.drive-list-table`) share `.bk-stack`: labelled cards, one field per line with
-  its column name, `min-width:0 !important` so the floor does not pin a card wide,
-  and the sitewide cell top border removed in the sitewide block (a rule here
-  loses to it). Chosen over sideways scroll because the Restore button must never
-  sit off-screen.
+- **`/admin/library-backup`'s one table (`.bk-table`)** has one named width:
+  `_BACKUP_COL_WIDTH_FILENAME` (236, the file name; 211px of text plus cell padding, so
+  the name never wraps). The other six columns (Made, Size, Articles, Last check,
+  Restored, Actions) take what is left; short tokens carry `white-space:nowrap` and the
+  Actions buttons wrap. `_BACKUP_TABLE_MIN_WIDTH` (900) keeps seven columns readable
+  between the card breakpoint and a wide page. Under 700px the table is `.bk-stack`:
+  labelled cards, one field per line with its column name, `min-width:0 !important` so
+  the floor does not pin a card wide, long tokens wrap, the cells that do not apply to a
+  failure row are hidden, and the sitewide cell top border is removed in the sitewide
+  block (a rule here loses to it). Chosen over sideways scroll because the Restore button
+  must never sit off-screen.
 - **`/admin/checks`'s result column** (`_CHK_STATUS_COL_WIDTH`, 200px) is a
   fixed width rather than a third of the row: its widest unbreakable content
   is the Mark reviewed button (about 130px), and the explanation text takes

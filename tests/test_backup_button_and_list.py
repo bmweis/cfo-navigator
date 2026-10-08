@@ -198,15 +198,15 @@ def test_drive_list_shows_a_button_made_file(env, monkeypatch):
         {"id": "1", "name": "library-20261007-101500.db", "size": "266000000",
          "createdTime": "2026-10-07T10:15:00.000Z"}])
     d = admin.get("/admin/library-backup/drive-list").json()
-    assert d["ok"] and d["files"][0]["name"] == "library-20261007-101500.db"
-    assert d["files"][0]["size"] == 266000000
+    assert d["ok"] and d["rows"][0]["name"] == "library-20261007-101500.db"
+    assert d["rows"][0]["size"] == 266000000
 
 
 def test_drive_list_empty_when_no_folder_yet(env, monkeypatch):
     _, admin, _, _ = env
     _configure(monkeypatch)
     d = admin.get("/admin/library-backup/drive-list").json()
-    assert d == {"ok": True, "files": [], "message": ""}
+    assert d == {"ok": True, "rows": [], "message": ""}
 
 
 @pytest.mark.parametrize("exc", [TimeoutError("timed out"), RuntimeError("boom 500 secret detail")])

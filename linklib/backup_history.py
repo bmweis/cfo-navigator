@@ -1,16 +1,22 @@
-"""One merged history of backups, checks and restores for /admin/library-backup.
+"""The one table on /admin/library-backup: a row per backup file in Drive, plus a
+row for each failure.
 
-Backups come from the backup_log table. Checks and restores come from
-restore-audit.jsonl on the volume, because the table lives inside the
-database a restore replaces, while the audit file does not. HTML-free, so
-the page and the tests share one place for the merge.
+Drive is the base because a restore of an older snapshot deletes the newer
+rows from backup_log (inside the database), and those files must keep their
+buttons. Each file row carries the article count (from backup_log, when it
+still has a row), the latest Check, and the latest successful Restore (from
+restore-audit.jsonl on the volume, which a restore does not replace). A
+failed backup, check or restore, a refused one, and an interrupted run each
+get one row of their own. A successful check or restore of a file that is no
+longer in Drive has nothing to attach to and is dropped. HTML-free, so the
+page and the tests share one place for the merge.
 """
 from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
 
-HISTORY_LIMIT = 50
+FAILURE_LIMIT = 20   # newest failure rows shown; the audit file keeps every attempt
 
 # Result chips, in the words the page shows.
 SUCCEEDED, FAILED, REFUSED, INTERRUPTED = "Succeeded", "Failed", "Refused", "Interrupted"
@@ -46,77 +52,96 @@ def _duration(rec: dict) -> str:
     return f"{sec // 60}m {sec % 60:02d}s"
 
 
-def _audit_row(rec: dict, user_names: dict) -> dict | None:
-    when = parse_time(rec.get("time", ""))
-    if not when:
-        return None
-    mode = "Check" if rec.get("mode") == "check" else "Restore"
-    result = _AUDIT_RESULT.get(rec.get("result", ""), FAILED)
-    if result == SUCCEEDED:
-        bits = []
-        n = _articles(rec)
-        if n is not None:
-            bits.append(f"{n:,} articles")
-        d = _duration(rec)
-        if d:
-            bits.append(d)
-        detail = " · ".join(bits)
-    else:
-        msg = _LEAD.sub("", rec.get("message") or "")
-        detail = re.sub(r"\s*Nothing was changed\.\s*$", "", msg)
+def _stamp(dt) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def _who(rec: dict, user_names: dict) -> str:
     user = rec.get("user")
-    by = user_names.get(str(user), str(user)) if user not in (None, "") else "—"
-    return {"when": when, "action": mode, "file": rec.get("file_name") or "—", "result": result,
-            "detail": detail, "by": by}
+    return user_names.get(str(user), str(user)) if user not in (None, "") else ""
 
 
-def _backup_row(b: dict, plain_error) -> dict | None:
-    when = parse_time(b.get("created_at", ""))
-    if not when:
-        return None
-    ok = b.get("status") == "success"
-    detail = f"{b.get('row_count', 0):,} articles" if ok else plain_error(b.get("error", ""))
-    return {"when": when, "action": "Backup", "file": b.get("filename") or "—",
-            "result": SUCCEEDED if ok else FAILED, "detail": detail, "by": "—"}
+def _failure_detail(rec: dict) -> str:
+    msg = _LEAD.sub("", rec.get("message") or "")
+    return re.sub(r"\s*Nothing was changed\.\s*$", "", msg)
 
 
-def history_rows(backup_rows: list[dict], audit_rows: list[dict], plain_error, user_names: dict | None = None,
-                 interrupted: dict | None = None, limit: int = HISTORY_LIMIT) -> list[dict]:
-    """Newest first. `interrupted` is the current status record when its
-    process is gone; such a run never wrote an audit line."""
-    names = user_names or {}
-    rows = [r for r in (_backup_row(b, plain_error) for b in backup_rows) if r]
-    rows += [r for r in (_audit_row(a, names) for a in audit_rows) if r]
-    if interrupted:
-        when = parse_time(interrupted.get("updated_at", "")) or parse_time(interrupted.get("started_at", ""))
-        if when:
-            u = interrupted.get("user")
-            rows.append({"when": when, "action": "Check" if interrupted.get("mode") == "check" else "Restore",
-                         "file": interrupted.get("file_name") or "—", "result": INTERRUPTED,
-                         "detail": "The process stopped before it finished.",
-                         "by": names.get(str(u), str(u)) if u not in (None, "") else "—"})
-    rows.sort(key=lambda r: r["when"], reverse=True)
-    return rows[:limit]
-
-
-def last_restore_times(audit_rows: list[dict]) -> tuple[dict, dict]:
-    """(by file id, by file name) -> time of the latest successful restore from it.
-    Checks never count."""
-    by_id: dict = {}
-    by_name: dict = {}
+def _latest(audit_rows: list[dict], file: dict, mode: str, results: tuple) -> dict | None:
+    """The newest audit line for this Drive file (id first, then name)."""
+    best, best_t = None, None
     for rec in audit_rows:
-        if rec.get("mode") != "restore" or rec.get("result") != "finished":
+        if rec.get("mode") != mode or rec.get("result") not in results:
+            continue
+        if not (rec.get("file_id") == file.get("id") or
+                (not rec.get("file_id") and rec.get("file_name") == file.get("name"))):
+            continue
+        t = parse_time(rec.get("time", ""))
+        if t and (best_t is None or t > best_t):
+            best, best_t = rec, t
+    return best
+
+
+def _backup_for(file: dict, backup_rows: list[dict]) -> dict | None:
+    """The newest successful backup_log row for this Drive file (id first, then name)."""
+    for key, col in (("id", "drive_file_id"), ("name", "filename")):
+        if not file.get(key):
+            continue
+        for b in backup_rows:    # newest first, as list_backup_log returns them
+            if b.get("status") == "success" and b.get(col) == file[key]:
+                return b
+    return None
+
+
+def _file_row(f: dict, backup_rows, audit_rows, user_names) -> dict:
+    b = _backup_for(f, backup_rows)
+    chk = _latest(audit_rows, f, "check", ("checked", "failed", "rolled_back"))
+    rst = _latest(audit_rows, f, "restore", ("finished",))
+    made = parse_time(f.get("created", ""))
+    row = {"kind": "file", "sort": made.timestamp() if made else 0.0, "id": f.get("id", ""),
+           "name": f.get("name", ""), "size": int(f.get("size") or 0),
+           "made": _stamp(made) if made else (f.get("created") or ""),
+           "articles": b.get("row_count") if b else None, "check": None, "restored": None}
+    if chk:
+        t = parse_time(chk.get("time", ""))
+        row["check"] = {"result": SUCCEEDED if chk.get("result") == "checked" else FAILED,
+                        "when": _stamp(t) if t else ""}
+    if rst:
+        t = parse_time(rst.get("time", ""))
+        row["restored"] = {"when": _stamp(t) if t else "", "by": _who(rst, user_names)}
+    return row
+
+
+def _failure_rows(backup_rows, audit_rows, plain_error, user_names) -> list[dict]:
+    out = []
+    for b in backup_rows:
+        if b.get("status") == "success":
+            continue
+        t = parse_time(b.get("created_at", ""))
+        if t:
+            out.append({"kind": "failure", "sort": t.timestamp(), "when": _stamp(t), "action": "Backup",
+                        "file": b.get("filename") or "", "result": FAILED,
+                        "detail": plain_error(b.get("error", "")), "by": ""})
+    for rec in audit_rows:
+        res = _AUDIT_RESULT.get(rec.get("result", ""), FAILED)
+        if res == SUCCEEDED:
             continue
         t = parse_time(rec.get("time", ""))
         if not t:
             continue
-        for key, bucket in ((rec.get("file_id"), by_id), (rec.get("file_name"), by_name)):
-            if key and (key not in bucket or t > bucket[key]):
-                bucket[key] = t
-    return by_id, by_name
+        out.append({"kind": "failure", "sort": t.timestamp(), "when": _stamp(t),
+                    "action": "Check" if rec.get("mode") == "check" else "Restore",
+                    "file": rec.get("file_name") or "", "result": res,
+                    "detail": _failure_detail(rec), "by": _who(rec, user_names)})
+    out.sort(key=lambda r: r["sort"], reverse=True)
+    return out[:FAILURE_LIMIT]
 
 
-def restored_at(file: dict, by_id: dict, by_name: dict) -> str:
-    """'YYYY-MM-DD HH:MM' (UTC) of the latest restore from this Drive file, else ''."""
-    t = by_id.get(file.get("id")) or by_name.get(file.get("name"))
-    return t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M") if t else ""
+def table_rows(files: list[dict], backup_rows: list[dict], audit_rows: list[dict], plain_error,
+               user_names: dict | None = None) -> list[dict]:
+    """Newest first. `files` are the Drive list (empty when Drive could not be
+    reached; the failure rows still show)."""
+    names = user_names or {}
+    rows = [_file_row(f, backup_rows, audit_rows, names) for f in files]
+    rows += _failure_rows(backup_rows, audit_rows, plain_error, names)
+    rows.sort(key=lambda r: r["sort"], reverse=True)
+    return rows

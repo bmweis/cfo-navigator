@@ -368,19 +368,22 @@ def test_admin_backup_page_shows_green_banner_when_healthy(admin_client, monkeyp
     lib.close()
     r = client.get("/admin/library-backup")
     assert "backups are <strong>on</strong>" in r.text.lower()
-    assert "library-20260810-090000.db" in r.text
-    # The Drive link now lives in the "Backups in Drive" list; the history table lists the file name.
-    assert "Backup and restore history" in r.text
+    # The one table is built in the browser from the Drive list; its JSON joins the article count from backup_log.
+    assert "Backups in Drive" in r.text and "Backup and restore history" not in r.text
+    monkeypatch.setattr(appmod.backup, "list_for_display", lambda p, timeout=10.0: {"ok": True, "message": "", "files": [
+        {"id": "abc123", "name": "library-20260810-090000.db", "size": 4096, "created": "2026-08-10T09:00:00Z"}]})
+    rows = client.get("/admin/library-backup/drive-list").json()["rows"]
+    assert rows[0]["name"] == "library-20260810-090000.db" and rows[0]["articles"] == 1500
 
 
-def test_admin_backup_page_history_table_shows_no_backups_yet(admin_client, monkeypatch):
+def test_admin_backup_page_with_no_backups_yet_says_so_in_the_list(admin_client, monkeypatch):
     client, appmod, db = admin_client
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "cid")
     monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "csecret")
     monkeypatch.setenv("GOOGLE_OAUTH_REFRESH_TOKEN", "rtoken")
     monkeypatch.setenv("GOOGLE_DRIVE_FOLDER_ID", "folder123")
     r = client.get("/admin/library-backup")
-    assert "nothing recorded yet" in r.text.lower()
+    assert "No backups in Drive yet" in r.text
 
 
 # --- prune_old_backups / _select_backups_to_delete — daily-cadence retention -
