@@ -34328,9 +34328,13 @@ option&mdash;set a high dollar number instead of the default.</li>
 <code style="display:block;margin:6px 0;padding:8px 10px;background:var(--surface);border:1px solid var(--line);border-radius:6px;font-size:12.5px;overflow-x:auto;">python -m scripts.mint_api_token --db /data/library.db --username &lt;username&gt; --label &lt;label&gt;</code>
 The plaintext token is shown once&mdash;copy it to a password manager immediately. It can&rsquo;t be recovered
 later, only reissued.</li>
-<li><strong>They add the connector in their own Claude app:</strong> URL <code>https://mcp.bmweis.com/mcp</code>,
-header <code>authorization</code>, value <code>Bearer &lt;token&gt;</code> (the word &ldquo;Bearer&rdquo;, a space,
-the token&mdash;no other format), marked Required.</li>
+<li><strong>They add the connector in their own Claude app</strong> (Settings, Connectors, add custom connector):
+<ul style="margin:6px 0 0;padding-left:20px;display:grid;gap:4px;">
+<li>URL: <code>https://mcp.bmweis.com/mcp</code></li>
+<li>Sign-in: select <strong>No sign-in</strong>. The server uses bearer tokens, not OAuth, so ignore the OAuth client options.</li>
+<li>Request headers: name <strong>Authorization</strong> (pick it from the dropdown), value <code>Bearer &lt;token&gt;</code>
+(the word Bearer, one space, the token, nothing else). Leave <strong>Required</strong> checked.</li>
+</ul></li>
 </ol>
 """
 

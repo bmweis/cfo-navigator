@@ -717,7 +717,9 @@ def test_mcp_setup_copy_covers_all_four_steps(env):
     body = admin.get("/admin/users").text
     assert "Create the account." in body
     assert "Raise their Ask/Matchmaker cap" in body
-    assert "no other format" in body  # Bearer <token> format callout
+    assert "nothing else" in body  # Bearer <token> format callout
+    assert "No sign-in" in body
+    assert "Settings, Connectors, add custom connector" in body
     assert "unlimited" in body
     assert "python -m scripts.mint_api_token --db /data/library.db --username" in body
     assert "https://mcp.bmweis.com/mcp" in body
