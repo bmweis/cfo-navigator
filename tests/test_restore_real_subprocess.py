@@ -188,7 +188,7 @@ def test_script_refuses_a_second_restore_and_leaves_the_first_status_alone(world
     assert _titles(w["db"]) == ["live-1", "live-2"]
 
 
-# --- the per-row "Check this backup" button -------------------------------------
+# --- the per-row "Check backup" button -------------------------------------
 
 def test_row_check_needs_an_admin_session_not_the_save_token(world):
     w = world
@@ -245,8 +245,8 @@ def test_row_check_is_refused_plainly_with_no_side_effects(world, monkeypatch, w
 
 def test_list_script_has_both_buttons_per_row(world):
     page = world["admin"].get("/admin/library-backup").text
-    assert "'/admin/library-backup/check/'" in page and "Check this backup" in page
-    assert "'/admin/library-backup/restore/'" in page and "Restore from backup" in page
+    assert "'/admin/library-backup/check/'" in page and "Check backup" in page
+    assert "'/admin/library-backup/restore/'" in page and "Restore backup" in page
 
 
 def test_both_buttons_fit_and_stay_tappable_at_390px(world, tmp_path):
@@ -285,7 +285,7 @@ def test_both_buttons_fit_and_stay_tappable_at_390px(world, tmp_path):
             pg.click("button[type=submit]")
             pg.goto(base + "/admin/library-backup")
             pg.wait_for_selector(".bk-table")
-            for sel in ("button:has-text('Check this backup')", "a:has-text('Restore from backup')"):
+            for sel in ("button:has-text('Check backup')", "a:has-text('Restore backup')"):
                 box = pg.locator(".bk-table " + sel).first.bounding_box()
                 assert box and box["x"] >= 0 and box["x"] + box["width"] <= 390, (sel, box)
                 assert box["height"] >= 24

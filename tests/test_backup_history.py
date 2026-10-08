@@ -297,7 +297,8 @@ def test_a_failed_restore_shows_in_the_last_restore_cell_with_its_reason(world):
 
 def test_the_script_renders_the_cells(world):
     page = _page(world)
-    for head in ("Made (UTC)", "Backup", "Size", "Articles", "Last check", "Last restore", "Actions"):
+    for head in ("Made (UTC)", "Backup", "Size", "Articles", "Last check", "Check date", "Last restore",
+                 "Restore date", "Details", "Actions"):
         assert f"'{head}'" in page
     assert "Not checked" in page
 
@@ -365,14 +366,14 @@ def test_the_table_is_labelled_cards_without_stray_lines_on_a_phone(world):
             display:getComputedStyle(t.querySelector('tbody tr')).display,
             failVisibleCells:[...fail.children].filter(td=>getComputedStyle(td).display!=='none').map(td=>td.getAttribute('data-label')),
             overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth,
-            restored:[...t.querySelectorAll('td[data-label="Last restore"]')].some(td=>td.textContent.includes('UTC'))};}""")
+            restored:[...t.querySelectorAll('td[data-label="Restore date"]')].some(td=>td.textContent.includes('UTC'))};}""")
         assert not m["overflow"], m
         assert m["restored"], m
         assert m["borders"] == ["0px"], m          # no line between every cell
         assert m["unlabelled"] == 0, m              # each field says what it is
         assert m["lastRowBorder"] == "0px", m       # no doubled line at the frame's foot
         assert m["display"] == "block"
-        assert m["failVisibleCells"] == ["Made", "Backup", "Last check"], m   # the not-applicable cells are hidden
+        assert m["failVisibleCells"] == ["Made", "Backup", "Last check", "Check date", "Details"], m   # the not-applicable cells are hidden
     finally:
         b.close()
         pw.stop()
@@ -454,4 +455,123 @@ def test_a_file_with_a_good_restore_and_a_later_failed_check_shows_both(world):
 def test_the_script_shows_the_reason_and_the_new_labels(world):
     page = _page(world)
     assert "'Last restore'" in page and "'Restored'" not in page and "Not used" in page
-    assert "a.reason" in page
+    assert "f.check.reason" in page and "f.restored.reason" in page
+
+
+# --- ten columns: date, who and reason each in their own field -----------------------------
+
+def _td(page, label):
+    return page.locator(f'tr:not(.bk-failure) td[data-label="{label}"]')
+
+
+def _phone_or_desktop(world, width, setup):
+    launched = _launch()
+    if launched is None:
+        pytest.skip("no Chromium available")
+    pw, b = launched
+    try:
+        setup()
+        ctx = b.new_context(viewport={"width": width, "height": 900}, has_touch=width < 700, is_mobile=width < 700)
+        pg = ctx.new_page()
+        _serve(pg, world["admin"])
+        pg.goto("http://t.test/admin/library-backup")
+        pg.wait_for_selector(".bk-table td")
+        return pw, b, pg
+    except Exception:
+        b.close()
+        pw.stop()
+        raise
+
+
+def test_reason_appears_only_in_details_and_date_and_by_in_their_own_fields(world):
+    def setup():
+        rs.audit(world["db"], time=_iso(30), user="admin", file_id="f1", file_name=FILES[0]["name"], mode="restore",
+                 result="finished", message="x")
+        rs.audit(world["db"], time=_iso(5), user="admin", file_id="f1", file_name=FILES[0]["name"], mode="check",
+                 result="failed", message="The check failed: md5 does not match Drive's checksum. Nothing was changed.")
+    pw, b, pg = _phone_or_desktop(world, 1280, setup)
+    try:
+        row = pg.locator("tr:not(.bk-failure)").filter(has_text=FILES[0]["name"])
+        cell = lambda label: row.locator(f'td[data-label="{label}"]').inner_text()
+        assert cell("Last check").strip() == "Failed"
+        assert cell("Last restore").strip() == "Succeeded"
+        assert "md5" not in cell("Last check") and "md5" not in cell("Check date")
+        assert "UTC" in cell("Check date") and "by admin" in cell("Check date")
+        assert "UTC" in cell("Restore date") and "by admin" in cell("Restore date")
+        assert "by" not in cell("Last check") and "UTC" not in cell("Last check")
+        details = cell("Details")
+        assert "Check: md5 does not match Drive's checksum." in details
+        assert "Restore:" not in details                    # a successful restore has nothing to explain
+        for other in ("Made", "Backup", "Size", "Articles", "Last restore", "Restore date"):
+            assert "md5" not in cell(other)
+    finally:
+        b.close()
+        pw.stop()
+
+
+def test_row_buttons_are_renamed_and_exactly_as_wide_on_desktop_and_phone(world):
+    for width in (1280, 390):
+        pw, b, pg = _phone_or_desktop(world, width, lambda: None)
+        try:
+            row = pg.locator("tbody tr:not(.bk-failure)").first
+            cb = row.locator("button:has-text('Check backup')").bounding_box()
+            rb = row.locator("a:has-text('Restore backup')").bounding_box()
+            assert cb and rb, width
+            assert cb["width"] == rb["width"], (width, cb, rb)
+            assert abs(cb["height"] - rb["height"]) < 1, (width, cb, rb)
+            assert pg.locator("text=Check this backup").count() == 0 and pg.locator("text=Restore from backup").count() == 0
+        finally:
+            b.close()
+            pw.stop()
+
+
+def test_a_check_line_carries_the_user_and_an_old_line_without_one_shows_a_dash(world):
+    db = world["db"]
+    rs.audit(db, time=_iso(5), user="7", file_id="f1", file_name=FILES[0]["name"], mode="check", result="finished", message="ok")
+    rs.audit(db, time=_iso(5), file_id="f2", file_name=FILES[1]["name"], mode="check", result="finished", message="ok")  # no user key
+    _, rows = _rows(world)
+    assert _file(rows, "f1")["check"]["by"] == "7"
+    assert _file(rows, "f2")["check"]["by"] == ""
+    page = _page(world)
+    assert "if(a.by)c.appendChild(el('div','bk-sub','by '+a.by))" in page   # nothing shown, not "by undefined"
+
+
+def test_the_real_script_records_the_user_on_a_check_line(tmp_path):
+    from scripts import restore_from_drive as r
+    dest = str(tmp_path / "library.db")
+    rep = r.Reporter(dest, "check", "42", "job1")
+    rep.snap = {"id": "f1", "name": "x.db"}
+    rep.end("checked", "Check passed.")
+    last = rs.read_audit(dest)[-1]
+    assert (last["mode"], last["user"]) == ("check", "42")
+
+
+def test_failure_rows_use_the_same_columns(world):
+    lib = Library(world["db"])
+    lib.record_backup_attempt("failure", error="HTTP 404")
+    lib.close()
+    rs.audit(world["db"], user="admin", file_id="gone", file_name="old.db", mode="check", result="failed",
+             message="The check failed: gone from Drive. Nothing was changed.")
+    rs.audit(world["db"], user="admin", file_id="gone2", file_name="older.db", mode="restore", result="refused",
+             message="Another restore is already running. Nothing was changed.")
+    pw, b, pg = _phone_or_desktop(world, 1280, lambda: None)
+    try:
+        fails = pg.locator("tr.bk-failure")
+        assert fails.count() == 3
+        text = lambda r, label: r.locator(f'td[data-label="{label}"]').inner_text()
+        by_file = {}
+        for i in range(3):
+            r = fails.nth(i)
+            by_file[text(r, "Backup").strip().split("\n")[0]] = r
+        chk = by_file["old.db"]
+        assert text(chk, "Last check").strip() == "Failed" and "UTC" in text(chk, "Check date")
+        assert text(chk, "Details").strip() == "Check: gone from Drive."
+        assert text(chk, "Last restore").strip() == "\u2014"
+        rst = by_file["older.db"]
+        assert text(rst, "Last restore").strip() == "Refused" and "by admin" in text(rst, "Restore date")
+        assert text(rst, "Details").strip() == "Restore: Another restore is already running."
+        bk = by_file["Backup failed"]
+        assert text(bk, "Details").strip().startswith("Backup:")
+    finally:
+        b.close()
+        pw.stop()

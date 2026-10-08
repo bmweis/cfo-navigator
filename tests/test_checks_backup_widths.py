@@ -137,8 +137,11 @@ def test_backup_columns_are_named_constants(app_module, admin):
     html = admin.get("/admin/library-backup").text
     assert f"min-width:{a._BACKUP_TABLE_MIN_WIDTH}px" in html
     assert f".bk-table .col-name{{min-width:{a._BACKUP_COL_WIDTH_FILENAME}px;overflow-wrap:anywhere;}}" in html
+    for const in ("_BACKUP_COL_WIDTH_CHIP", "_BACKUP_COL_WIDTH_WHEN", "_BACKUP_COL_WIDTH_DETAILS", "_BACKUP_BTN_WIDTH"):
+        assert getattr(a, const) > 0
     assert a._BACKUP_COL_WIDTH_FILENAME > 200   # the file name column is wider than a 26-character name needs
-    for head in ("Made (UTC)", "Backup", "Size", "Articles", "Last check", "Last restore", "Actions"):
+    for head in ("Made (UTC)", "Backup", "Size", "Articles", "Last check", "Check date", "Last restore",
+                 "Restore date", "Details", "Actions"):
         assert f"'{head}'" in html
     # The stacked card layout drops the desktop floor so the card is not pinned wide.
     assert ".bk-stack{min-width:0 !important;}" in html

@@ -898,10 +898,13 @@ constants:
   percentage-based reasoning, tuned to that page's own content.
 - **`/admin/library-backup`'s one table (`.bk-table`)** has one named width:
   `_BACKUP_COL_WIDTH_FILENAME` (236, the file name; 211px of text plus cell padding, so
-  the name never wraps). The other six columns (Made, Size, Articles, Last check,
-  Last restore, Actions) take what is left; short tokens carry `white-space:nowrap` and the
-  Actions buttons wrap. `_BACKUP_TABLE_MIN_WIDTH` (900) keeps seven columns readable
-  between the card breakpoint and a wide page. Under 700px the table is `.bk-stack`:
+  the name never wraps). Further named widths: `_BACKUP_COL_WIDTH_CHIP` (104, Last check and
+  Last restore), `_BACKUP_COL_WIDTH_WHEN` (132, Check date and Restore date, with "by <user>"
+  on a second line), `_BACKUP_COL_WIDTH_DETAILS` (240, the reasons). The columns are Made (UTC),
+  Backup, Size, Articles, Last check, Check date, Last restore, Restore date, Details, Actions.
+  The two row buttons, Check backup and Restore backup, share `_BACKUP_BTN_WIDTH` (116).
+  `_BACKUP_TABLE_MIN_WIDTH` (1560) keeps ten columns readable between the card breakpoint
+  and a wide page; the `.table-frame` scrolls sideways when the page is narrower. Under 700px the table is `.bk-stack`:
   labelled cards, one field per line with its column name, `min-width:0 !important` so
   the floor does not pin a card wide, long tokens wrap, the cells that do not apply to a
   failure row are hidden, and the sitewide cell top border is removed in the sitewide
