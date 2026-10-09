@@ -25,6 +25,11 @@ KEY_FEATURES = "Key features"
 APP_SCREENSHOT = "App screenshot"
 HOMEPAGE_SCREENSHOT = "Homepage screenshot"
 
+# Primary use (issue #624): the one required category, the main reason someone
+# buys the tool. The checkboxes beside it are the optional secondary tags.
+PRIMARY_USE = "Primary use"
+ALSO_USED_FOR = "Also used for"
+
 # Grouping names. EYEBROW_AGENT names an eyebrow, not the field, so it is kept
 # as it is and listed in the PR's copy table for review.
 # Same words as the field: the Compare row shows the field name, once.

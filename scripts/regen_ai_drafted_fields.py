@@ -403,6 +403,8 @@ def _regen_tool_description(lib: Library, tool: dict, model: str, voice_core: st
         tool_id,
         name=current["name"], description=draft.description, url=current["url"],
         categories=current["categories"], advisor=current["advisor"], promoted=current["promoted"],
+        # Primary use (issue #624): round-trip it so a regeneration never wipes it.
+        primary_category=current.get("primary_category") or "",
         vendor_email=current.get("vendor_email") or "", warm_intro_enabled=current.get("warm_intro_enabled") or 0,
         vendor_name=current.get("vendor_name") or "", summary=draft.summary,
         description_needs_verification=0, description_ai_confident=int(bool(draft.confident)),

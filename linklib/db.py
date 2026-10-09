@@ -2460,6 +2460,11 @@ class Library:
             # report. Written only by the on-add job, cleared by any
             # successful draft or a hand-written note, never on page view.
             "ALTER TABLE tools ADD COLUMN research_refusal TEXT NOT NULL DEFAULT ''",
+            # Primary use (issue #624, PR 1): the one required category, the
+            # main reason someone buys the tool. categories_json stays the
+            # full set; this names the primary within it. Empty = "no primary
+            # yet", allowed in the database during the transition.
+            "ALTER TABLE tools ADD COLUMN primary_category TEXT NOT NULL DEFAULT ''",
             # Quality-indicator visibility (item 6, Aug 2026 UI pass) —
             # persists the OTHER signal every generate_tool_* draft already
             # returns (draft.low_confidence: "the page fetch failed / no
@@ -6058,6 +6063,17 @@ class Library:
                 f"Nothing was saved. Shorten it and try again."
             )
 
+    @staticmethod
+    def _categories_with_primary(categories: list[str], primary: str | None) -> tuple[list[str], str]:
+        """The primary-use invariant (issue #624): a non-empty primary is a
+        member of the category set. A primary the caller left out of the set is
+        added to it. Empty means "no primary yet" and is allowed."""
+        cats = list(categories or [])
+        primary = (primary or "").strip()
+        if primary and primary not in cats:
+            cats.append(primary)
+        return cats, primary
+
     def add_tool(self, name: str, description: str, url: str,
                  categories: list[str], submitted_by: str = "",
                  approved: int = 0, advisor: int = 0,
@@ -6067,7 +6083,12 @@ class Library:
                  description_needs_verification: int = 0,
                  description_ai_confident: Optional[int] = None,
                  description_low_confidence: Optional[int] = None,
-                 needs_review: int = 1, source: str | None = None) -> int:
+                 needs_review: int = 1, source: str | None = None,
+                 primary_category: str = "") -> int:
+        # primary_category (issue #624): empty = "no primary yet" (the public
+        # submit form stores it that way). When set, it joins the saved set if
+        # the caller left it out, so the primary is always a member of
+        # categories_json.
         # needs_review defaults to 1 (not the column's own SQL default of 0)
         # — a brand-new tool's profile should read as "needs review" until
         # someone actually signs off on it, not "already reviewed" by
@@ -6106,18 +6127,19 @@ class Library:
         now = _now()
         description_before, summary_before = description.strip(), summary.strip()
         description_fixed, summary_fixed = _voice_fix(description_before), _voice_fix(summary_before)
+        categories, primary_category = self._categories_with_primary(categories, primary_category)
         cur = self.conn.execute(
             """INSERT INTO tools (name, slug, description, url, categories_json,
                approved, advisor, submitted_by, created_at, updated_at, promoted, vendor_email,
                warm_intro_enabled, vendor_name, summary,
                description_needs_verification, description_ai_confident, description_low_confidence,
-               needs_review)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               needs_review, primary_category)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (name.strip(), slug, description_fixed, url.strip(),
              json.dumps(categories), approved, advisor, submitted_by.strip(), now, now,
              promoted, vendor_email.strip(), warm_intro_enabled, vendor_name.strip(),
              summary_fixed, description_needs_verification, description_ai_confident,
-             description_low_confidence, 1 if needs_review else 0),
+             description_low_confidence, 1 if needs_review else 0, primary_category),
         )
         self.conn.commit()
         new_id = cur.lastrowid
@@ -6176,7 +6198,15 @@ class Library:
                     description_needs_verification: Optional[int] = None,
                     description_ai_confident: Optional[int] = None,
                     description_low_confidence: Optional[int] = None,
-                    clear_description_verification_stamp: bool = False, source: str | None = None) -> None:
+                    clear_description_verification_stamp: bool = False, source: str | None = None,
+                    primary_category: Optional[str] = None) -> None:
+        # primary_category (issue #624): None leaves the stored primary alone
+        # (so a save that does not touch categories can never wipe it); a
+        # string sets it ("" clears it). Either way the primary that ends up
+        # stored is a member of the saved category set: one the caller left
+        # out of `categories` is added to it. Callers that remove a category
+        # must change or clear the primary themselves (the bulk-edit route
+        # refuses such a change before it gets here).
         # description_needs_verification defaults to None ("leave the column
         # alone") rather than 0/1, because update_tool is also the bulk-edit
         # panel's write path (every row resaved at once) and
@@ -6210,8 +6240,12 @@ class Library:
                 raise DuplicateURLError("software entry", dup["id"], dup["name"], dup["slug"])
         self._check_text_field_length(tool_labels.DESCRIPTION, description.strip(), self.TOOL_DESCRIPTION_MAX)
         self._check_text_field_length(tool_labels.SHORT_SUMMARY, summary.strip(), self.TOOL_SUMMARY_MAX)
+        if primary_category is None:
+            primary_category = (current or {}).get("primary_category") or ""
+        categories, primary_category = self._categories_with_primary(categories, primary_category)
         self.conn.execute(
             """UPDATE tools SET name=?, description=?, url=?, categories_json=?,
+               primary_category=?,
                advisor=?, promoted=?, vendor_email=?, warm_intro_enabled=?, vendor_name=?,
                summary=?,
                description_needs_verification=COALESCE(?, description_needs_verification),
@@ -6219,7 +6253,7 @@ class Library:
                description_low_confidence=COALESCE(?, description_low_confidence),
                updated_at=? WHERE id=?""",
             (name.strip(), self._vf("tools", tool_id, "description", description.strip(), source=source), url.strip(),
-             json.dumps(categories), advisor, promoted, vendor_email.strip(),
+             json.dumps(categories), primary_category, advisor, promoted, vendor_email.strip(),
              warm_intro_enabled, vendor_name.strip(), self._vf("tools", tool_id, "summary", summary.strip(), source=source),
              description_needs_verification, description_ai_confident,
              description_low_confidence, _now(), tool_id),
@@ -7326,6 +7360,26 @@ class Library:
         self.conn.commit()
         return True
 
+    def set_tool_primary(self, tool_id: int, primary: str, touch: bool = True) -> None:
+        """Set a tool's Primary use (issue #624), enforcing the invariant: the
+        primary joins the tool's category set if it is not already in it. ""
+        clears the primary. `touch=False` leaves updated_at alone (the backfill
+        script, so a mechanical fill does not read as an edit). Raises
+        ValueError on an unknown tool."""
+        row = self.conn.execute("SELECT categories_json FROM tools WHERE id=?", (tool_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"No tool with id={tool_id}.")
+        cats, primary = self._categories_with_primary(json.loads(row[0] or "[]"), primary)
+        if touch:
+            self.conn.execute(
+                "UPDATE tools SET primary_category=?, categories_json=?, updated_at=? WHERE id=?",
+                (primary, json.dumps(sorted(cats)), _now(), tool_id))
+        else:
+            self.conn.execute(
+                "UPDATE tools SET primary_category=?, categories_json=? WHERE id=?",
+                (primary, json.dumps(sorted(cats)), tool_id))
+        self.conn.commit()
+
     def list_tool_categories(self) -> list[dict]:
         # Always alphabetical by name, not sort_order (insertion order)—so the
         # filter pills on /tools/software and the rows on /admin/tools/software/categories
@@ -7413,6 +7467,12 @@ class Library:
                     (json.dumps(updated), t["id"]),
                 )
                 changed += 1
+            # Primary use (issue #624): a tool whose primary was the old name
+            # keeps it under the new one.
+            self.conn.execute(
+                "UPDATE tools SET primary_category=? WHERE primary_category=?",
+                (new_name, old_name),
+            )
         self.conn.commit()
         return changed
 
@@ -7427,6 +7487,9 @@ class Library:
             return 0
         name = row["name"]
         self.conn.execute("DELETE FROM tool_categories WHERE id = ?", (category_id,))
+        # Primary use (issue #624): a tool whose primary was this category is
+        # left with no primary, so it shows as "needs a primary".
+        self.conn.execute("UPDATE tools SET primary_category='' WHERE primary_category=?", (name,))
         changed = 0
         for t in self.conn.execute(
             "SELECT id, categories_json FROM tools WHERE categories_json LIKE ?", (f'%"{name}"%',)

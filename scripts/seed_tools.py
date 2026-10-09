@@ -982,6 +982,9 @@ def main():
                     approved=1,
                     advisor=int(t.get("advisor", False)),
                     source="script",
+                    # Primary use (issue #624): a single-category seed entry takes
+                    # that category; several are chosen by hand in the admin UI.
+                    primary_category=t["categories"][0] if len(t["categories"]) == 1 else "",
                 )
             except DuplicateURLError as e:
                 # Defense in depth — the existing_by_url lookup above should already
