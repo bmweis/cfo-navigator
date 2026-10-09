@@ -190,7 +190,7 @@ def test_software_edit_layout_priority_tags_and_categories_move_up(admin):
     slug = lib.get_tool(tid)["slug"]
     lib.close()
     html = admin.get(f"/tools/software/{slug}/edit").text
-    assert html.index("Categories") < html.index("Verification status") < html.index("Priority tags") \
+    assert html.index("Primary use") < html.index("Verification status") < html.index("Priority tags") \
         < html.index(">Warm intro<")
     box = html[html.index("Priority tags"):]
     assert box.index("Featured") < box.index("Formal advisor")
