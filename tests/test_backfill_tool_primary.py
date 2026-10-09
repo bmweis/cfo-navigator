@@ -2,7 +2,6 @@
 fills only single-category vendors, multi-category vendors are never touched and
 are printed as the worksheet, and a second run changes nothing."""
 import os
-import sqlite3
 
 import pytest
 
