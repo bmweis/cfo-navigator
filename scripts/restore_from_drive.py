@@ -27,7 +27,11 @@ What it does, in order:
   6. Otherwise keeps the current database as <db>.pre-restore-<timestamp>
      (a hard link, so it costs no extra space; a copy if the filesystem
      cannot link), swaps the snapshot in with os.replace, and removes the
-     stale -wal and -shm files. The pre-restore copy is never deleted.
+     stale -wal and -shm files.
+  7. Only after the swap passes its article-count and integrity checks, deletes
+     every OLDER <db>.pre-restore-<timestamp> file (and its -wal copy), so only
+     the newest pre-restore copy is kept. If the swapped file fails those checks,
+     the pre-restore copy is put back and nothing is pruned.
 
 Safe by default: if the destination exists it refuses to replace it
 unless --yes-replace-live is passed. A destination that does not exist

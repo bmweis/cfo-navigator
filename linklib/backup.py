@@ -483,7 +483,7 @@ def backup_is_running() -> bool:
 
 def try_acquire_exclusive() -> bool:
     """Take the same lock a backup uses, for a restore (Phase 2 of #714).
-    While it is held the nightly cron's request gets "already running" and
+    While it is held the daily cron's request gets "already running" and
     the page's backup button refuses. Non-blocking; release_exclusive()
     when the restore process has exited."""
     return _BACKUP_LOCK.acquire(blocking=False)

@@ -40042,7 +40042,7 @@ def admin_backup_drive_list(request: Request):
 # --- Restore from the page (Phase 2 of issue #714) --------------------------------
 # The route spawns scripts/restore_from_drive.py as a subprocess (the path
 # rehearsed at full size, PR 716) and watches it from a thread. The thread
-# holds the same lock a backup uses, so the nightly cron's request gets
+# holds the same lock a backup uses, so the daily cron's request gets
 # "already running" while a restore runs. Status, log and audit are files on
 # the volume (linklib/restore_status.py), because the database is the thing
 # being replaced. The app never exits itself; the cron and healthcheck are

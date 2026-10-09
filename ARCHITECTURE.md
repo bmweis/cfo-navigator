@@ -10608,8 +10608,8 @@ recorded anywhere, it's flagged rather than invented.
   account's Actions spending limit blocked every workflow run, an outage
   entirely unrelated to Railway or this app. Moved onto a native Railway
   Cron Service instead — a minimal service in the same project with no
-  application code, configured with a cron schedule (`0 9 * * *`, the same
-  daily 09:00 UTC slot) and one command:
+  application code, configured with a daily cron schedule (set in the Railway Cron
+  Service, not in this repo) and one command:
   ```
   response=$(curl -sS -w '\n%{http_code}' -X POST \
     "https://cfo-navigator-production.up.railway.app/admin/backup-now" \
@@ -11485,7 +11485,7 @@ running" while `backup.backup_is_running()` and reads the result from `backup_lo
 `GET /admin/library-backup/drive-list` (admin only, JSON, 10 second timeouts, never
 raises) feeds the "Backups in Drive" list, loaded by the page after it renders;
 `list_snapshots` lists every non-trashed file in the folder, so a button backup (named
-like the nightly ones) appears, and under `drive.file` a hand-placed file does not.
+like the daily ones) appears, and under `drive.file` a hand-placed file does not.
 `backup_now` holds a non-blocking `threading.Lock`: an overlap raises `BackupBusy`,
 logs nothing, and `/admin/backup-now` answers 200 "already running" (not 409, which
 shows red in Railway's cron history). The upload to Drive streams the snapshot from
@@ -11505,7 +11505,7 @@ plain sentence and no side effect: Drive not configured, a restore already runni
 (per `restore-status.json`), a backup running, any `_JOB_STATE` job with `running`
 true, or less free space than the snapshot plus 16 MB. Then it takes the backup lock
 (`backup.try_acquire_exclusive()`, the same `_BACKUP_LOCK` `backup_now` uses), so the
-nightly cron's request gets 200 "already running" for as long as the restore lives, and
+daily cron's request gets 200 "already running" for as long as the restore lives, and
 starts `_restore_job` in a daemon thread. That thread runs
 `python -m scripts.restore_from_drive ... --yes-replace-live` as a **subprocess**
 (`_restore_run_process`, stderr to `restore.log`), waits, and releases the lock. The

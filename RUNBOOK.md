@@ -651,8 +651,9 @@ one-time setup procedure.
    need a source repo or a build).
 3. Name it something identifiable, e.g. `backup-cron`.
 4. On the new service's **Settings** tab:
-   - **Cron Schedule**: `0 9 * * *` (daily, 09:00 UTC — the same slot the
-     GitHub Action used).
+   - **Cron Schedule**: daily. The schedule lives only in the Railway Cron
+     Service's settings, so it is not recorded in this repo. Set a daily
+     value there.
    - **Deploy → Custom Start Command** (this is the only thing the service
      ever runs, since it has no build/source):
      ```

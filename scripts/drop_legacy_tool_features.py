@@ -30,7 +30,7 @@ exactly:
      `sqlite_master` immediately after and asserts the table is actually
      gone.
   6. Runs `PRAGMA integrity_check` (via `linklib.backup.check_integrity`,
-     the same mechanism the nightly backup runs) against the live DB and
+     the same mechanism the daily backup runs) against the live DB and
      prints the result — the standing post-destructive-write verification,
      also logged to `integrity_check_log` so it shows up on
      `/admin/library-backup` like any other check.
