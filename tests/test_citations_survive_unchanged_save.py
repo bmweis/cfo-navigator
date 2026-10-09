@@ -72,7 +72,7 @@ def _tool(description="Old description.", note="Agent note.", desc_cites=True, n
 
 def _edit(client, slug, **over):
     data = {"name": "Runway", "url": "https://runway.com", "description": "Old description.",
-            "summary": "Old summary.", "agent_taxonomy_note": "Agent note."}
+            "summary": "Old summary.", "agent_taxonomy_note": "Agent note.", "primary_category": "FP&A"}
     data.update(over)
     r = client.post(f"/tools/software/{slug}/edit", data=data, follow_redirects=False)
     assert r.status_code == 303, r.text[:300]

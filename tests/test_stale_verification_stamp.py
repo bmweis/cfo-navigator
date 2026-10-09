@@ -172,7 +172,7 @@ def test_edit_submit_clears_stale_description_stamp_on_fresh_draft(env):
 
     client = _client(env)
     _login(client, "brian", "pw")
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "AI drafted text",
         "summary": "AI drafted summary", "ai_drafted_fields": "description,summary",
     }, follow_redirects=False)
@@ -202,7 +202,7 @@ def test_edit_submit_hand_edit_does_not_clear_stale_description_stamp(env):
 
     client = _client(env)
     _login(client, "brian", "pw")
-    client.post(f"/tools/software/{slug}/edit", data={
+    client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "hand-typed tweak",
         "summary": "s",
     }, follow_redirects=False)
@@ -225,7 +225,7 @@ def test_mark_verified_after_regeneration_sets_fresh_stamp(env):
 
     client = _client(env)
     _login(client, "brian", "pw")
-    client.post(f"/tools/software/{slug}/edit", data={
+    client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "AI drafted text",
         "summary": "s", "ai_drafted_fields": "description",
     }, follow_redirects=False)

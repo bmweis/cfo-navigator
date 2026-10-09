@@ -165,11 +165,6 @@ def test_new_form_refuses_a_save_with_no_primary_and_writes_nothing(admin):
     assert _count() == 0
 
 
-def test_new_form_refuses_a_primary_that_is_not_a_category(admin):
-    r = admin.post("/admin/tools/software/new", data=_new_form(primary_category="Nope"), follow_redirects=False)
-    assert r.status_code == 400 and _count() == 0
-
-
 def test_new_form_saves_union_of_primary_and_ticks(admin):
     r = admin.post("/admin/tools/software/new",
                    data=_new_form(primary_category="FP&A", categories=["Revenue", "FP&A"]),

@@ -176,7 +176,7 @@ def test_admin_new_tool_warns_on_name_duplicate_but_saves(admin_client):
     lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "Dealhub Inc", "url": "https://dealhub-other.example",
         "description": "desc", "summary": "desc",
     }, follow_redirects=False)
@@ -195,7 +195,7 @@ def test_admin_new_tool_no_warn_for_distinct_name(admin_client):
     lib.add_tool("Dealhub", "desc", "https://dealhub.io", [], approved=1)
     lib.close()
 
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "Coefficient", "url": "https://coefficient.io",
         "description": "desc", "summary": "desc",
     }, follow_redirects=False)
@@ -211,7 +211,7 @@ def test_admin_edit_tool_warns_on_name_duplicate_but_saves(admin_client):
     tool_b_slug = lib.get_tool(tool_b)["slug"]
     lib.close()
 
-    r = client.post(f"/tools/software/{tool_b_slug}/edit", data={
+    r = client.post(f"/tools/software/{tool_b_slug}/edit", data={"primary_category": "FP&A", 
         "name": "Dealhub Inc", "url": "https://b.example", "description": "desc", "summary": "desc",
     }, follow_redirects=False)
     assert r.status_code == 303
@@ -229,7 +229,7 @@ def test_admin_edit_tool_no_warn_against_itself(admin_client):
     tool_slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
-    r = client.post(f"/tools/software/{tool_slug}/edit", data={
+    r = client.post(f"/tools/software/{tool_slug}/edit", data={"primary_category": "FP&A", 
         "name": "Dealhub Inc", "url": "https://dealhub.io", "description": "new desc", "summary": "new desc",
     }, follow_redirects=False)
     assert r.status_code == 303

@@ -69,7 +69,7 @@ def test_confirm_verified_fields_clears_description_needs_verification_in_same_s
 
     client = _client(env)
     _login(client, "brian", "pw")
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "AI drafted text",
         "summary": "AI drafted summary", "ai_drafted_fields": "description,summary",
         "confirm_verified_fields": "description",
@@ -107,7 +107,7 @@ def test_confirm_verified_fields_never_verifies_stale_previously_saved_text(env)
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "Brand new drafted text",
         "summary": "new summary", "ai_drafted_fields": "description,summary",
         "confirm_verified_fields": "description",
@@ -135,7 +135,7 @@ def test_confirm_verified_fields_absent_behaves_exactly_as_before(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "AI drafted text",
         "summary": "AI drafted summary", "ai_drafted_fields": "description,summary",
     }, follow_redirects=False)
@@ -161,7 +161,7 @@ def test_confirm_verified_fields_respects_the_two_tier_length_guard(env):
     client = _client(env)
     _login(client)
     over_limit = "x" * (max_len + 1)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": over_limit,
         "summary": "s", "ai_drafted_fields": "description",
         "confirm_verified_fields": "description",
@@ -186,7 +186,7 @@ def test_confirm_verified_fields_clears_differentiation_needs_verification(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "d", "summary": "s",
         "competitive_differentiation": "AI drafted bottom line",
         "ai_drafted_fields": "competitive_differentiation",
@@ -212,7 +212,7 @@ def test_confirm_verified_fields_can_confirm_both_fields_in_one_save(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "d",
         "summary": "s", "competitive_differentiation": "diff",
         "ai_drafted_fields": "description,summary,competitive_differentiation",

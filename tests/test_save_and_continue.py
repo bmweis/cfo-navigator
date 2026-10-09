@@ -78,7 +78,7 @@ def test_save_and_continue_redirects_back_to_same_edit_page(env):
 
     client = _client(env)
     _login(client)
-    r = client.post("/tools/software/abacum/edit", data={
+    r = client.post("/tools/software/abacum/edit", data={"primary_category": "FP&A", 
         "name": "Abacum", "url": "https://abacum.co", "description": "Updated description.",
         "summary": "Updated short.", "categories": ["FP&A"],
         "save_action": "continue",
@@ -95,7 +95,7 @@ def test_save_changes_without_continue_redirects_to_list(env):
 
     client = _client(env)
     _login(client)
-    r = client.post("/tools/software/abacum/edit", data={
+    r = client.post("/tools/software/abacum/edit", data={"primary_category": "FP&A", 
         "name": "Abacum", "url": "https://abacum.co", "description": "Updated description.",
         "summary": "Updated short.", "categories": ["FP&A"],
     }, follow_redirects=False)

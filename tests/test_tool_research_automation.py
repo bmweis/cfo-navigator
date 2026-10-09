@@ -113,7 +113,7 @@ def test_admin_add_tool_triggers_background_research(env, monkeypatch):
     calls = _mock_generate_tool_agent_taxonomy(monkeypatch)
     client = _client(env)
     _login(client)
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "FP&A platform",
         "summary": "FP&A platform for scenario modeling.",
     }, follow_redirects=False)

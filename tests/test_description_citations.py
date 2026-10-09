@@ -323,7 +323,7 @@ def test_new_tool_fresh_draft_records_needs_verification_confidence_and_citation
     client = _client(app_module)
     _login(client)
     citations_json = '[{"n": 1, "title": "Runway", "url": "https://runway.com", "type": "tool_page"}]'
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com",
         "description": "AI-drafted description.", "summary": "AI-drafted summary.",
         "ai_drafted_fields": "description,summary",
@@ -349,7 +349,7 @@ def test_new_tool_hand_written_description_records_no_citations_or_verification_
     description_ai_confident, unaffected by this change."""
     client = _client(app_module)
     _login(client)
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com",
         "description": "Hand-written description.", "summary": "Hand-written summary.",
     }, follow_redirects=False)
@@ -366,7 +366,7 @@ def test_new_tool_hand_written_description_records_no_citations_or_verification_
 def test_new_tool_malformed_citations_payload_persists_nothing(app_module):
     client = _client(app_module)
     _login(client)
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com",
         "description": "AI-drafted description.", "summary": "AI-drafted summary.",
         "ai_drafted_fields": "description,summary",
@@ -396,7 +396,7 @@ def test_edit_submit_persists_citations_for_fresh_draft(app_module):
     client = _client(app_module)
     _login(client)
     citations_json = '[{"n": 1, "title": "Runway", "url": "https://runway.com", "type": "tool_page"}]'
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com",
         "description": "Freshly generated description.", "summary": "Freshly generated summary.",
         "ai_drafted_fields": "description,summary",
@@ -429,7 +429,7 @@ def test_edit_submit_clears_citations_on_hand_edit(app_module):
 
     client = _client(app_module)
     _login(client)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com",
         "description": "Hand-edited description, no Generate this session.",
         "summary": "Hand-edited summary.",
@@ -461,7 +461,7 @@ def test_edit_submit_keeps_citations_when_only_other_fields_change(app_module):
 
     client = _client(app_module)
     _login(client)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com",
         "description": "AI description.", "summary": "AI summary.",
         "promoted": "1",

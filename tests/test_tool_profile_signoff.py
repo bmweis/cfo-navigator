@@ -168,7 +168,7 @@ def test_edit_submit_ignores_stray_needs_review_form_field(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "d",
         "summary": "s", "needs_review": "1",
     }, follow_redirects=False)
@@ -194,7 +194,7 @@ def test_edit_submit_persists_existing_needs_review_without_fresh_draft(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "d", "summary": "s",
     }, follow_redirects=False)
     assert r.status_code == 303
@@ -217,7 +217,7 @@ def test_edit_submit_forces_needs_review_when_description_ai_drafted(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/tools/software/{slug}/edit", data={
+    client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "AI drafted text",
         "summary": "AI drafted summary", "ai_drafted_fields": "description,summary",
     }, follow_redirects=False)
@@ -239,7 +239,7 @@ def test_edit_submit_forces_needs_review_when_differentiation_ai_drafted(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/tools/software/{slug}/edit", data={
+    client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "d", "summary": "s",
         "competitive_differentiation": "AI drafted note",
         "ai_drafted_fields": "competitive_differentiation",
@@ -265,7 +265,7 @@ def test_edit_submit_fresh_draft_overrides_currently_reviewed_state(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/tools/software/{slug}/edit", data={
+    client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "AI text",
         "summary": "AI sum", "ai_drafted_fields": "description,summary",
     }, follow_redirects=False)
@@ -290,7 +290,7 @@ def test_edit_submit_hand_edit_only_does_not_force_needs_review(env):
 
     client = _client(env)
     _login(client)
-    client.post(f"/tools/software/{slug}/edit", data={
+    client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "hand-edited text",
         "summary": "s",
     }, follow_redirects=False)

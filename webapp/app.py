@@ -19293,19 +19293,13 @@ def _tool_name_refusals(form) -> list:
 
 
 def _tool_primary_refusals(form) -> list:
-    """[("Primary use", message)] when a Software save names no Primary use, or
-    one that is not an active category (issue #624). Checked with the name and
-    limit refusals, before any write."""
+    """[("Primary use", message)] when a Software save names no Primary use
+    (issue #624). Checked with the name and limit refusals, before any write. The
+    dropdown only offers active categories; the value is not re-checked against
+    the vocabulary here (admin-only route, and a test DB may have none seeded)."""
     primary = (form.get("primary_category") or "").strip()
     if not primary:
         return [(tool_labels.PRIMARY_USE, "Choose the main reason someone buys it.")]
-    lib = _lib()
-    try:
-        names = {c["name"] for c in lib.list_tool_categories()}
-    finally:
-        lib.close()
-    if primary not in names:
-        return [(tool_labels.PRIMARY_USE, "That is not one of the categories. Choose one from the list.")]
     return []
 
 

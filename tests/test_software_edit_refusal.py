@@ -80,7 +80,7 @@ def _row(tid):
 
 
 def _post(admin, slug, **over):
-    data = dict(name="Acme", url="https://acme.example", description="NEW DESC", summary="NEW SUM")
+    data = dict(name="Acme", url="https://acme.example", description="NEW DESC", summary="NEW SUM", primary_category="FP&A")
     data.update(over)
     return admin.post(f"/tools/software/{slug}/edit", data=data, follow_redirects=False)
 
@@ -170,7 +170,7 @@ def test_under_limit_save_still_works(admin):
 
 def test_new_over_max_creates_nothing_and_shows_banner(admin):
     r = admin.post("/admin/tools/software/new", data=dict(
-        name="Newco", url="https://newco.example",
+        name="Newco", url="https://newco.example", primary_category="FP&A",
         description="d" * (Library.TOOL_DESCRIPTION_MAX + 2),
         summary="s" * (Library.TOOL_SUMMARY_MAX + 3)), follow_redirects=False)
     assert r.status_code == 400

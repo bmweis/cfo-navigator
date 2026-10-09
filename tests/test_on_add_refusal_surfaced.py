@@ -52,7 +52,7 @@ def _raise(exc):
 
 
 def _add(client):
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "Aura", "url": "https://aura.example", "description": "FP&A platform",
         "summary": "FP&A platform for scenario modeling."}, follow_redirects=False)
     assert r.status_code == 303

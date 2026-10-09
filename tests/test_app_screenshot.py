@@ -501,7 +501,7 @@ def test_admin_edit_saves_app_screenshot_source_url(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{a_slug}/edit", data={
+    r = client.post(f"/tools/software/{a_slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
         "app_screenshot_source_url": "https://runway.com/demo",
     }, follow_redirects=False)
