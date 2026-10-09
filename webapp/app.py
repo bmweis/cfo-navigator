@@ -14552,7 +14552,7 @@ def admin_software(request: Request, filter: str = ""):
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col" style="padding:10px 12px;text-align:left;font-size:13px;"><div style="display:flex;align-items:center;gap:10px;"><input type="checkbox" aria-label="Select all" onchange="selectAllRows('software',this.checked)"><span>Name</span></div></th>
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
-  <th data-col="software:primary_category" style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_CATEGORY}px;">{_esc(tool_labels.PRIMARY_USE)}</th>
+  <th aria-label="{_esc(tool_labels.PRIMARY_USE)}" data-col="software:primary_category" style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_CATEGORY}px;">{_esc(tool_labels.PRIMARY_USE)}</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
   <th data-col="software:review_status" style="padding:10px 12px;text-align:left;font-size:13px;">Review status</th>
