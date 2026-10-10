@@ -275,3 +275,15 @@ def test_new_constants_are_labels_only():
     assert tool_labels.KEY_FEATURES == "Key features"
     assert tool_labels.APP_SCREENSHOT == "App screenshot"
     assert tool_labels.HOMEPAGE_SCREENSHOT == "Homepage screenshot"
+
+
+# --- Primary use (issue #624) ------------------------------------------------
+
+def test_primary_use_words_come_from_the_constants(admin):
+    assert tool_labels.PRIMARY_USE == "Primary use" and tool_labels.ALSO_USED_FOR == "Also used for"
+    tool = _tool()
+    for html in (admin.get(f"/tools/software/{tool['slug']}/edit").text,
+                 admin.get("/admin/tools/software/new").text):
+        assert f"{tool_labels.PRIMARY_USE} *" in html
+        assert tool_labels.ALSO_USED_FOR in html
+    assert f">{tool_labels.PRIMARY_USE}</th>" in admin.get("/admin/tools/software").text

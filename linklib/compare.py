@@ -231,6 +231,9 @@ class CompareEntity:
     sections: list[CompareSection]
     chip_lists: list[CompareChipList]
     program_details: list[CompareProgramDetail] = _dc_field(default_factory=list)
+    # Software only (issue #624): the vendor's Primary use. "" for a
+    # community, or for a vendor with no primary yet.
+    primary_category: str = ""
 
 
 @dataclass
@@ -346,6 +349,7 @@ def build_software_compare(
             profile_url=f"/tools/software/{t['slug']}",
             promoted=bool(t.get("promoted")), advisor=bool(t.get("advisor")),
             tags=tags_by_id[tid],
+            primary_category=(t.get("primary_category") or ""),
             key_facts=[],
             sections=[
                 CompareSection(tool_labels.SHORT_SUMMARY, [desc_field]),
@@ -468,6 +472,7 @@ MCP_PARITY: dict[str, str] = {
     "tools.description": "mcp:get_software.description.text",
     "tools.url": "mcp:get_software.url",
     "tools.categories_json": "mcp:get_software.categories",
+    "tools.primary_category": "mcp:get_software.primary_category",
     "tools.approved": "admin-only: approval gate; an unapproved record is refused, the flag is never emitted",
     "tools.advisor": "mcp:get_software.advisor",
     "tools.submitted_by": "admin-only: submitter name",

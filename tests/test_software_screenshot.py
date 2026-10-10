@@ -64,7 +64,7 @@ def test_admin_edit_saves_screenshot_fields(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{a_slug}/edit", data={
+    r = client.post(f"/tools/software/{a_slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
         "screenshot_url": "https://example.com/shot.png",
         "screenshot_is_product": "1",
@@ -100,7 +100,7 @@ def test_admin_edit_save_does_not_clobber_legacy_product_flag(env):
     _login(client)
     # A save that doesn't touch the screenshot section at all — just a
     # routine edit to an unrelated field.
-    r = client.post(f"/tools/software/{a_slug}/edit", data={
+    r = client.post(f"/tools/software/{a_slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "Updated description",
         "summary": "FP&A",
         "screenshot_url": "https://example.com/product-shot.png",

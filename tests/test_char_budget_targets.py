@@ -251,7 +251,7 @@ def test_tool_edit_route_refuses_over_limit_description(env):
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
     over = "d" * (Library.TOOL_DESCRIPTION_MAX + 1)
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": over,
         "summary": "s",
     })
@@ -271,7 +271,7 @@ def test_tool_edit_route_refuses_over_limit_agent_taxonomy(env):
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
     over = "a" * (Library.TOOL_AGENT_TAXONOMY_MAX + 1)
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": "s",
         "agent_taxonomy_note": over,
     })
@@ -298,7 +298,7 @@ def test_longest_stored_agent_taxonomy_note_still_round_trips(env):
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": "s",
         "agent_taxonomy_note": long_value,
     }, follow_redirects=False)
@@ -319,7 +319,7 @@ def test_over_target_under_limit_save_succeeds_and_counter_would_warn(env):
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
     value = "d" * 2900   # over the 2,500 target, comfortably under the 3,500 limit
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": value, "summary": "s",
     }, follow_redirects=False)
     assert r.status_code == 303
@@ -445,7 +445,7 @@ def test_description_longest_stored_value_round_trips(env):
     lib.close()
     value = ("Rillet automates the accounting close for finance teams. " * 50)[:2339]
     assert len(value) == 2339
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": value, "summary": "s",
     }, follow_redirects=False)
     assert r.status_code == 303
@@ -465,7 +465,7 @@ def test_differentiation_longest_stored_value_round_trips(env):
     lib.close()
     value = ("Unlike generic BI tools, Rillet is purpose-built for the close. " * 10).strip()[:546]
     assert len(value) == 546
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": "s",
         "competitive_differentiation": value,
     }, follow_redirects=False)
@@ -487,7 +487,7 @@ def test_summary_legacy_over_old_cap_value_round_trips_via_route(env):
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
     value = "s" * 453
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": value,
     }, follow_redirects=False)
     assert r.status_code == 303
@@ -506,7 +506,7 @@ def test_over_target_under_limit_save_succeeds_summary(env):
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
     value = "s" * 600   # over the 400 target, under the 800 limit
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": value,
     }, follow_redirects=False)
     assert r.status_code == 303
@@ -526,7 +526,7 @@ def test_over_target_under_limit_save_succeeds_agent_taxonomy(env):
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
     value = "a" * 3000   # over the 2,500 target, under the 4,000 limit
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": "s",
         "agent_taxonomy_note": value,
     }, follow_redirects=False)
@@ -547,7 +547,7 @@ def test_over_target_under_limit_save_succeeds_differentiation(env):
     slug = lib.get_tool(tool_id)["slug"]
     lib.close()
     value = "d" * 900   # over the 600 target, under the 1,200 limit
-    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={
+    r = _client(appmod).post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Rillet", "url": "https://rillet.example", "description": "d", "summary": "s",
         "competitive_differentiation": value,
     }, follow_redirects=False)

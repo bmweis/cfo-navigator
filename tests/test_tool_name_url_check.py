@@ -67,7 +67,7 @@ def _count():
 
 def _new(admin, name):
     return admin.post("/admin/tools/software/new", data=dict(
-        name=name, url="https://acme.example", description="d", summary="s"),
+        name=name, url="https://acme.example", description="d", summary="s", primary_category="FP&A"),
         follow_redirects=False)
 
 
@@ -81,7 +81,7 @@ def _tool():
 
 def _edit(admin, slug, name):
     return admin.post(f"/tools/software/{slug}/edit", data=dict(
-        name=name, url="https://acme.example", description="NEW", summary="NEW S"),
+        name=name, url="https://acme.example", description="NEW", summary="NEW S", primary_category="FP&A"),
         follow_redirects=False)
 
 

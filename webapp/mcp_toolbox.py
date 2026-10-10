@@ -325,6 +325,9 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
                 "id": t["id"], "slug": t["slug"], "name": t["name"],
                 "profile_url": f"/tools/software/{t['slug']}",
                 "categories": t.get("categories") or [],
+                # Primary use (issue #624): additive. `categories` keeps its
+                # meaning (the full set); this names the main one, "" if none yet.
+                "primary_category": t.get("primary_category") or "",
                 "summary": (t.get("summary") or "").strip(),
                 "promoted": bool(t.get("promoted")), "advisor": bool(t.get("advisor")),
             })
@@ -369,6 +372,7 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
             "id": tool["id"], "slug": tool["slug"], "name": tool["name"],
             "url": tool.get("url") or "", "profile_url": f"/tools/software/{tool['slug']}",
             "categories": tool.get("categories") or [],
+            "primary_category": tool.get("primary_category") or "",
             "promoted": bool(tool.get("promoted")), "advisor": bool(tool.get("advisor")),
             # The public profile shows a Warm Intro button when both are set.
             # Only the boolean is served: the vendor's contact details are
@@ -545,7 +549,8 @@ def register_toolbox_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         finally:
             lib.close()
         return {
-            "entities": [_serialize_compare_entity(e, authed) for e in entities],
+            "entities": [{**_serialize_compare_entity(e, authed), "primary_category": e.primary_category}
+                         for e in entities],
             "shared_tags": tag_diff.shared,
             "summary": summary,
         }

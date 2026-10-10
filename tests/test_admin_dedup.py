@@ -142,7 +142,7 @@ def test_software_create_blocked_on_duplicate_url(admin_client):
     tool_slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "New Tool", "url": "https://vendor.example", "description": "desc", "summary": "desc",
     })
     assert r.status_code == 400
@@ -159,7 +159,7 @@ def test_software_edit_blocked_when_changing_url_to_duplicate(admin_client):
     tool_b_slug = lib.get_tool(tool_b)["slug"]
     lib.close()
 
-    r = client.post(f"/tools/software/{tool_b_slug}/edit", data={
+    r = client.post(f"/tools/software/{tool_b_slug}/edit", data={"primary_category": "FP&A", 
         "name": "Tool B", "url": "https://vendor-a.example", "description": "desc", "summary": "desc",
     })
     assert r.status_code == 400
@@ -173,7 +173,7 @@ def test_software_edit_allowed_when_url_unchanged(admin_client):
     tool_slug = lib.get_tool(tool_id)["slug"]
     lib.close()
 
-    r = client.post(f"/tools/software/{tool_slug}/edit", data={
+    r = client.post(f"/tools/software/{tool_slug}/edit", data={"primary_category": "FP&A", 
         "name": "Tool A Updated", "url": "https://vendor-a.example", "description": "new desc", "summary": "new desc",
     }, follow_redirects=False)
     assert r.status_code == 303

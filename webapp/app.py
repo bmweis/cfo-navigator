@@ -2156,6 +2156,8 @@ _RESULT_PANEL_MINUTES = 30
 
 _COL_WIDTH_DATE = 140         # Date / timestamp — sized for a full
                               # "YYYY-MM-DD HH:MM" value, not just "YYYY-MM-DD"
+_COL_WIDTH_CATEGORY = 190     # A category name (Primary use): the longest, "Treasury/Cash
+                              # Management", is about 165px at 13px plus cell padding.
 _COL_WIDTH_STATUS = 110       # A short status/state badge or label
 _COL_WIDTH_COUNT = 80         # A small count/number column
 _COL_WIDTH_MESSAGE = 320      # A free-text column that is the point of its row (a contact
@@ -13778,10 +13780,16 @@ async function submitBulkEdit(tableKey, url) {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ids: ids, field: field, value: value})
     });
-    if (!r.ok) throw new Error();
+    if (!r.ok) {
+      var d = null;
+      try { d = await r.json(); } catch (e2) {}
+      var err = new Error();
+      if (d && d.message) err.serverMessage = d.message;
+      throw err;
+    }
     window.location.reload();
   } catch (e) {
-    document.getElementById(tableKey + '-bulk-summary').textContent = 'Save failed—try again.';
+    document.getElementById(tableKey + '-bulk-summary').textContent = e.serverMessage || 'Save failed—try again.';
     btn.disabled = false; btn.textContent = 'Apply';
   }
 }
@@ -14340,6 +14348,15 @@ def admin_software(request: Request, filter: str = ""):
     if filter == "needs_review":
         approved = [t for t in approved if t["needs_review"]]
 
+    def _pending_primary_options(t: dict) -> str:
+        # The vendor's own submitted categories lead; one is preselected only
+        # when there is exactly one. Several or none: the choice is made here.
+        names = [c["name"] for c in tool_categories]
+        chosen = t.get("primary_category") or (t["categories"][0] if len(t["categories"]) == 1 else "")
+        head = "" if chosen else f'<option value="" disabled selected>{_esc(tool_labels.PRIMARY_USE)}</option>'
+        return head + "".join(
+            f'<option value="{_esc(n)}"{" selected" if n == chosen else ""}>{_esc(n)}</option>' for n in names)
+
     def _tool_row(t: dict) -> str:
         cats = ", ".join(t["categories"]) or "—"
         return f"""<tr>
@@ -14350,6 +14367,7 @@ def admin_software(request: Request, filter: str = ""):
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(t['submitted_by'] or '—')}</td>
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
             <form method="post" action="/admin/tools/software/{t['id']}/approve" style="display:inline;">
+              <select name="primary_category" required aria-label="{_esc(tool_labels.PRIMARY_USE)}" style="padding:5px 8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;max-width:190px;">{_pending_primary_options(t)}</select>
               <button class="btn" style="padding:6px 14px;font-size:13px;">Approve</button>
             </form>
             <form method="post" action="/admin/tools/software/{t['id']}/reject" style="display:inline;margin-left:6px;"
@@ -14361,6 +14379,8 @@ def admin_software(request: Request, filter: str = ""):
 
     def _approved_row(t: dict) -> str:
         cats = ", ".join(t["categories"]) or "—"
+        _primary_cell = (_esc(t["primary_category"]) if t.get("primary_category")
+                         else '<span style="color:var(--muted);font-style:italic;">No primary yet</span>')
         n_leads = lead_counts.get(t["id"], 0)
         lead_badge = (f'<a href="/admin/inbox/toolbox-intros?tool_id={t["id"]}" '
                       f'style="display:inline-block;background:var(--coral);color:#fff;border-radius:5px;'
@@ -14408,6 +14428,7 @@ def admin_software(request: Request, filter: str = ""):
             </div>
           </td>
           <td data-col="software:summary" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:260px;">{_esc(t.get('summary') or '—')}</td>
+          <td data-col="software:primary_category" data-label="{_esc(tool_labels.PRIMARY_USE)}" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_primary_cell}</td>
           <td data-col="software:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td data-col="software:intros" data-label="Intros" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
           <td data-col="software:review_status" data-label="Review status" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">
@@ -14443,8 +14464,10 @@ def admin_software(request: Request, filter: str = ""):
     )
     total_leads = sum(lead_counts.values())
 
-    software_cols = [("summary", "Short description"), ("categories", "Categories"), ("intros", "Intros"),
-                      ("review_status", "Review status")]
+    software_cols = [("summary", "Short description"), ("primary_category", tool_labels.PRIMARY_USE),
+                      ("categories", "Categories"), ("intros", "Intros"), ("review_status", "Review status")]
+    # Primary use shows by default (issue #624): the empty ones are the work.
+    software_default_cols = ("review_status", "primary_category")
     software_bulk_fields = [
         {"key": "categories", "label": "Categories", "kind": "multi"},
         {"key": "advisor", "label": "Formal advisor", "kind": "checkbox"},
@@ -14519,7 +14542,7 @@ def admin_software(request: Request, filter: str = ""):
 </div>
 
 <h2 style="font-size:16px;font-weight:600;margin:0 0 12px;">Approved software{' needing review' if filter == 'needs_review' else ''}</h2>
-{_admin_column_picker_html("software", software_cols)}
+{_admin_column_picker_html("software", software_cols, default_visible=software_default_cols)}
 {_admin_sort_filter_toolbar_html("software", software_sort_fields, software_scalar_filters, category_options=tool_categories,
                                   category_style="pills", search_placeholder="Search by name or URL…")}
 {_admin_bulk_panel_html("software", "/admin/tools/software/bulk-edit", software_bulk_fields, category_options=tool_categories, show_delete_button=True)}
@@ -14529,6 +14552,7 @@ def admin_software(request: Request, filter: str = ""):
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col" style="padding:10px 12px;text-align:left;font-size:13px;"><div style="display:flex;align-items:center;gap:10px;"><input type="checkbox" aria-label="Select all" onchange="selectAllRows('software',this.checked)"><span>Name</span></div></th>
   <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
+  <th aria-label="{_esc(tool_labels.PRIMARY_USE)}" data-col="software:primary_category" style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_CATEGORY}px;">{_esc(tool_labels.PRIMARY_USE)}</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
   <th data-col="software:review_status" style="padding:10px 12px;text-align:left;font-size:13px;">Review status</th>
@@ -14538,7 +14562,7 @@ def admin_software(request: Request, filter: str = ""):
 </table>
 </div>
 <script>
-initColPicker('software', {json.dumps([k for k, _ in software_cols])});
+initColPicker('software', {json.dumps([k for k, _ in software_cols])}, {json.dumps(list(software_default_cols))});
 applySortFilter('software');
 initAdminScrollHint();
 </script>
@@ -14899,6 +14923,24 @@ async def admin_software_bulk_edit(request: Request):
         return JSONResponse({"ok": False, "error": "Invalid request"}, status_code=400)
     lib = _lib()
     try:
+        # Primary use (issue #624): a categories change replaces the set, so it
+        # must not take a vendor's Primary use out of it. Checked for the whole
+        # selection BEFORE any write; one such vendor refuses the whole save.
+        if field == "categories":
+            new_set = set(value if isinstance(value, list) else [])
+            blocked = []
+            for raw_id in ids:
+                try:
+                    t = lib.get_tool(int(raw_id))
+                except (TypeError, ValueError):
+                    continue
+                if t and t.get("primary_category") and t["primary_category"] not in new_set:
+                    blocked.append(f'{t["name"]} ({t["primary_category"]})')
+            if blocked:
+                return JSONResponse({"ok": False, "error": "primary use", "message": (
+                    f"Nothing was saved. This would remove the {tool_labels.PRIMARY_USE} of: "
+                    + ", ".join(blocked) + ". Change those on their edit pages first, "
+                    "or keep that category ticked.")}, status_code=400)
         for raw_id in ids:
             try:
                 tool_id = int(raw_id)
@@ -14912,6 +14954,7 @@ async def admin_software_bulk_edit(request: Request):
                 categories=t["categories"], advisor=t["advisor"], promoted=t["promoted"],
                 vendor_email=t["vendor_email"], warm_intro_enabled=t["warm_intro_enabled"],
                 vendor_name=t["vendor_name"], summary=t.get("summary") or "",
+                primary_category=t.get("primary_category") or "",
                 source="admin-edit",
             )
             if field == "categories":
@@ -19249,6 +19292,70 @@ def _tool_name_refusals(form) -> list:
     return []
 
 
+def _tool_primary_refusals(form) -> list:
+    """[("Primary use", message)] when a Software save names no Primary use
+    (issue #624). Checked with the name and limit refusals, before any write. The
+    dropdown only offers active categories; the value is not re-checked against
+    the vocabulary here (admin-only route, and a test DB may have none seeded)."""
+    primary = (form.get("primary_category") or "").strip()
+    if not primary:
+        return [(tool_labels.PRIMARY_USE, "Choose the main reason someone buys it.")]
+    return []
+
+
+def _tool_primary_and_categories(form) -> tuple[str, list[str]]:
+    """(primary, saved set) from a Software form: the saved set is the Primary
+    use plus every "Also used for" tick, primary first, no repeats. The form can
+    therefore never save a primary that is outside the set (issue #624)."""
+    primary = (form.get("primary_category") or "").strip()
+    cats = [primary] if primary else []
+    for v in form.getlist("categories"):
+        v = v.strip()
+        if v and v not in cats:
+            cats.append(v)
+    return primary, cats
+
+
+# Keeps the "Also used for" boxes honest as the Primary use changes: the
+# primary's own box is unticked and disabled (a disabled box is not submitted;
+# the server adds the primary to the set anyway).
+_PRIMARY_USE_SYNC_JS = """
+function syncPrimaryUse() {
+  var sel = document.getElementById('primary-category');
+  if (!sel) return;
+  var v = sel.value;
+  document.querySelectorAll('#also-used-for input[type="checkbox"]').forEach(function(cb) {
+    var same = !!v && cb.value === v;
+    if (same) cb.checked = false;
+    cb.disabled = same;
+    cb.parentNode.style.opacity = same ? '.45' : '';
+  });
+}
+"""
+
+
+def _tool_primary_block_html(categories: list[dict], primary: str, selected: list[str]) -> str:
+    """The Primary use dropdown and the "Also used for" boxes, shared by the add
+    and edit forms. `selected` is the tool's other categories (the primary is
+    not repeated in it)."""
+    options = "".join(
+        f'<option value="{_esc(c["name"])}"{" selected" if c["name"] == primary else ""}>{_esc(c["name"])}</option>'
+        for c in categories)
+    placeholder = '' if primary else '<option value="" disabled selected>Choose one</option>'
+    return f"""<div>
+    <label for="primary-category" style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;">{_esc(tool_labels.PRIMARY_USE)} * <span style="font-weight:400;color:var(--muted);">(the main reason someone buys it)</span></label>
+    <select id="primary-category" name="primary_category" required onchange="syncPrimaryUse()"
+      style="width:100%;max-width:360px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">{placeholder}{options}</select>
+  </div>
+  <div>
+    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">{_esc(tool_labels.ALSO_USED_FOR)} <span style="font-weight:400;color:var(--muted);">(optional; select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
+    <div id="also-used-for" style="display:flex;flex-wrap:wrap;gap:8px 16px;">
+      {_tool_category_checkboxes(categories, selected)}
+    </div>
+  </div>
+  <script>{_PRIMARY_USE_SYNC_JS}syncPrimaryUse();</script>"""
+
+
 def _tool_limit_refusals(form) -> list:
     """Every Software profile field in this submit that is over its hard max,
     as (label, length, limit), checked together BEFORE any write so a refused
@@ -20383,12 +20490,7 @@ def _tool_new_page(request: Request, form=None, refusal: list | None = None):
       placeholder="2-3 sentences—shown on the directory card and in search results. Filled in by Generate above, or write your own.">{_esc(_fv('summary'))}</textarea>
     {_new_summary_counter}
   </div>
-  <div>
-    <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
-    <div style="display:flex;flex-wrap:wrap;gap:8px 16px;">
-      {_tool_category_checkboxes(categories, _selected_cats)}
-    </div>
-  </div>
+  {_tool_primary_block_html(categories, _fv('primary_category'), [c for c in _selected_cats if c != _fv('primary_category')])}
   <div>
     <button type="submit" class="btn">Add to directory</button>
     <a href="/admin/tools/software" class="btn btn-ghost" style="margin-left:10px;">Cancel</a>
@@ -20558,7 +20660,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     url = (form.get("url") or "").strip()
     description = (form.get("description") or "").strip()
     summary = (form.get("summary") or "").strip()
-    categories = [v.strip() for v in form.getlist("categories") if v.strip()]
+    primary_category, categories = _tool_primary_and_categories(form)
     advisor = 1 if form.get("advisor") == "1" else 0
     promoted = 1 if form.get("promoted") == "1" else 0
     vendor_email = (form.get("vendor_email") or "").strip()
@@ -20566,7 +20668,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
     vendor_name = (form.get("vendor_name") or "").strip()
     if not (name and url and description and summary):
         raise HTTPException(status_code=400, detail="Name, URL, description, and summary are required.")
-    over = _tool_name_refusals(form) + _tool_limit_refusals(form)
+    over = _tool_name_refusals(form) + _tool_primary_refusals(form) + _tool_limit_refusals(form)
     if over:
         page = _tool_new_page(request, form=form, refusal=over)
         page.status_code = 400
@@ -20605,7 +20707,7 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
                                 description_needs_verification=description_needs_verification,
                                 description_ai_confident=description_confident,
                                 description_low_confidence=description_low_confidence,
-                                source="admin-edit")
+                                source="admin-edit", primary_category=primary_category)
         if description_citations:
             lib.set_generated_entity_citations("tool", tool_id, "description", description_citations, model=citations_model)
     except DuplicateURLError as e:
@@ -20622,11 +20724,29 @@ async def admin_tools_new_submit(request: Request, background_tasks: BackgroundT
 
 
 @app.post("/admin/tools/software/{tool_id}/approve")
-def admin_tools_approve(request: Request, tool_id: int):
+async def admin_tools_approve(request: Request, tool_id: int):
     if not _is_authed(request):
         raise HTTPException(status_code=401, detail="unauthorized")
+    # Primary use (issue #624): a pending vendor has no edit page (the edit
+    # route serves approved rows only), so approval is where its Primary use
+    # is chosen. Approving without one is refused, so a primary is always set
+    # before a public vendor goes live.
+    form = await request.form()
+    primary = (form.get("primary_category") or "").strip()
     lib = _lib()
     try:
+        tool = lib.get_tool(tool_id)
+        if tool is None:
+            raise HTTPException(status_code=404, detail="Tool not found")
+        primary = primary or tool.get("primary_category") or ""
+        if not primary:
+            raise HTTPException(status_code=400, detail=(
+                f"Choose a {tool_labels.PRIMARY_USE} for this vendor before approving it. "
+                "Nothing was changed."))
+        if primary not in {c["name"] for c in lib.list_tool_categories()}:
+            raise HTTPException(status_code=400, detail=(
+                f"{primary!r} is not one of the categories. Nothing was changed."))
+        lib.set_tool_primary(tool_id, primary)
         lib.approve_tool(tool_id)
     finally:
         lib.close()
@@ -20731,11 +20851,19 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
             if _k in form:
                 tool[_k] = (form.get(_k) or "").strip()
         tool["categories"] = [v.strip() for v in form.getlist("categories") if v.strip()]
+        tool["primary_category"] = (form.get("primary_category") or "").strip()
         for _k in ("advisor", "promoted", "warm_intro_enabled"):
             tool[_k] = 1 if form.get(_k) == "1" else 0
         for _k in _hidden:
             _hidden[_k] = form.get(_k) or ""
     _refusal_html = _refusal_banner_html(refusal)
+    # Primary use preselect (issue #624): a stored primary wins; a tool with
+    # exactly one category and no primary yet takes that one; a tool with
+    # several and no primary leaves the dropdown empty so the choice is made.
+    # A re-render after a refused save shows exactly what was submitted.
+    _edit_primary = tool.get("primary_category") or ""
+    if not _edit_primary and form is None and len(tool.get("categories") or []) == 1:
+        _edit_primary = tool["categories"][0]
     meta_parts = []
     if tool.get("submitted_by"):
         meta_parts.append(f"Submitted by {_esc(tool['submitted_by'])}")
@@ -21111,12 +21239,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
           style="width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;">
       </div>
       {_logo_in_form_html}
-      <div>
-        <label style="display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:10px;">Categories <span style="font-weight:400;color:var(--muted);">(select any that apply, or <a href="/admin/tools/software/categories">manage categories</a>)</span></label>
-        <div style="display:flex;flex-wrap:wrap;gap:8px 16px;">
-          {_tool_category_checkboxes(categories, tool['categories'])}
-        </div>
-      </div>
+      {_tool_primary_block_html(categories, _edit_primary, [c for c in tool['categories'] if c != _edit_primary])}
     </div>
     <div style="display:grid;gap:16px;align-content:start;">
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 18px;">
@@ -21426,7 +21549,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     url = (form.get("url") or "").strip()
     description = (form.get("description") or "").strip()
     summary = (form.get("summary") or "").strip()
-    categories = [v.strip() for v in form.getlist("categories") if v.strip()]
+    primary_category, categories = _tool_primary_and_categories(form)
     advisor = 1 if form.get("advisor") == "1" else 0
     promoted = 1 if form.get("promoted") == "1" else 0
     vendor_email = (form.get("vendor_email") or "").strip()
@@ -21442,7 +21565,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
     # a refused save never leaves the row half-saved (2a.2: update_tool used to
     # write Description and Short summary before the Bottom line and Agent
     # taxonomy limits were checked, then claimed "Nothing was saved").
-    over = _tool_name_refusals(form) + _tool_limit_refusals(form)
+    over = _tool_name_refusals(form) + _tool_primary_refusals(form) + _tool_limit_refusals(form)
     if over:
         page = _tool_edit_page(request, slug, form=form, refusal=over)
         page.status_code = 400
@@ -21547,7 +21670,7 @@ async def admin_tools_edit_submit(request: Request, slug: str):
                         description_ai_confident=description_confident,
                         description_low_confidence=description_low_confidence,
                         clear_description_verification_stamp=bool(description_needs_verification),
-                        source="admin-edit")
+                        source="admin-edit", primary_category=primary_category)
         # Three branches (issue #634): fresh validated citations from this
         # submit's Generate write; otherwise clear only if the description's
         # text actually changed (`tool` is the row as it was BEFORE this
@@ -26556,6 +26679,16 @@ def admin_open_source(request: Request):
 # Each entry: (name, module path, bucket, purpose, cadence, env vars, invocation lines).
 # bucket is "Recurring & actively useful" or "Reusable diagnostic".
 _SCRIPT_REGISTRY = [
+    ("backfill_tool_primary.py", "scripts.backfill_tool_primary", "Reusable diagnostic",
+     "Primary use backfill (issue #624): a Software vendor with exactly one category and no "
+     "Primary use takes that category. Vendors with two or more categories are never touched; "
+     "they are printed as a worksheet (id, name, tags) to set by hand on the edit page. Preview "
+     "by default, writes only with --apply, reads every write back, and is safe to re-run. Does "
+     "not bump updated_at or touch review flags.",
+     "One-off after the Primary use deploy; safe to re-run.",
+     ["None beyond the database path"],
+     ["python -m scripts.backfill_tool_primary --db /data/library.db            # preview",
+      "python -m scripts.backfill_tool_primary --db /data/library.db --apply    # write"]),
     ("reset_user_password.py", "scripts.reset_user_password", "Recurring and actively useful",
      "Recovery: resets a user's password, or creates an admin account, on the container. The "
      "shared-secret login fallback is retired (issue #627), so this is the way back in when an "

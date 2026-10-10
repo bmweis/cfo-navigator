@@ -199,7 +199,7 @@ def test_edit_submit_saves_confidence_only_for_ai_drafted_fields(env):
 
     client = _client(env)
     _login(client)
-    r = client.post("/tools/software/runway/edit", data={
+    r = client.post("/tools/software/runway/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "Drafted description.",
         "summary": "Drafted short.", "categories": ["FP&A"],
         "ai_drafted_fields": "description,summary",
@@ -225,7 +225,7 @@ def test_edit_submit_ignores_confidence_for_hand_edited_field(env):
 
     client = _client(env)
     _login(client)
-    r = client.post("/tools/software/runway/edit", data={
+    r = client.post("/tools/software/runway/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "Hand-written description.",
         "summary": "Hand-written short.", "categories": ["FP&A"],
         "ai_drafted_fields": "",   # nothing drafted this save

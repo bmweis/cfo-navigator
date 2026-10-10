@@ -222,7 +222,7 @@ def _login(client):
 def test_admin_add_tool_requires_summary(env):
     client = _client(env)
     _login(client)
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "Long description.",
     })
     assert r.status_code == 400
@@ -232,7 +232,7 @@ def test_admin_add_tool_requires_summary(env):
 def test_admin_add_tool_saves_summary(env):
     client = _client(env)
     _login(client)
-    r = client.post("/admin/tools/software/new", data={
+    r = client.post("/admin/tools/software/new", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "Long description.",
         "summary": "Short summary.",
     }, follow_redirects=False)
@@ -399,7 +399,7 @@ def test_admin_can_save_a_trimmed_summary_after_it_was_over_the_old_cap(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{slug}/edit", data={
+    r = client.post(f"/tools/software/{slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com",
         "description": "Long description.",
         "summary": "Trimmed, compliant short summary.",

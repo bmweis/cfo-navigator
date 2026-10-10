@@ -6128,6 +6128,38 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   remove" — the NetSuite placeholder seeded by
   `scripts/seed_feature_taxonomy.py` has no reader. See ARCHITECTURE.md's
   "MCP field parity" paragraph in the Phase 3 section.
+- **Primary use for Software vendors, PR 1 of 2 (2026-10, issue #624).** Standing decision (2026-09-25): every
+  vendor has one required primary category, the main reason someone buys it; additional categories are optional
+  and mark real secondary use; directory filters match any tag. PR 1 is data, admin, MCP and backfill tooling; PR 2
+  (profile badge, Compare header) is separate and not built. Storage is a new column `tools.primary_category TEXT NOT
+  NULL DEFAULT ''`. `categories_json` stays the full set, and "first element is primary" cannot work because
+  `_tool_to_dict` sorts it alphabetically. **Invariant**: a non-empty primary is a member of `categories_json`,
+  enforced in `add_tool`, `update_tool` and `Library.set_tool_primary`; empty means "no primary yet" and is allowed
+  in the database during the transition. `update_tool(primary_category=None)` keeps the stored value, so a save that
+  does not touch categories can never wipe it (the bulk-edit route and `scripts/regen_ai_drafted_fields.py` also pass
+  it through explicitly). `rename_tool_category` carries the primary; `delete_tool_category` clears the primary of
+  any tool that had it. Label words are `tool_labels.PRIMARY_USE` ("Primary use") and `ALSO_USED_FOR` ("Also used
+  for"). The admin add and edit forms have a required Primary use dropdown above the "Also used for" boxes; the
+  saved set is the primary plus the ticks, and a save with no primary is refused with the existing "Nothing was
+  saved" pattern (`_tool_primary_refusals`). Edit-page preselect: exactly one category and no primary takes that one;
+  several leave it empty. **A brief claim that did not hold, and what was done about it**: the brief said a public
+  submission is approved through the edit form, which refuses an empty primary. It is not: the edit route serves
+  approved rows only (`get_tool_by_slug`), so a pending vendor has no edit page, and approval was a one-click POST
+  with no check. So the pending-row Approve form now carries a required Primary use dropdown, and
+  `POST /admin/tools/software/{id}/approve` refuses without one (400, nothing changed) and sets it before approving.
+  The public submit form is unchanged and still stores an unapproved vendor with an empty primary. Bulk edit refuses
+  the whole save, naming the vendors, when a categories change would take a vendor's primary out of the set. The
+  Software admin list has a "Primary use" column (shown by default; "No primary yet" in muted italic when empty; width
+  `_COL_WIDTH_CATEGORY`; still the Xwide floor bucket shared with Communities). MCP: `primary_category` is added to
+  `search_software`, `get_software` and `compare_software`, additive; the `category` filter stays any-tag. Vendors
+  only: communities, the Matchmaker and the AI feature scan are untouched, and no public page changes. **Backfill**:
+  `scripts/backfill_tool_primary.py` (registered at `/admin/system/scripts`) sets the primary of a vendor with exactly
+  one category and an empty primary; vendors with two or more are never touched and are printed as the worksheet
+  (id, name, tags) for Brian. It uses `set_tool_primary(touch=False)`, so `updated_at` and the review flags are
+  untouched, and reads every write back. Until it has run, saving any existing vendor from the edit form needs a
+  Primary use chosen (the dropdown is empty for multi-category vendors), so run it right after the deploy. See
+  ARCHITECTURE.md's `tools` row and "Primary use over MCP", and `tests/test_primary_use.py`,
+  `tests/test_backfill_tool_primary.py`.
 - **MCP server, Phase 5 (2026-09) — FP&A Buddy & Matchmaker proxy tools
   (`ask_fpa_buddy`, `ask_matchmaker(kind, ...)`), a new `webapp/mcp_qa.py`.**
   Neither `/ask` nor the two matchmaker routes' identity resolution

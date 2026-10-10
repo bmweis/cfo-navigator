@@ -210,7 +210,7 @@ def test_admin_edit_saves_competitive_differentiation(env):
 
     client = _client(env)
     _login(client)
-    r = client.post(f"/tools/software/{a_slug}/edit", data={
+    r = client.post(f"/tools/software/{a_slug}/edit", data={"primary_category": "FP&A", 
         "name": "Runway", "url": "https://runway.com", "description": "FP&A", "summary": "FP&A",
         "competitive_differentiation": "Human-readable formulas, real-time sync.",
     }, follow_redirects=False)

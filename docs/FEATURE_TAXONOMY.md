@@ -11,7 +11,10 @@ Runway/Abacum/Aleph, FloQast/Numeric.io/Ledge), August 2026.
 
 **Category → Feature list → Tool-feature link.**
 
-- Every tool belongs to a category (ERP/Accounting, FP&A Planning, Close Management, etc.).
+- Every tool belongs to a category (ERP/Accounting, FP&A Planning, Close Management, etc.). Since
+  issue #624 "belongs to" means any tag: each tool has one required Primary use (the main reason someone
+  buys it) plus optional "Also used for" tags, and a tool is mapped against the feature list of every
+  category it carries, primary or not.
 - Each category owns a curated, flat list of ~10-15 features. This list is the controlled
   vocabulary — tools do not bring their own features; they are mapped against the category's list.
 - A tool-feature link records that vendor's implementation: availability, AI flag, verified date,
