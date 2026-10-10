@@ -6160,6 +6160,12 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   Primary use chosen (the dropdown is empty for multi-category vendors), so run it right after the deploy. See
   ARCHITECTURE.md's `tools` row and "Primary use over MCP", and `tests/test_primary_use.py`,
   `tests/test_backfill_tool_primary.py`.
+- **Primary use, PR 2 of 2: public display (2026-10, issue #624).** The directory card shows the primary only
+  (the full set still ships, so the filter and search match any tag); the profile badge is the primary with one
+  muted "Also used for: X, Y" line, absent when the vendor has only the primary; the Compare header leads each
+  vendor with a visible "Primary use: X" line and keeps the shared-vs-unique tag chips. An empty primary renders
+  exactly as before on all three. Not changed: Matchmaker context, communities, filters, URLs, the admin lists.
+  See ARCHITECTURE.md's "Primary use on public pages" and `tests/test_primary_use_display.py`.
 - **MCP server, Phase 5 (2026-09) — FP&A Buddy & Matchmaker proxy tools
   (`ask_fpa_buddy`, `ask_matchmaker(kind, ...)`), a new `webapp/mcp_qa.py`.**
   Neither `/ask` nor the two matchmaker routes' identity resolution
