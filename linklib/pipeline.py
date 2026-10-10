@@ -4,6 +4,8 @@
                   fetch + enrich + store. The web endpoint and the CLI both
                   call this, so saving from a phone shortcut and from the
                   terminal go through identical logic.
+- `ingest_text` : load text that was handed over (a benchmark digest) with no
+                  fetch and no Claude call; creates or overwrites by URL.
 - `enrich_library`: backfill Claude summaries/tags over rows that don't have
                   them yet (e.g. right after the Feedly import).
 - `embed_article` : best-effort embed-on-save for one article (#93), called
@@ -19,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from .db import Article, Library
+from .db import DIGEST_TAG, Article, Library
 from . import enrich as enrich_mod
 
 
@@ -165,6 +167,68 @@ def ingest_url(
                 {"id": article_id, "url": url})
 
 
+def ingest_text(
+    lib: Library,
+    *,
+    url: str,
+    title: str,
+    content: str,
+    summary: str,
+    source: str,
+    tags: Optional[list[str]] = None,
+    published_at: Optional[str] = None,
+) -> dict:
+    """Create or overwrite one benchmark digest from supplied text.
+
+    No page fetch and no Claude enrichment call: the text is stored exactly as
+    handed over (the summary is the digest's own, not a Claude-written one),
+    which is why the row is stored enriched=1 and tagged DIGEST_TAG, the tag
+    every automatic rewrite path skips (see db.DIGEST_TAG). URL identity is the
+    normal normalize_url, so `?digest=<slug>` survives and two digests of one
+    report stay two rows.
+
+    A URL that already holds a digest is overwritten through
+    Library.overwrite_article_text (upsert() keeps old content, so it cannot
+    correct a digest). A URL that holds anything else raises ValueError and
+    writes nothing: this function never replaces a real saved article.
+
+    Then calls embed_article so the vector index includes the row (FTS5 is
+    trigger-driven and needs nothing). Embedding is best-effort, like every
+    other embed-on-save; the row is saved either way and `embedded` says
+    whether the stored text actually has a current vector.
+
+    Returns {"id", "url", "created", "embedded"}.
+    """
+    from . import embeddings as embed_mod
+
+    from .digests import canonical_tags
+    tag_list = canonical_tags(tags or [])
+    existing = lib.get_article_by_url(url)
+    if existing is not None:
+        if DIGEST_TAG not in (existing.get("tags") or []):
+            raise ValueError(
+                f"Article #{existing['id']} already uses this URL and is not a digest; "
+                "refusing to overwrite it.")
+        article_id = existing["id"]
+        lib.overwrite_article_text(
+            article_id, title=title, summary=summary, content=content,
+            source=source, tags=tag_list, published_at=published_at)
+        created = False
+    else:
+        article_id = lib.upsert(Article(
+            url=url, title=title, summary=summary, content=content, source=source,
+            tags=tag_list, published_at=published_at, enriched=True,
+            saved_at=datetime.now(timezone.utc).isoformat()))
+        created = True
+
+    embed_article(lib, article_id)
+    stored = lib.get_article(article_id)
+    text = embed_mod.document_text(stored) if stored else ""
+    embedded = bool(text) and lib.embedding_content_hash(article_id) == embed_mod.content_hash(text)
+    return {"id": article_id, "url": stored["url"] if stored else url,
+            "created": created, "embedded": embedded}
+
+
 def embed_article(lib: Library, article_id: int) -> bool:
     """Best-effort embed-on-save for one article (#93). Builds the same
     document text the backfill script embeds (title + tags + summary +
@@ -225,7 +289,7 @@ def enrich_library(lib: Library, limit: int = 1000, fetch: bool = True,
     use_model = model or enrich_mod.DEFAULT_MODEL
     vocab = lib.known_tags()
     guide = tagstyle.effective_tag_guidance(lib)
-    rows = lib.all_articles(limit=limit) if force else lib.unenriched(limit=limit)
+    rows = lib.articles_for_enrichment(limit=limit, force=force)
     done = 0
     for row in rows:
         text = row["content"] or row["summary"] or ""
