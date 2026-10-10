@@ -6734,6 +6734,10 @@ pending, 0 member submissions ever, dormant for months — see
   alongside the RSS scan and one-time sitemap backfill that also fed that
   table — all retired together; see `library_queue`'s own schema-table row
   above.)
+- **Text loads** (benchmark digests, 2026-10): `pipeline.ingest_text` creates
+  or overwrites an article from supplied text, with no fetch and no Claude
+  call, for the admin page at `/admin/reader/digests`. See "Benchmark digests"
+  below.
 - FTS5 stays in sync automatically via the triggers — every insert/update
   cascades into the index. `articles_vec` does **not**: a SQL trigger can't
   make a network call, so embeddings are written from Python instead
@@ -6741,6 +6745,91 @@ pending, 0 member submissions ever, dormant for months — see
   consistent by design** rather than trigger-synchronous like FTS5 — an
   article is always immediately findable via FTS5, and via vector search
   once its embed call (inline or backfilled) has actually completed.
+
+### Benchmark digests (`/admin/reader/digests`, 2026-10)
+
+FP&A Buddy answers benchmark questions from the Archive, and no existing path
+can put text in without fetching a URL (`/save` and `ingest_url` fetch,
+`add_link.py --no-fetch` stores a bare URL, the original-content mirror only
+serves Brian's own pieces). Digests of third-party benchmark reports are
+written elsewhere (in a Claude Project) and handed over as a text bundle; this
+page only loads them. No AI call and no fetch happen on this path.
+
+**Where things live**
+
+| Piece | Where |
+|---|---|
+| Bundle format, parser, limits, preview planning | `linklib/digests.py` (HTML-free, writes nothing). The format is documented on the page itself, below the form. |
+| Writer | `linklib/pipeline.py::ingest_text`, which calls `embed_article` (the same best-effort embed-on-save every save uses) |
+| The one overwriting writer | `Library.overwrite_article_text`. `Library.upsert` keeps the old summary and content on a URL match, so it cannot correct a digest. This is the only method allowed to replace stored content, and `ingest_text` is its only caller. |
+| Page and routes | `webapp/app.py`: `GET /admin/reader/digests`, `POST .../preview` (writes nothing), `POST .../load` (re-parses and re-plans, never trusts the preview). Admin session only: the save token gets 401, and a signed-out `GET` redirects to login. A hub-nav card sits in the Reader group's "Add content" quadrant (`_LIBRARY_TOOLS`). |
+| Audit | One `archive_audit_log` row per load (`_log_archive_audit`, action `add`, no item id, detail lists the counts and the URLs), the same one-summary-row convention as the bulk tag operations. |
+| Probe | `scripts/probe_digest_rank.py` (read-only; see below) |
+
+**Identity and overwrite.** A digest's identity is `normalize_url(URL)`.
+`?digest=<slug>` survives normalization (the `#fragment` and `source`, `ref`,
+`amp`, `utm_*` parameters do not), so two digests of one report stay two rows.
+Loading a URL that already holds a digest overwrites it (title, summary,
+content, source, tags, published date, `saved_at`, and clears `content_html`
+and the content-check flag, since the Reader prefers `content_html`). A URL
+that holds an article that is not tagged as a digest is an error in the
+preview and a `ValueError` in `ingest_text`: the overwrite never replaces a
+real saved article. Text is stored exactly as written, with no voice
+normalization.
+
+**Stored shape.** `enriched=1`, `in_scope=1`, `is_own_content=0`,
+`needs_content_check=0`, tags always including `benchmark-digest`
+(`db.DIGEST_TAG`, folded to that exact spelling by `digests.canonical_tags`).
+`PUBLISHED` accepts `YYYY`, `YYYY-MM` or `YYYY-MM-DD`; a partial date becomes
+the first day of the period at UTC midnight, stored as ISO 8601. The Reader
+list shows it as `1 Mar 2099` and the article pane as `2099-03-01`, so a
+month-only digest reads as the 1st. FTS5 needs nothing (trigger-driven).
+Embedding is best-effort: the load result says `Saved, not embedded` when no
+current vector exists afterward (no OpenAI key, or the call failed), and
+`scripts/embed_backfill.py` picks those up later.
+
+**Digests must stay as written.** The tag is what every automatic rewrite
+path skips, even when forced:
+
+- The enrich backfill and forced re-enrich: `Library.unenriched()` and the new
+  `Library.articles_for_enrichment()` (used by `pipeline.enrich_library` and
+  the admin re-enrich job) exclude it. A Claude summary would replace the
+  digest's own.
+- The Reader content backfill: `articles_needing_content_backfill()` in every
+  scope (default, `force`, host-scoped), `_content_backfill_remaining_ids()`
+  (the Remaining tile) and `articles_eligible_for_purge()`. Otherwise the
+  report's landing page would be fetched into `content_html`.
+- Near-duplicate clustering: `dedupe.find_clusters` drops them first. Without
+  that, digests of one report cluster against each other (similar titles and
+  summaries), and the tool offers to delete all but one.
+
+`Library.all_articles()` is deliberately NOT filtered: `embed_backfill` and
+tag-style learning read it, and digests must stay embeddable.
+
+**What retrieval does with them.** Nothing special: ranking is unchanged and
+`is_own_content` stays 0, so a digest competes on merit like any article. Two
+limits shape what to write. The embedding input is the first 8,000 characters
+of title, tags, summary and content together (`embeddings.DOCUMENT_MAX_CHARS`).
+Grounding reads the summary plus the start of the content up to
+`EFFORT_SETTINGS[depth]["source_chars"]` per source (1,800 at Standard), so the
+summary and the top of the content carry the answer. Limits are two-tier:
+summary target 700, max 1,000; content target 6,000, max 12,000. Over target is
+an amber warning; over max refuses the whole bundle; nothing is shortened.
+There are no partial loads: any row error refuses the bundle.
+
+**The Reader.** Opening a digest uses `_resolve_reader_content`, which serves
+the stored text when it is over 200 characters (no live fetch). A digest
+shorter than that would fall through to a live fetch of its landing page, so
+keep digests longer.
+
+**Probe.** `scripts/probe_digest_rank.py` opens the database with `mode=ro`,
+never constructs `Library` (its constructor writes), and borrows the real
+`Library.search`, `Library.vector_search`, `agent._rrf_merge` and
+`agent._build_source_documents`, so the ranks and the character budget are the
+real ones. It makes one OpenAI embedding call (skipped with a message without a
+key) and no Claude or Exa call. For each depth it prints the top 15 with the
+full-text and vector rank, `SENT` / `budget` / `not sent`, grounding characters,
+and how many characters of the depth's global cap are left for feed and web.
 
 ### Reader merge (Phase 5)
 
@@ -8542,7 +8631,7 @@ CFO Toolbox alongside the Software sub-group and the Communities card.
 
 **Structure: two levels of nesting, everything collapsed on load.** Reader
 group → three quadrants (Add content, Existing archive management, Tag
-management) → the tool cards inside each. `webapp/app.py`'s
+management) → the tool cards inside each. The Benchmark digests card (`/admin/reader/digests`) sits at the top of Add content, ahead of the capture accordions. `webapp/app.py`'s
 `_reader_admin_quadrants(task_counts)` is what used to be the
 `admin_library()` route body, minus the page shell: it returns those
 quadrants as pre-rendered HTML strings, which `admin_page()` drops straight
