@@ -1663,6 +1663,16 @@ _TRACKING_PARAMS = {
 }
 
 
+# Benchmark digests (hand-handed text, see linklib/digests.py) carry this tag.
+# Every automatic mechanism that would rewrite an article (enrichment, the
+# Reader content backfill, the purge candidate list, near-duplicate
+# clustering) skips it, so a digest stays exactly as written.
+DIGEST_TAG = "benchmark-digest"
+# tags_json is json.dumps(list), so the tag appears quoted. Unqualified column
+# name on purpose: it is used with and without an `a` alias.
+_NOT_DIGEST_SQL = "tags_json NOT LIKE '%\"" + DIGEST_TAG + "\"%'"
+
+
 def normalize_url(url: str) -> str:
     """Canonicalize a URL for dedup so trivial variants of the same article map
     to one key: force https, drop a leading 'www.', strip the fragment and common
@@ -3121,6 +3131,43 @@ class Library:
         self.conn.commit()
         return existing["id"]
 
+    def overwrite_article_text(self, article_id: int, *, title: str, summary: str,
+                               content: str, source: str, tags: list[str],
+                               published_at: str | None) -> None:
+        """Replace an article's title, summary, content, source, tags and
+        published date outright, so a corrected benchmark digest can be loaded
+        again.
+
+        This is the ONLY writer allowed to overwrite stored content.
+        `upsert()` deliberately keeps the existing summary and content on a URL
+        match (that is right for a re-import or a second save, and
+        tests/test_content_downgrade_guard.py depends on it), so it cannot
+        correct a digest. Only linklib.pipeline.ingest_text calls this, and
+        only for a row already tagged DIGEST_TAG; the admin preview refuses to
+        plan an overwrite of anything else.
+
+        The row also gets what a fresh digest gets: enriched=1 (nothing may
+        replace the summary), in_scope=1, is_own_content=0,
+        needs_content_check=0, content_html cleared (the Reader prefers
+        content_html over content, so a stale structured copy would shadow the
+        new text), and saved_at set to now. The caller re-embeds afterwards.
+        The text is stored exactly as given: no voice normalization, because a
+        digest must stay as written."""
+        clean = sorted(set(t.strip() for t in tags if t.strip()))
+        now = _now()
+        cur = self.conn.execute(
+            """UPDATE articles SET title=?, summary=?, content=?, source=?,
+               tags_json=?, tags_text=?, published_at=?, saved_at=?,
+               enriched=1, in_scope=1, is_own_content=0, needs_content_check=0,
+               content_check_reason='', content_html='', updated_at=? WHERE id=?""",
+            (title, summary, content, source, json.dumps(clean), " ".join(clean),
+             published_at, now, now, article_id),
+        )
+        if cur.rowcount != 1:
+            self.conn.rollback()
+            raise KeyError(f"No article #{article_id} to overwrite")
+        self.conn.commit()
+
     def update_tags(self, article_id: int, tags: list[str]) -> None:
         """Replace the tag list on an article (hard-replace, not union)."""
         clean = sorted(set(t.strip() for t in tags if t.strip()))
@@ -3186,7 +3233,7 @@ class Library:
         URL' set — real purge candidates, not ordinary backfill backlog."""
         from .extract import _MIN_CONTENT_WORDS
         rows = self.conn.execute(
-            "SELECT * FROM articles WHERE url!='' AND content_html='' ORDER BY id"
+            f"SELECT * FROM articles WHERE url!='' AND content_html='' AND {_NOT_DIGEST_SQL} ORDER BY id"
         ).fetchall()
         out: list[dict] = []
         for r in rows:
@@ -3970,7 +4017,20 @@ class Library:
 
     def unenriched(self, limit: int = 1000) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT * FROM articles WHERE enriched=0 ORDER BY id LIMIT ?", (limit,)
+            f"SELECT * FROM articles WHERE enriched=0 AND {_NOT_DIGEST_SQL} ORDER BY id LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def articles_for_enrichment(self, limit: int = 100000, force: bool = False) -> list[dict]:
+        """Rows an enrichment pass may touch: the unenriched ones, or with
+        `force` every row. Benchmark digests are never in either list: a
+        Claude-written summary would replace the digest's own, so the
+        enrich backfill and a forced re-enrich both skip them."""
+        if not force:
+            return self.unenriched(limit=limit)
+        rows = self.conn.execute(
+            f"SELECT * FROM articles WHERE {_NOT_DIGEST_SQL} ORDER BY id LIMIT ?", (limit,)
         ).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
@@ -4134,7 +4194,11 @@ class Library:
         stopped/crashed run and a deliberate re-run both just pick up where
         they left off, and articles a prior run already succeeded on are
         never re-fetched (rate-limit-friendly, and safe to press "start"
-        again after a stop). ALSO excludes, in the default scope only:
+        again after a stop). Benchmark digests (DIGEST_TAG) are excluded in
+        EVERY scope, force and host-scoped included: their text was handed
+        over, not fetched, and their URL is a report landing page that would
+        otherwise be fetched into content_html, which the Reader prefers.
+        ALSO excludes, in the default scope only:
         - any article whose most recent content_refetch_log attempt was
           reason='defunct-service' (linklib.pipeline._DEFUNCT_SERVICE_DOMAINS)
           — a confirmed-permanently-dead host (e.g. Google's discontinued
@@ -4187,12 +4251,12 @@ class Library:
 
             if force:
                 rows = self.conn.execute(
-                    "SELECT * FROM articles WHERE url!='' ORDER BY id"
+                    f"SELECT * FROM articles WHERE url!='' AND {_NOT_DIGEST_SQL} ORDER BY id"
                 ).fetchall()
             else:
                 rows = self.conn.execute(
-                    """SELECT a.* FROM articles a
-                       WHERE a.url!='' AND a.content_html=''
+                    f"""SELECT a.* FROM articles a
+                       WHERE a.url!='' AND a.content_html='' AND {_NOT_DIGEST_SQL}
                          AND a.id NOT IN (
                            SELECT article_id FROM (
                              SELECT article_id, reason,
@@ -4209,14 +4273,15 @@ class Library:
 
         if force:
             rows = self.conn.execute(
-                "SELECT * FROM articles WHERE url!='' ORDER BY id LIMIT ?", (limit,)
+                f"SELECT * FROM articles WHERE url!='' AND {_NOT_DIGEST_SQL} ORDER BY id LIMIT ?",
+                (limit,)
             ).fetchall()
             return [self._row_to_dict(r) for r in rows]
 
         manual_review_ids = self._manual_review_article_ids()
         rows = self.conn.execute(
-            """SELECT a.* FROM articles a
-               WHERE a.url!='' AND a.content_html=''
+            f"""SELECT a.* FROM articles a
+               WHERE a.url!='' AND a.content_html='' AND {_NOT_DIGEST_SQL}
                  AND a.id NOT IN (
                    SELECT article_id FROM (
                      SELECT article_id, reason,
@@ -4250,8 +4315,8 @@ class Library:
         count_structured_content's docstring)."""
         base_ids = {
             r[0] for r in self.conn.execute(
-                """SELECT a.id FROM articles a
-                   WHERE a.url!='' AND a.content_html=''
+                f"""SELECT a.id FROM articles a
+                   WHERE a.url!='' AND a.content_html='' AND {_NOT_DIGEST_SQL}
                      AND a.id NOT IN (
                        SELECT article_id FROM (
                          SELECT article_id, reason,

@@ -26353,6 +26353,7 @@ _LIBRARY_TOOLS = [
     # admin_tag_management()'s own docstring for the two-section structure.
     ("/admin/reader/tag-management", "Tag cleanup and style", "Merge, rename, or remove existing tags, and edit the guide that steers how new ones get chosen."),
     ("/admin/reader/enrich",       "Enrich archive",      "Uses Claude to draft a summary and tags for each saved article. This is where new tags get created."),
+    ("/admin/reader/digests",      "Benchmark digests",   "Load digests of third-party benchmark reports into the Archive from a text bundle, so FP&amp;A Buddy can answer from them. Nothing is fetched and no AI runs; each digest is stored as written and skipped by every automatic rewrite."),
     ("/admin/reader/bulk-delete",   "Bulk delete articles", "Permanently remove a specific list of articles you've already decided aren't needed&mdash;paste their URLs into the CSV template, mark <code>confirm_delete</code>, and re-upload. For a known list, not a scan&mdash;different from the &lt;60-word Purge tool under Reader content backfill. A single article can also be removed straight from its Reader toolbar."),
 ]
 
@@ -26689,6 +26690,18 @@ _SCRIPT_REGISTRY = [
      ["None beyond the database path"],
      ["python -m scripts.backfill_tool_primary --db /data/library.db            # preview",
       "python -m scripts.backfill_tool_primary --db /data/library.db --apply    # write"]),
+    ("probe_digest_rank.py", "scripts.probe_digest_rank", "Reusable diagnostic",
+     "Read-only check that loaded benchmark digests rank where FP&A Buddy actually looks. For one "
+     "question it prints the top 15 library hits at each depth (quick, standard, deep) with the "
+     "full-text rank, the vector rank, whether the row would be sent to the model, its grounding "
+     "characters, published date, title and source, marks the rows you are watching, and shows how "
+     "much of the depth's character cap is left for feed and web. Uses the real retrieval pieces, "
+     "opens the database with mode=ro (never the Library class), makes one OpenAI embedding call "
+     "(skipped with a message when there is no key) and no Claude or Exa call.",
+     "After loading a bundle at /admin/reader/digests, and whenever a benchmark question looks wrong.",
+     ["OPENAI_API_KEY (optional; without it only the full-text half prints)"],
+     ["python -m scripts.probe_digest_rank --db /data/library.db --question \"...\" --watch 4801,4802",
+      "python -m scripts.probe_digest_rank --db /data/library.db --question \"...\" --watch-text \"High Alpha\""]),
     ("reset_user_password.py", "scripts.reset_user_password", "Recurring and actively useful",
      "Recovery: resets a user's password, or creates an admin account, on the container. The "
      "shared-secret login fallback is retired (issue #627), so this is the way back in when an "
@@ -31019,7 +31032,12 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
     # here as a _lib_card above them, which buried it four expansions deep from
     # /admin (CFO Toolbox -> Reader -> New content -> the card). It's now a
     # sibling of the three quadrants instead — see the return statement below.
-    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
+    digests_card_html = _lib_card(
+        "/admin/reader/digests", lib_by_href["/admin/reader/digests"][0],
+        lib_by_href["/admin/reader/digests"][1],
+        _badge_for_href("/admin/reader/digests", task_counts.get("/admin/reader/digests", 0)))
+    saving_articles_body = f"""<div style="margin:0 0 18px;">{digests_card_html}</div>
+<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
 <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving to the archive</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 
@@ -31099,16 +31117,14 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
 
 <p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, all four snippets above stop working at once&mdash;they share the same token, and the old copies embed the old values. Set them up again from the instructions above.</p>"""
 
-    # 4, not the literal 0 cards: the archive bookmarklet/Share-Sheet
-    # accordions and the Read Later bookmarklet/Share-Sheet accordions. Each is
-    # a real tool a person uses, even though none is a _lib_card. Was 5 before
-    # PR 35 moved Manage feeds out to its own sibling card. `hrefs` is empty
-    # now, so this quadrant carries no task badge of its own — Manage feeds'
-    # badge moved out with the card, and _lib_quadrant's count_override is
-    # deliberately badge-independent, so that stays correct rather than
-    # orphaning a badge from the page it aggregates.
+    # 5, not the literal 1 card: the Benchmark digests card plus the four
+    # capture accordions (archive and Read Later, bookmarklet and Share Sheet).
+    # Each is a real tool a person uses. `hrefs` is empty, so this quadrant
+    # carries no task badge of its own, and _lib_quadrant's count_override is
+    # deliberately badge-independent, so the count can't orphan a badge from the
+    # page it aggregates.
     saving_articles_html = _lib_quadrant("Add content", saving_articles_body,
-                                         [], count_override=4)
+                                         [], count_override=5)
 
     existing_mgmt_html = _lib_section(
         "Existing archive management",
@@ -35319,7 +35335,7 @@ def _enrich_job(force: bool, model: str, limit: int) -> None:
     try:
         from linklib import pipeline as _pl
 
-        rows = lib.all_articles(limit=limit) if force else lib.unenriched(limit=limit)
+        rows = lib.articles_for_enrichment(limit=limit, force=force)
         total = len(rows)
         _job_set("enrich", total=total)
 
@@ -37182,6 +37198,323 @@ async def admin_library_bulk_delete_commit(request: Request):
         msg += (f' {len(skipped_ids)} row(s) skipped (already changed or gone since preview): '
                 f'{", ".join(f"#{i}" for i in skipped_ids[:10])}{" …" if len(skipped_ids) > 10 else ""}')
     return RedirectResponse(f"/admin/reader/bulk-delete?msg={quote(msg)}", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Benchmark digests: load hand-handed text into the Archive (no fetch, no AI).
+# Three routes: the form, a preview that writes nothing, and the load, which
+# re-parses the bundle itself and refuses it whole if any row has an error.
+# Format and limits live in linklib/digests.py; the writer is
+# pipeline.ingest_text. See ARCHITECTURE.md ("Benchmark digests").
+# ---------------------------------------------------------------------------
+
+_DIGESTS_FORM_MAX_BYTES = 5 * 1024 * 1024    # per form field; the bundle cap is smaller
+
+_DIGEST_FORMAT_EXAMPLE = """TITLE: Example Benchmarks 2099: Growth and retention
+URL: https://example-benchmarks.test/report-2099?digest=growth-retention
+SOURCE: Example Benchmarks 2099
+PUBLISHED: 2099-03
+TAGS: benchmark-digest, saas
+SUMMARY: One paragraph on one line: what the digest covers and the headline numbers.
+CONTENT:
+Markdown, as many lines as it needs.
+
+| Stage | Median growth |
+|---|---|
+| Seed | 90 percent |
+=====
+TITLE: Example Benchmarks 2099: Sales efficiency
+URL: https://example-benchmarks.test/report-2099?digest=sales-efficiency
+SOURCE: Example Benchmarks 2099
+PUBLISHED: 2099
+SUMMARY: The next digest follows the line of five equals signs.
+CONTENT:
+More markdown."""
+
+
+def _digest_gate(request: Request, post: bool):
+    """None when the caller has an admin session; else the refusal. The save
+    token is not an admin session, so a request carrying only the token gets
+    401 on GET as well as POST; a plain signed-out GET redirects to login like
+    every other admin page."""
+    if _is_authed(request):
+        return None
+    if post or request.headers.get("x-save-token"):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return _login_redirect(request)
+
+
+_DIGEST_TH = "padding:10px 12px;text-align:left;font-size:13px;"
+_DIGEST_URL_MIN = 240   # a free-text column needs a floor, or break-all squeezes it to one character a line
+
+
+def _digest_notice(text: str, kind: str = "error") -> str:
+    bg = "var(--coral-wash)" if kind == "error" else "var(--seafoam-wash)"
+    return (f'<p style="background:{bg};color:var(--navy);border-radius:10px;padding:10px 16px;'
+            f'font-size:14px;margin:0 0 16px;">{text}</p>')
+
+
+def _digests_form_page(*, bundle: str = "", error: str = "", status: int = 200) -> HTMLResponse:
+    from linklib import digests as _dg
+    from linklib.embeddings import DOCUMENT_MAX_CHARS
+    from linklib.agent import EFFORT_SETTINGS
+    std = EFFORT_SETTINGS["standard"]["source_chars"]
+    notice = _digest_notice(_esc(error)) if error else ""
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Benchmark digests</h1>
+<div style="max-width:900px;margin:0 auto;">
+<p style="color:var(--muted);margin:0 0 18px;">Loads digests of third-party benchmark reports into the Archive so FP&amp;A Buddy can answer from them. Nothing is fetched and no AI runs: each digest is stored exactly as written in the bundle.</p>
+{notice}
+<form method="post" action="/admin/reader/digests/preview" enctype="multipart/form-data"
+      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;">
+  <label for="digest-file" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Bundle file</label>
+  <input type="file" id="digest-file" name="file" accept=".md,.txt,text/markdown,text/plain" style="max-width:100%;margin:0 0 14px;">
+  <label for="digest-text" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Or paste the bundle</label>
+  <textarea id="digest-text" name="bundle" rows="12" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font:13px/1.5 monospace;" spellcheck="false">{_esc(bundle)}</textarea>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:14px;">
+    <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Preview</button>
+    <span style="font-size:12.5px;color:var(--muted);">Use the file or the box, not both. Preview writes nothing.</span>
+  </div>
+</form>
+
+<h2 style="font-size:16px;margin:32px 0 10px;">Bundle format</h2>
+<p style="font-size:13.5px;color:var(--muted);margin:0 0 10px;">Digests are separated by a line holding only <code>=====</code>. The headers come first, one line each, then <code>CONTENT:</code> on its own line and the markdown, which runs to the next separator or the end of the file. The publisher in the example is invented.</p>
+<pre style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:12.5px;line-height:1.5;overflow-x:auto;margin:0 0 14px;">{_esc(_DIGEST_FORMAT_EXAMPLE)}</pre>
+<ul style="font-size:13.5px;color:var(--ink-soft);line-height:1.65;padding-left:20px;margin:0 0 14px;">
+  <li><strong>URL</strong> is the report landing page plus <code>?digest=&lt;slug&gt;</code>. The slug keeps two digests of one report as two rows. A <code>#fragment</code> is dropped, as are <code>source</code>, <code>ref</code>, <code>amp</code> and <code>utm_*</code> parameters.</li>
+  <li><strong>PUBLISHED</strong> is a year, a month or a day. A partial date becomes the first day of the period at midnight UTC, so <code>2099-03</code> is stored as 2099-03-01, and the Reader shows it as the 1st of that month.</li>
+  <li><strong>TAGS</strong> is optional and comma-separated. <code>benchmark-digest</code> is always added; it is the tag that keeps a digest from being rewritten.</li>
+  <li><strong>Limits.</strong> Summary: aim for {_dg.SUMMARY_TARGET:,} characters, never over {_dg.SUMMARY_MAX:,}. Content: aim for {_dg.CONTENT_TARGET:,}, never over {_dg.CONTENT_MAX:,}. Over the aim is a warning; over the limit refuses the whole bundle. Nothing is shortened for you.</li>
+  <li><strong>What search sees.</strong> Meaning-based search embeds only the first {DOCUMENT_MAX_CHARS:,} characters of title, tags, summary and content together. At Standard depth FP&amp;A Buddy reads the summary plus the start of the content, about {std:,} characters per source, so the summary and the top of the content carry the answer. Put the year in the title: retrieval never sees the URL or the published date.</li>
+  <li><strong>Loading the same URL again overwrites that digest</strong> (its text, tags and date). A URL that holds a saved article that is not a digest is refused, never overwritten. If one digest has an error, none load.</li>
+  <li><strong>Digests are skipped</strong> by the enrich backfill, forced re-enrich, the Reader content backfill, the purge list and the de-dupe scan, so they stay as written.</li>
+</ul>
+</div>
+</div>"""
+    return HTMLResponse(_page("Benchmark digests—Admin", "Admin", body, authed=True), status_code=status)
+
+
+def _digest_count_cell(n: int, target: int, limit: int) -> str:
+    color = "var(--alert)" if n > limit else ("var(--caution)" if n > target else "inherit")
+    weight = "font-weight:600;" if color != "inherit" else ""
+    return f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;color:{color};{weight}">{n:,}</td>'
+
+
+def _digests_preview_page(bundle: str, rows, plan, bundle_errors, *, refused: bool = False) -> HTMLResponse:
+    from linklib import digests as _dg
+    n_err = sum(1 for e in plan if e["status"] == "error")
+    n_new = sum(1 for e in plan if e["status"] == "new")
+    n_over = sum(1 for e in plan if e["status"] == "overwrite")
+    body_rows = []
+    for e in plan:
+        r = e["row"]
+        if e["status"] == "error":
+            status = f'<span style="color:var(--alert);font-weight:600;">Error: {_esc(e["error"])}</span>'
+        elif e["status"] == "overwrite":
+            status = f'Will overwrite article #{e["article_id"]}'
+        else:
+            status = "New"
+        notes = "".join(
+            f'<div style="font-size:12px;color:var(--caution);margin-top:4px;line-height:1.45;">{_esc(w)}</div>'
+            for w in r.warnings)
+        body_rows.append(
+            f'<tr><td style="padding:10px 12px;font-size:13px;vertical-align:top;">'
+            f'<strong>{_esc(r.title) or "<em>untitled</em>"}</strong>{notes}</td>'
+            f'<td style="padding:10px 12px;font-size:12px;color:var(--muted);overflow-wrap:anywhere;vertical-align:top;">{_esc(r.url)}</td>'
+            f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_esc(r.published)}</td>'
+            + _digest_count_cell(len(r.summary), _dg.SUMMARY_TARGET, _dg.SUMMARY_MAX)
+            + _digest_count_cell(len(r.content), _dg.CONTENT_TARGET, _dg.CONTENT_MAX)
+            + f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{status}</td></tr>')
+    table = ""
+    if body_rows:
+        table = f"""{_ADMIN_SCROLL_HINT_HTML}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
+<table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="{_DIGEST_TH}min-width:{_COL_WIDTH_NAME}px;">Title</th>
+  <th style="{_DIGEST_TH}min-width:{_DIGEST_URL_MIN}px;">URL</th>
+  <th style="{_DIGEST_TH}width:{_COL_WIDTH_DATE}px;">Published</th>
+  <th style="{_DIGEST_TH}width:110px;">Summary chars</th>
+  <th style="{_DIGEST_TH}width:110px;">Content chars</th>
+  <th style="{_DIGEST_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Status</th>
+</tr></thead>
+<tbody>{"".join(body_rows)}</tbody>
+</table>
+</div>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>"""
+    errs = "".join(_digest_notice(_esc(m)) for m in bundle_errors)
+    if refused:
+        errs = _digest_notice("Nothing was loaded. Fix the rows marked Error and preview again.") + errs
+    if bundle_errors or n_err:
+        action = ('<p style="font-size:13.5px;color:var(--muted);margin:16px 0 0;">Nothing loads until every row is clean, '
+                  'so there are no partial loads. Fix the bundle and preview again.</p>')
+    else:
+        n = len(plan)
+        action = f"""<form method="post" action="/admin/reader/digests/load" style="margin:16px 0 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+  <textarea name="bundle" hidden>{_esc(bundle)}</textarea>
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Load {n} digest{"s" if n != 1 else ""}</button>
+  <span style="font-size:12.5px;color:var(--muted);">Warnings in amber do not block the load.</span>
+</form>"""
+    summary = (f'{len(plan)} digest{"s" if len(plan) != 1 else ""}: {n_new} new, {n_over} to overwrite, {n_err} with errors. '
+               'Nothing has been written.')
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/reader/digests" style="font-size:13px;color:var(--muted);">&larr; Benchmark digests</a></p>
+<h1>Preview</h1>
+<p style="color:var(--muted);margin:0 0 16px;">{_esc(summary)}</p>
+{errs}{table}{action}
+<p style="margin:18px 0 0;"><a href="/admin/reader/digests" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Back to the bundle</a></p>
+</div>"""
+    return HTMLResponse(_page("Preview digests—Admin", "Admin", body, authed=True),
+                        status_code=400 if refused else 200)
+
+
+async def _digest_bundle_from_request(request: Request) -> tuple[str, str]:
+    """(bundle_text, error). A file or the pasted box, not both."""
+    form = await request.form(max_part_size=_DIGESTS_FORM_MAX_BYTES)
+    upload = form.get("file")
+    pasted = form.get("bundle")
+    pasted = pasted if isinstance(pasted, str) else ""
+    data = b""
+    if upload is not None and hasattr(upload, "read"):
+        data = await upload.read()
+    if data.strip() and pasted.strip():
+        return "", "Use the file or the box, not both."
+    if data.strip():
+        try:
+            return data.decode("utf-8-sig"), ""
+        except UnicodeDecodeError:
+            return "", "The file is not UTF-8 text."
+    return pasted, ""
+
+
+@app.get("/admin/reader/digests", response_class=HTMLResponse)
+def admin_digests(request: Request):
+    gate = _digest_gate(request, post=False)
+    if gate is not None:
+        return gate
+    return _digests_form_page()
+
+
+@app.post("/admin/reader/digests/preview", response_class=HTMLResponse)
+async def admin_digests_preview(request: Request):
+    """Parses the bundle and shows what loading it would do. Writes nothing."""
+    _digest_gate(request, post=True)
+    from linklib.digests import parse_bundle, plan_rows
+    text, error = await _digest_bundle_from_request(request)
+    if error:
+        return _digests_form_page(bundle=text, error=error, status=400)
+    rows, bundle_errors = parse_bundle(text)
+    if bundle_errors and not rows:
+        return _digests_form_page(bundle=text, error=" ".join(bundle_errors), status=400)
+    lib = _lib()
+    try:
+        plan = plan_rows(rows, lib.get_article_by_url)
+    finally:
+        lib.close()
+    return _digests_preview_page(text, rows, plan, bundle_errors)
+
+
+@app.post("/admin/reader/digests/load", response_class=HTMLResponse)
+async def admin_digests_load(request: Request):
+    """Loads the bundle. Re-parses and re-plans it here (never trusts the
+    preview), refuses the whole bundle if any row has an error, then writes
+    each digest through pipeline.ingest_text and records one audit row."""
+    _digest_gate(request, post=True)
+    from linklib.digests import parse_bundle, plan_rows
+    from linklib import pipeline as _pl
+    text, error = await _digest_bundle_from_request(request)
+    if error:
+        return _digests_form_page(bundle=text, error=error, status=400)
+    rows, bundle_errors = parse_bundle(text)
+    if bundle_errors and not rows:
+        return _digests_form_page(bundle=text, error=" ".join(bundle_errors), status=400)
+    lib = _lib()
+    results: list[dict] = []
+    try:
+        plan = plan_rows(rows, lib.get_article_by_url)
+        if bundle_errors or any(e["status"] == "error" for e in plan):
+            return _digests_preview_page(text, rows, plan, bundle_errors, refused=True)
+        failed = False
+        for e in plan:
+            r = e["row"]
+            if failed:
+                results.append({"row": r, "result": "Not loaded", "article_id": None,
+                                "note": "An earlier digest failed."})
+                continue
+            try:
+                out = _pl.ingest_text(
+                    lib, url=r.url, title=r.title, content=r.content, summary=r.summary,
+                    source=r.source, tags=r.tags, published_at=r.published_at)
+            except Exception as exc:
+                failed = True
+                results.append({"row": r, "result": "Failed", "article_id": None, "note": str(exc)})
+                continue
+            if not out["embedded"]:
+                label = "Saved, not embedded"
+            elif out["created"]:
+                label = "Loaded"
+            else:
+                label = f'Overwrote #{out["id"]}'
+            results.append({"row": r, "result": label, "article_id": out["id"],
+                            "note": "New" if out["created"] else f'Overwrote #{out["id"]}',
+                            "created": out["created"], "url": out["url"]})
+        done = [x for x in results if x.get("article_id")]
+        if done:
+            n_new = sum(1 for x in done if x.get("created"))
+            n_over = len(done) - n_new
+            _log_archive_audit(
+                lib, request, "add", None,
+                detail=(f"digest load: {n_new} new, {n_over} overwritten; "
+                        + "; ".join(x["url"] for x in done)))
+    finally:
+        lib.close()
+    if results:
+        backup.maybe_backup(DB_PATH)
+
+    n_ok = sum(1 for x in results if x.get("article_id"))
+    n_unembedded = sum(1 for x in results if x["result"] == "Saved, not embedded")
+    body_rows = "".join(
+        f'<tr><td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_esc(x["row"].title)}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">'
+        + (f'<a href="/read/{x["article_id"]}">#{x["article_id"]}</a>' if x.get("article_id") else "")
+        + '</td><td style="padding:10px 12px;font-size:13px;vertical-align:top;'
+        + ('color:var(--alert);font-weight:600;' if x["result"] == "Failed" else '')
+        + f'">{_esc(x["result"])}'
+        + (f'<div style="font-size:12px;color:var(--muted);margin-top:2px;font-weight:400;">{_esc(x["note"])}</div>'
+           if x["result"] in ("Saved, not embedded", "Failed", "Not loaded") else "")
+        + '</td></tr>'
+        for x in results)
+    notes = ""
+    if n_unembedded:
+        notes += _digest_notice(
+            f'{n_unembedded} digest{"s were" if n_unembedded != 1 else " was"} saved but not embedded '
+            '(the embedding call failed, or there is no OpenAI key). They are searchable by keyword now. '
+            'To add them to meaning-based search, run <code>python -m scripts.embed_backfill --db /data/library.db</code> on the container.',
+            "info")
+    if any(x["result"] in ("Failed", "Not loaded") for x in results):
+        notes += _digest_notice("The load stopped at the first failure. Digests above it are saved; "
+                                "load the bundle again to retry (a digest already saved is overwritten with the same text).")
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/reader/digests" style="font-size:13px;color:var(--muted);">&larr; Benchmark digests</a></p>
+<h1>Load result</h1>
+<p style="color:var(--muted);margin:0 0 16px;">{n_ok} of {len(results)} digest{"s" if len(results) != 1 else ""} saved.</p>
+{notes}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="{_DIGEST_TH}">Title</th>
+  <th style="{_DIGEST_TH}width:{_COL_WIDTH_STATUS}px;">Article</th>
+  <th style="{_DIGEST_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Result</th>
+</tr></thead>
+<tbody>{body_rows}</tbody>
+</table>
+</div>
+<p style="margin:18px 0 0;"><a href="/admin/reader/digests" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Load another bundle</a></p>
+</div>"""
+    return HTMLResponse(_page("Digests loaded—Admin", "Admin", body, authed=True))
 
 
 def _backup_status_banner(backup_rows: list[dict]) -> str:
