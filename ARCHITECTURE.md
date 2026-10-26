@@ -1276,6 +1276,10 @@ later drift scan would eventually flag it.
 | `tool_feature_links` | One row per (tool, feature) — the vendor-specific designations (rules doc §6) live here, never on the feature itself, since the same feature is native/rules-based at one vendor and an add-on/AI-driven at another. `availability` is a real `CHECK` constraint (`native`\|`add_on`) — absence of a row is the third state ("not available"), never a stored value. `verified_as_of` is required per link (claims decay fast). `note` is the internal curation log, never shown publicly; `public_note` (2026-09) is the separate, visitor-facing vendor text, empty until Brian writes it, capped at `Library.FEATURE_LINK_PUBLIC_NOTE_MAX` (refused, never shortened) and left untouched by an upsert that doesn't pass it. Toggled from a checklist on each tool's own `/tools/software/{slug}/edit` page (`Library.upsert_tool_feature_link`/`delete_tool_feature_link`, via `POST /admin/tools/software/{tool_id}/feature-links/save`) — a direct admin edit, not routed through the review queue below, since the queue exists for scan/public proposals and admin fast-path logging, and a manual checklist toggle on the tool's own page already *is* the admin editing directly. **`Library.delete_tool`'s cascade fix (2026-08, see the `tool_audit_log` row above) deletes a deleted tool's own rows here** rather than leaving them orphaned. | `tool_id`, `feature_id` (composite unique) |
 | `feature_review_queue` | The review gate (rules doc §9) — no proposed change reaches `category_features`/`tool_feature_links` without landing here first and being approved by a human, regardless of who or what proposed it. `source` (`admin`\|`scan`\|`public`) distinguishes an admin's own fast-pathed edit, the (later, unscheduled) recurring AI scan, and the (later, unscheduled) public suggestion channel — `category_id`/`tool_id`/`submitter_name`/`submitter_email` are nullable now so those later phases don't need a migration to add them. `payload` is the proposed change as JSON (new feature, new link(s), or an existing-feature link) since the three sources produce structurally different proposals. Approving (`Library.approve_feature_review_queue_item`) applies `payload` through the exact same `add_category_feature`/`upsert_tool_feature_link` methods a manual edit would call — never a direct table write from the approval path itself; passing `override_payload` is "edit-then-approve" (status lands `edited` rather than `approved`) and is the same route/form as a verbatim approval, not a separate mechanism — the admin edit page's approve form doubles as the edit form, pre-filled from the stored payload. `/admin/tools/software/feature-review-queue` lists pending items grouped by source with Approve/Deny actions; seeded with 15 pilot proposals (`source='scan'`) via `scripts/seed_feature_taxonomy.py`. **Merge confirmation step (Phase 1c, 2026-08):** when a `new_feature`-proposal Approve would resolve to an existing feature by exact case-insensitive name match in the category (`Library.find_category_feature_by_name`, extracted from `approve_feature_review_queue_item`'s own merge logic for reuse here) — the exact mechanism confirmed working in production on the Abacum/Aleph merge, 8/20 — the route now interposes a confirmation page (`_feature_merge_confirm_page`) naming the vendors already linked to the existing feature (`Library.list_tools_linked_to_feature`), with Merge (resubmits the identical approve request plus `confirm_merge=1`) and Change name (back to the queue page to edit the proposal's name first) actions, rather than merging silently. **`Library.delete_tool`'s cascade fix (2026-08, see the `tool_audit_log` row above) auto-denies any `pending` row naming a deleted tool** rather than leaving it pointing at nothing. | `status` (`pending`\|`approved`\|`edited`\|`denied`), `source` (`admin`\|`scan`\|`public`) |
 | `benchmarks` | The Resources page at `/tools/resources` (renamed from `/tools/benchmarks`/"Benchmarking" in the admin URL convention PR — URL/copy only, table name unchanged), managed at `/admin/tools/resources`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: run by hand it adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync — but the `_seed_toolbox` startup hook's per-boot pass over `_DEFAULT_BENCHMARKS` only performs that sync, same insert-never fix and same reasoning as `tools` above (no soft-delete column here either). `section` (`'benchmarking'`\|`'books'`, default `'benchmarking'`) splits the page into two headings — see "Resources — Book recommendations" below for the full write-up; `_DEFAULT_BENCHMARKS`/`_seed_toolbox` only ever cover the `'benchmarking'` rows, since a sync-only mechanism can't originate new `'books'` rows. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`), `section` (`benchmarking`\|`books`) |
+| `benchmark_reports` | One row per loaded benchmark-figures report (issue #738, Phase A), written by `Library.replace_benchmark_report` in the same transaction as its figures. `row_count`/`sha256` come from the zip's `MANIFEST.tsv`; the `/admin/checks` row "Figures loaded match their manifests" compares `row_count` with the figures stored. `landing_url`/`article_id` are set only when exactly one `benchmark-digest` article has the report name as its `source`. Not the `benchmarks` table above, which is the Resources page. See "Benchmark figures" below. | `report_slug` unique (CSV filename stem) |
+| `benchmark_figures` | Every extracted figure: `report_slug`, `row_no` and the 16 CSV columns stored verbatim as TEXT (`source`, `report`, `report_year`, `data_period`, `band_basis`, `band`, `segment`, `metric`, `denominator`, `statistic`, `value`, `unit`, `n`, `page`, `read_from`, `note`), plus `value_num` (REAL, only when `value` is one plain number; `figures.parse_value_num`). `benchmark_figures_fts` (FTS5 over metric, segment, band, note, report) is kept in sync by triggers. Statistic names are stored as printed (`p75` is not merged with `top_quartile`). | `UNIQUE(report_slug, row_no)` |
+| `metric_registry`, `metric_aliases` | Brian's canonical metrics (card URL, the "Contains:" line) and their lowercase aliases, seeded from a TSV on `/admin/reader/figures` by `Library.seed_metric_registry` (idempotent; an alias with `edited=1` is never changed; an alias listed under two metrics keeps the first). | `metric_aliases.alias` primary key |
+| `metric_name_map` | Raw metric names (lowercase) to a canonical metric. Created empty in Phase A; a later job fills it. | `raw_name_lower` primary key |
 | `tool_leads` | Warm Intro request submissions per tool. | `tool_id`, contact fields |
 | `tool_audit_log` | Deletion audit trail for Software entries — one row per hard delete, since `tools` has no `deleted_at` column (unlike `contacts`) and a deleted row leaves nothing else behind. Same shape as `archive_audit_log`/`contact_audit_log` below, but written from inside `Library.delete_tool` itself rather than at each route (`_log_archive_audit`'s pattern) — every current delete path (the admin Delete button, bulk delete, a pending submission's Reject, a name-duplicate merge's "delete the loser" step) already calls `delete_tool`, so logging there guarantees a future new call site can't add a delete without also logging it. `detail` carries a name/url/categories snapshot taken immediately before the `DELETE`, since that's the only record of what was removed once the row is gone. **Cascade fix (2026-08, the Pave/Culpepper/Radford removal investigation):** `delete_tool` used to leave `tool_feature_links` and `entity_citations` rows orphaned (nothing reads them once the tool is gone — a "no dead data" violation), and any `pending` `feature_review_queue` proposal naming the tool stayed pending forever, pointing at nothing. `delete_tool` now also deletes the tool's `tool_feature_links`/`entity_citations` rows and denies (never silently drops) any `pending` `feature_review_queue` row naming the tool, alongside its pre-existing `tool_competitors`/`tool_name_dedupe_decisions`/`field_reviews` cleanup. `tool_leads` and `narrative_review_log` are deliberately still untouched — historical record, same precedent as this table itself surviving a deleted tool. | `admin_id` (nullable, same nullable-`admin_id` caveat as `archive_audit_log`), `action` (`'delete'`\|`'reject'`\|`'merge'`), `item_id` (a former `tools.id` — the row no longer exists), `detail` (name/url/categories snapshot) |
 | `communities` | The directory on `/tools/communities` — CFO/finance peer groups, associations, and Slack communities (a sibling of `tools`, not a variant of it). `scripts/seed_communities.py` is re-runnable like `seed_tools.py`: run by hand it adds any community missing by URL and syncs `name`/`notes` on existing rows via `Library.update_community_content`, plus `advisor` (a direct `UPDATE`, mirroring `tools.advisor` exactly — see below) — the identical name+description+advisor contract as `tools`. `_seed_toolbox`'s per-boot pass over `COMMUNITIES` carries the identical insert-never fix as `tools` above, for the identical reason (no soft-delete column, hook runs on every restart). Every other field (`reach`, `local_markets`, `featured`, `cost_band`, `cost_note`, `sponsorship_type`, `sponsor_name`, `access`, `format`, `categories_json`, `approved`) is admin-owned, edited at `/admin/tools/communities`, and never touched by a re-sync. | `slug` (unique), `reach` (`Regional`\|`National`\|`Global` — a community's overall footprint), `local_markets` (free text, e.g. "Boston, New York, SF Bay Area" — cities/areas where it has a chapter, hub, or local focus; independent of `reach`, so a National community like FEI can still carry local markets; replaced a fixed 18-city checkbox grid — see "Metros -> free text migration" below), `featured` (pin-to-top + coral badge, same pattern as `tools.promoted`; independent of `reach`/`local_markets`/`advisor`), `advisor` (⭐ marker + "Advisor" filter chip, same pattern as `tools.advisor` — discloses a personal relationship, e.g. The F Suite; independent of `featured`), `cost_band` (one of five fixed bands: `Free`\|`Undisclosed dues`\|`<$1k/yr`\|`<$2,500/yr`\|`$2,500+/yr` — bucketed by individual/base rate, exact dues go in `cost_note`), `sponsorship_type` (`Independent`\|`Vendor-sponsored`\|`Investor-sponsored`), `access` (`Open`\|`Application`\|`Invite-only`\|`Qualification-based` — a fixed `<select>`, converted from free text; see the auto-populate section below for how the option list was derived), `format` (`Hybrid`\|`In-person`\|`Slack`\|`Online`\|`LinkedIn group` — same conversion), `approved`, `screenshot_url`/`screenshot_captured_at`/`app_screenshot_source_url`/`app_screenshot_url`/`app_screenshot_captured_at` (Phase 3b — built from scratch for Communities, mirroring `tools`' homepage-screenshot columns of the same name exactly: `update_community_screenshot_url` for a manually pasted URL from the admin edit form (same `update_community_screenshot`-was-clobbering-`screenshot_is_product` incident and fix as the `tools` row), `set_community_screenshot_capture` for an automated homepage capture via the same `linklib/screenshots.py::capture_homepage`; served at `GET /tools/communities/screenshot/{filename}` from its own `_COMMUNITY_SCREENSHOT_DIR`, kept separate from Software's `_SCREENSHOT_DIR` since the two types' slugs can collide — Phase 0 found `airbase`/`datarails`/`rillet` shared across both. The `app_screenshot_*` trio and `screenshot_is_product`'s retirement (Phase E) mirror the `tools` row exactly — see there for the full design; the app slot's file is `{slug}-app.png`, same directory, same serving route), `logo_path` (Phase D — mirrors `tools.logo_path` exactly, written by `set_community_logo`; communities are the second and lower-priority half of the same three-batch `scripts/backfill_logos.py` backfill, processed only after every tool has one, saved under a separate `logos/communities/` subdirectory for the identical slug-collision reason as the screenshot columns above — see the `tools` row for the full backfill design), `logo_manual_override`/`logo_override_stale` (2026-08 — mirrors `tools.logo_manual_override`/`tools.logo_override_stale` exactly; see the `tools` row and the dedicated manual-logo-override write-up under the Auth/routing table above) |
@@ -4050,6 +4054,10 @@ erDiagram
     articles ||--o| articles_vec : "rowid, written from Python (#93)"
     articles ||--o| article_embeddings : "article_id"
     articles ||--o{ enrichment_cost : "article_id (nullable)"
+    benchmark_reports ||--o{ benchmark_figures : "report_slug (issue #738)"
+    benchmark_figures ||--|| benchmark_figures_fts : "rowid, via triggers"
+    articles |o--o{ benchmark_reports : "article_id (nullable, the matching digest)"
+    metric_registry ||--o{ metric_aliases : "canonical_metric"
     library_queue }o--|| articles : "promoted into (by URL) — retired 2026-09, PR 3"
     articles ||--o{ archive_audit_log : "item_id (nullable)"
     contacts ||--o{ contact_audit_log : "item_id (nullable)"
@@ -4223,6 +4231,33 @@ erDiagram
         text rank
         int score "client-reported"
         int difficulty_index "frozen at write"
+    }
+    benchmark_reports {
+        int id PK
+        text report_slug UK "CSV filename stem"
+        int row_count "from MANIFEST.tsv"
+        text sha256
+        int article_id "nullable"
+    }
+    benchmark_figures {
+        int id PK
+        text report_slug
+        int row_no
+        text value "verbatim"
+        real value_num "nullable, plain numbers only"
+    }
+    metric_registry {
+        int id PK
+        text canonical_metric UK
+    }
+    metric_aliases {
+        text alias PK "lowercase"
+        text canonical_metric
+        int edited
+    }
+    metric_name_map {
+        text raw_name_lower PK
+        text canonical_metric "nullable"
     }
 ```
 
@@ -6831,6 +6866,37 @@ key) and no Claude or Exa call. For each depth it prints the top 15 with the
 full-text and vector rank, `SENT` / `budget` / `not sent`, grounding characters,
 and how many characters of the depth's global cap are left for feed and web.
 
+### Benchmark figures (`/admin/reader/figures`, issue #738 Phase A, 2026-10)
+
+Digests carry prose, and at Standard depth FP&A Buddy reads only the summary
+plus the start of each source's content (`EFFORT_SETTINGS[...]["source_chars"]`,
+inside a shared `global_chars` budget), so most figures in a report never reach
+the model. Phase A stores every extracted figure losslessly so a later phase
+can look numbers up exactly. Phase A changes no Buddy answer: nothing in
+`linklib/agent.py`, the MCP tools or retrieval reads these tables yet.
+
+| Piece | Where |
+|---|---|
+| Zip format, parser, validation, `value_num`, registry TSV parser, audit file | `linklib/figures.py` (HTML-free, writes nothing to the database) |
+| Writer | `Library.replace_benchmark_report` (one report per transaction: delete its rows, insert the new ones, upsert its `benchmark_reports` record; any error rolls the report back), `Library.seed_metric_registry` |
+| Page and routes | `webapp/app.py`: `GET /admin/reader/figures`, `POST .../preview` (writes nothing; carries the zip to the load as a base64 hidden field), `POST .../load` (re-parses the zip, never trusts the preview), `POST .../registry`. Admin session only: the save token gets 401. Hub card in the Reader group's "Add content" quadrant (`_LIBRARY_TOOLS`). |
+| Audit | One `archive_audit_log` row per load (action `add`) and one JSON line per load in `figures-audit.jsonl` beside the database (next to `restore-audit.jsonl`), so the history survives a restore. The line has the user, time, zip sha256 and each report's result. |
+| Invariant | `webapp.checks.figures_manifest_problems()` over `Library.figures_manifest_problems()`: every `benchmark_reports` row has exactly `row_count` figures, and no figure has a slug without a report record. A restore that swaps in an older database fails here, naming each missing or short report. |
+
+**Rejected, never coerced.** Per file: a header other than the 16 columns in
+order, a row with a field count other than 16, a row count, byte count or
+sha256 different from the manifest, a slug that is not the filename stem or is
+repeated, text that is not UTF-8. A file the manifest lists but the zip lacks,
+and a file in the zip the manifest does not list, are each errors. One bad file
+is skipped; the rest load. Whole-zip errors (not a zip, no `MANIFEST.tsv`, a bad
+manifest header, size guards) load nothing. macOS `__MACOSX/` and `.DS_Store`
+entries are ignored with a note.
+
+**`value_num`.** Set only when `value` is one plain number after removing, each
+at most once, surrounding parentheses (negative), a leading `$`, a trailing
+`%`, `x` or `M`, and standard comma thousands. Ranges, words, dashes and
+unicode minus signs stay NULL. `value` is never changed.
+
 ### Reader merge (Phase 5)
 
 `GET /read` is a single three-pane admin tool that replaces the two
@@ -8631,7 +8697,7 @@ CFO Toolbox alongside the Software sub-group and the Communities card.
 
 **Structure: two levels of nesting, everything collapsed on load.** Reader
 group → three quadrants (Add content, Existing archive management, Tag
-management) → the tool cards inside each. The Benchmark digests card (`/admin/reader/digests`) sits at the top of Add content, ahead of the capture accordions. `webapp/app.py`'s
+management) → the tool cards inside each. The Benchmark digests card (`/admin/reader/digests`) and the Benchmark figures card (`/admin/reader/figures`) sit at the top of Add content, ahead of the capture accordions. `webapp/app.py`'s
 `_reader_admin_quadrants(task_counts)` is what used to be the
 `admin_library()` route body, minus the page shell: it returns those
 quadrants as pre-rendered HTML strings, which `admin_page()` drops straight
