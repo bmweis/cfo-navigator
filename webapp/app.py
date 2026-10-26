@@ -27433,6 +27433,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
                             "content_refetch_log", "url_correction_log",
                             "feed_sections", "feeds"]),
+    ("Benchmark figures", ["benchmark_reports", "benchmark_figures", "benchmark_figures_fts",
+                           "metric_registry", "metric_aliases", "metric_name_map"]),
     ("Site utilities and system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
