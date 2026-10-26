@@ -2791,11 +2791,19 @@ def _cmp_tag_chips_html(entity: "compare.CompareEntity", diff: "compare.CompareT
     when the entity has no tags at all, so a caller can skip the wrapping
     markup entirely rather than rendering an empty row."""
     shared_set = set(diff.shared)
+    primary_html = ""
+    if entity.primary_category:
+        # Issue #624 PR 2: each vendor's Primary use leads the header, as
+        # visible text. An empty primary renders exactly what it did before.
+        primary_html = (f'<div class="cmp-primary"><span class="cmp-primary-label">'
+                        f'{_esc(tool_labels.PRIMARY_USE)}:</span> '
+                        f'<span class="cmp-primary-value">{_esc(entity.primary_category)}</span></div>')
     tag_chips = "".join(f'<span class="cmp-tag cmp-tag-shared">{_esc(t)}</span>'
                          for t in entity.tags if t in shared_set)
     tag_chips += "".join(f'<span class="cmp-tag cmp-tag-unique">{_esc(t)}</span>'
                           for t in diff.unique.get(entity.id, []))
-    return f'<div class="cmp-tag-row">{tag_chips}</div>' if tag_chips else ""
+    chips_html = f'<div class="cmp-tag-row">{tag_chips}</div>' if tag_chips else ""
+    return primary_html + chips_html
 
 
 # Width of the field-name column on both Compare tables (px). Sized to the
@@ -3023,6 +3031,8 @@ thead .cc-cell{{border-bottom:2px solid var(--line);vertical-align:bottom;}}
    the Key facts band, since a category tag is an identity fact about the
    entity, not a "key fact" alongside Region/Access/Cost). */
 .cmp-tag-row{{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 0;}}
+.cmp-primary{{font-size:13px;margin:4px 0 0;color:var(--muted);}}
+.cmp-primary-value{{font-weight:600;color:var(--navy);}}
 .cmp-tag{{font-size:11.5px;font-weight:600;border-radius:999px;padding:3px 10px;white-space:nowrap;}}
 /* Shared-vs-unique tag treatment (Compare Redesign Phase 1, approved in
    Step 0): solid seafoam fill for a tag every compared entity shares,
@@ -9056,6 +9066,9 @@ def tools_directory(request: Request, warn: str = ""):
             "slug": t["slug"],
             "logo_url": _tool_logo_url(t),
             "categories": t["categories"],
+            # Issue #624 PR 2: the card shows only the primary; the full set
+            # still ships because the category filter and search match any tag.
+            "primary_category": t.get("primary_category") or "",
             "agent_taxonomy_note": t.get("agent_taxonomy_note") or "",
             "description_needs_verification": desc_unverified,
             "agent_taxonomy_needs_verification": taxonomy_unverified,
@@ -9339,7 +9352,10 @@ function renderTools(tools) {{
     // ("under review" for a visitor, "unverified, visible to visitors" for
     // an admin).
     var descUnverified = !!t.description_needs_verification;
-    var cats = (t.categories || []).map(function(c) {{
+    // Primary use only on the card (issue #624 PR 2). A vendor with no
+    // primary yet falls back to its full set, as before.
+    var cardCats = t.primary_category ? [t.primary_category] : (t.categories || []);
+    var cats = cardCats.map(function(c) {{
       return '<span class="tool-cat">' + esc(c) + '</span>';
     }}).join('');
     var adminControls = '';
@@ -10265,8 +10281,18 @@ def tools_software_profile(request: Request, slug: str, suggested: str = "", sug
     # `.tp-cat-pill` treatment rather than adopting Compare's outline
     # variant, which has no meaning here.
     cats = tool.get("categories") or []
-    cats_html = ("".join(f'<span class="tp-cat-pill">{_esc(c)}</span>' for c in cats)
-                 if cats else "")
+    primary = tool.get("primary_category") or ""
+    if primary:
+        # Issue #624 PR 2: the badge is the primary; the rest sit on one quiet
+        # line, only when there are any. An empty primary renders the full set.
+        others = [c for c in cats if c != primary]
+        cats_html = f'<span class="tp-cat-pill">{_esc(primary)}</span>'
+        if others:
+            cats_html += (f'<span class="tp-also-used">{_esc(tool_labels.ALSO_USED_FOR)}: '
+                          f'{_esc(", ".join(others))}</span>')
+    else:
+        cats_html = ("".join(f'<span class="tp-cat-pill">{_esc(c)}</span>' for c in cats)
+                     if cats else "")
 
     featured_sticker = _sticker("Featured", rotate=8, top="-14px", right="-16px", size=14) if tool.get("promoted") else ""
     screenshot_block = _screenshot_card_html(tool, featured_sticker)
@@ -10586,6 +10612,7 @@ function submitIntroForm() {{
    right below, so a small margin-bottom is what's needed instead). */
 .tp-hero-cats{{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px;}}
 .tp-cat-pill{{font-size:11px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:6px;padding:3px 9px;}}
+.tp-also-used{{flex-basis:100%;font-size:13px;color:var(--muted);}}
 .tp-admin-divider{{width:1px;align-self:stretch;background:var(--line-strong);margin:0 2px;}}
 .tp-card{{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;}}
 .tp-card-h{{font-family:var(--font-head);font-weight:600;font-size:18px;color:var(--ink);margin:0 0 14px;letter-spacing:-0.01em;}}
