@@ -64,6 +64,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import markdown as _markdown
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
@@ -25804,11 +25805,17 @@ async def ask_similar(request: Request):
     the same shared rule the past-questions list uses (Library.ask_visibility_clause):
     never another user's private or hidden question; an admin sees all, labelled."""
     _require_member(request)
-    from linklib.similar_questions import rank_similar
     payload = await request.json()
     question = (payload.get("question") or "").strip()[:2000]
     if not question:
         return {"suggestions": []}
+    # SQLite reads plus the ranking pass are blocking; keep them off the event
+    # loop like /ask (issue #738, A1).
+    return await run_in_threadpool(_ask_similar_blocking, request, question)
+
+
+def _ask_similar_blocking(request: Request, question: str) -> dict:
+    from linklib.similar_questions import rank_similar
     authed = _is_authed(request)
     lib = _lib()
     try:
@@ -25864,6 +25871,18 @@ async def ask(request: Request):
     use_feed    = "feed" in raw_sources or "web" in raw_sources
     use_web     = "open_web" in raw_sources
 
+    # Everything below is blocking (SQLite, retrieval, Exa, the Claude call,
+    # often many seconds). It runs in the threadpool so one slow answer can't
+    # stall every other request on the process (issue #738, A1).
+    return await run_in_threadpool(
+        _ask_blocking, request, question, model=model, effort=effort,
+        use_library=use_library, use_feed=use_feed, use_web=use_web,
+        conversation_id=conversation_id, is_private=is_private)
+
+
+def _ask_blocking(request: Request, question: str, *, model: str, effort: str,
+                  use_library: bool, use_feed: bool, use_web: bool,
+                  conversation_id: str, is_private: bool):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
