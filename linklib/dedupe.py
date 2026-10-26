@@ -15,6 +15,7 @@ import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
+from .db import DIGEST_TAG
 from .models import DEFAULT_CHAT_MODEL
 
 DEFAULT_THRESHOLD = 0.62      # applies to TITLE similarity (the strictness lever)
@@ -210,6 +211,9 @@ def find_clusters(articles: list[dict], *, days: int = DEFAULT_WINDOW_DAYS,
     Scales to thousands: tokens precomputed once; candidates found via an inverted
     index on distinctive (rare) tokens only, then gated by the date window.
     """
+    # Benchmark digests of one report read alike by design; they are handed-over
+    # text, never reruns of each other, so they are not candidates.
+    articles = [a for a in articles if DIGEST_TAG not in (a.get("tags") or [])]
     n = len(articles)
     _MIN = datetime.min.replace(tzinfo=timezone.utc)
 
