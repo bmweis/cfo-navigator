@@ -2190,6 +2190,13 @@ _COL_WIDTH_VENDOR = 160       # A short vendor/company label (Railway,
                               # full software/community name, not a one-
                               # or two-word vendor label (overhead spend
                               # fixes, 2026-09)
+_COL_WIDTH_REPORT_TITLE = 420  # A report or digest title, which can run to 90+
+                              # characters (the figures page's Report column,
+                              # the digests preview's Title column). The cells
+                              # are nowrap, so this is only a floor: the column
+                              # grows to the longest title and the .table-frame
+                              # scrolls sideways, which Brian prefers to wrapped
+                              # titles (2026-10).
 _COL_WIDTH_STATUS_AGE = 190   # A status word PLUS a relative-age readout on
                               # the same line (e.g. the feeds admin table's
                               # Cookie column: a dot, "inconclusive", " · ",
@@ -37471,10 +37478,10 @@ def _digests_preview_page(bundle: str, rows, plan, bundle_errors, *, refused: bo
         else:
             status = "New"
         notes = "".join(
-            f'<div style="font-size:12px;color:var(--caution);margin-top:4px;line-height:1.45;">{_esc(w)}</div>'
+            f'<div style="font-size:12px;color:var(--caution);margin-top:4px;line-height:1.45;white-space:normal;max-width:{_COL_WIDTH_REPORT_TITLE}px;">{_esc(w)}</div>'
             for w in r.warnings)
         body_rows.append(
-            f'<tr><td style="padding:10px 12px;font-size:13px;vertical-align:top;">'
+            f'<tr><td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">'
             f'<strong>{_esc(r.title) or "<em>untitled</em>"}</strong>{notes}</td>'
             f'<td style="padding:10px 12px;font-size:12px;color:var(--muted);overflow-wrap:anywhere;vertical-align:top;">{_esc(r.url)}</td>'
             f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_esc(r.published)}</td>'
@@ -37487,7 +37494,7 @@ def _digests_preview_page(bundle: str, rows, plan, bundle_errors, *, refused: bo
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
 <table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="{_DIGEST_TH}min-width:{_COL_WIDTH_NAME}px;">Title</th>
+  <th style="{_DIGEST_TH}min-width:{_COL_WIDTH_REPORT_TITLE}px;">Title</th>
   <th style="{_DIGEST_TH}min-width:{_DIGEST_URL_MIN}px;">URL</th>
   <th style="{_DIGEST_TH}width:{_COL_WIDTH_DATE}px;">Published</th>
   <th style="{_DIGEST_TH}width:110px;">Summary chars</th>
@@ -37708,7 +37715,7 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
         land = landings.get(r["report_slug"], {"url": "", "how": "none"})
         if land["url"]:
             shown = (f'<a href="{_esc(land["url"])}" target="_blank" rel="noopener" '
-                     f'style="overflow-wrap:anywhere;">{_esc(land["url"])}</a>'
+                     f'>{_esc(land["url"])}</a>'
                      f'<span style="display:block;font-size:12px;color:var(--muted);">{_how[land["how"]]}</span>')
         else:
             shown = ('<span style="color:var(--alert);font-weight:600;">Not set</span>'
@@ -37725,14 +37732,14 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
         return shown + form
 
     report_rows = "".join(
-        f'<tr><td style="padding:10px 12px;font-size:13px;overflow-wrap:anywhere;vertical-align:top;">{_esc(r["report_slug"])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_esc(r["report"])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_esc(r["report_year"])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;'
+        f'<tr><td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc(r["report_slug"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc(r["report"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc(r["report_year"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;'
         + ("color:var(--alert);font-weight:600;" if r["stored_rows"] != r["row_count"] else "")
         + f'">{r["stored_rows"]:,} of {r["row_count"]:,}</td>'
         f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc((r["loaded_at"] or "")[:10])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_landing_cell(r)}</td></tr>'
+        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_landing_cell(r)}</td></tr>'
         for r in reports)
     linked = sum(1 for v in landings.values() if v["url"])
     link_summary = (f'<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;">{linked:,} of {len(landings):,} reports '
@@ -37742,7 +37749,7 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
 <table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_NAME}px;">Report slug</th>
-  <th style="{_FIGURES_TH}">Report</th>
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_REPORT_TITLE}px;">Report</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_COUNT}px;">Year</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Rows stored</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_DATE}px;">Loaded</th>
