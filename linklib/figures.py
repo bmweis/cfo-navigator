@@ -609,7 +609,7 @@ def _fts_metric_rows(lib, text: str, cap: int = 400) -> list[dict]:
 def _row_out(r: dict, landings: dict, canonical: str) -> dict:
     land = landings.get(r["report_slug"], {"url": "", "how": "none"})
     return {
-        "report_slug": r["report_slug"], "source": r["source"], "report": r["report"],
+        "figure_key": r["id"], "report_slug": r["report_slug"], "source": r["source"], "report": r["report"],
         "report_year": r["report_year"], "data_period": r["data_period"],
         "band_basis": r["band_basis"], "band": r["band"], "segment": r["segment"],
         "metric": r["metric"], "canonical_metric": canonical, "denominator": r["denominator"],
@@ -882,7 +882,7 @@ def metric_definition(lib, name: str) -> dict:
     for r in res:
         c = r["canonical"]
         out.append({"canonical_metric": c, "match": r["match"], "aliases": sorted(_names_for(idx, c) - {c.casefold()}),
-                    "card": metric_card(lib, c, idx["card"].get(c, ""))})
+                    "card_url": idx["card"].get(c, ""), "card": metric_card(lib, c, idx["card"].get(c, ""))})
     return {"found": True, "name": name, "ambiguous": len(res) > 1 and res[0]["match"] == "ambiguous_alias",
             "metrics": out, "precedence": "The workbook card governs; other sources define it differently, newest first."}
 

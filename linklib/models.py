@@ -90,9 +90,15 @@ _REGISTRY: list[dict] = [
 # enrich_model setting; "matchmaker" and the three Buddy tiers live in
 # model_roles. A model's allowed roles are stored on model_catalog.allowed_roles
 # and enforced at save time.
-ROLES = ("enrichment", "matchmaker", "buddy_quick", "buddy_standard", "buddy_deep")
+ROLES = ("enrichment", "matchmaker", "buddy_quick", "buddy_standard", "buddy_deep", "prestep")
 ROLE_LABELS = {"enrichment": "Enrichment", "matchmaker": "Matchmaker", "buddy_quick": "Buddy Quick",
-               "buddy_standard": "Buddy Standard", "buddy_deep": "Buddy Deep"}
+               "buddy_standard": "Buddy Standard", "buddy_deep": "Buddy Deep",
+               "prestep": "Question splitter"}
+# The Buddy benchmark pre-step's small model (#738 Phase B3): splits a
+# multi-part benchmark question into sub-queries. Cheapest verified model.
+PRESTEP_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+PRESTEP_BLOCK_REASON = ("Question splitter not checked for always-on thinking (its answer budget is 600 tokens "
+                        "and it must return bare JSON)")
 BUDDY_ROLES = ("buddy_quick", "buddy_standard", "buddy_deep")
 BUDDY_BLOCK_REASON = "Buddy not yet checked for always-on thinking"
 MATCHMAKER_BLOCK_REASON = "Matchmaker not yet checked for always-on thinking (its answer budget is 900 tokens)"
@@ -151,6 +157,8 @@ def hard_block_reason(model_id: str, role: str) -> str:
             return BUDDY_BLOCK_REASON
         if role == "matchmaker":
             return MATCHMAKER_BLOCK_REASON
+        if role == "prestep":
+            return PRESTEP_BLOCK_REASON
     return ""
 
 

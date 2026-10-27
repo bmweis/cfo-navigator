@@ -6943,6 +6943,58 @@ tables; `tests/test_mcp_figures.py` refuses a non-admin token on every tool.
 - **Metric cards.** `metric_card` finds the workbook definition at the
   registry's card URL, else the digest article `saas-metric-<name>`.
 
+**Phase B3/B4: the Buddy benchmark pre-step (#738).** `linklib/benchmark_prestep.py`
+runs inside `agent.answer_question` before the answer call and sends exact
+figures as Citations-API documents ahead of the retrieved articles. No tool
+loop, no agents.
+
+1. **Rules, no model call** (`detect`): registry names and aliases found as
+   whole words (`figures.detect_metrics`), bands, change-over-time words,
+   definition words, and whether the question is mixed (two question marks, over
+   40 words, or enough words left once metric phrases, bands and benchmark words
+   are removed). No registered metric means the pre-step is inactive and the turn
+   is byte-for-byte what it was. No library source means no lookup.
+2. **Split, only when the rules ask for it** (more than one metric phrase, more
+   than one band, or a benchmark inside a broader ask): one call to the
+   `prestep` role (`model_roles`, "Question splitter" card on
+   `/admin/system/ai`, default Haiku 4.5, always-on-thinking models are
+   hard-blocked for it) returns up to 4 sub-queries and `rest_of_question` as
+   JSON. `parse_split` validates it. A missing key, a raised call, unusable JSON
+   or a budget that cannot cover it falls back to ONE rules-only lookup over
+   every detected metric; the fallback and any real spend are logged; raw model
+   output is never shown or stored.
+3. **Budget before running.** `run_ask` passes the user's remaining monthly budget
+   (`cap - spent`) as `budget_usd`. `estimate_extra_usd` is a conservative
+   upper bound (every extra sub-query at the tier's full library cap plus its
+   figures budget); a split that does not fit drops parts (the last part absorbs
+   their text and metrics) and sets a plain notice, returned as `notice`. A turn
+   is never blocked by its own cost; the existing cap check is unchanged.
+4. **Retrieval per sub-query** (`agent._retrieve_per_sub`): each sub-query gets the
+   tier's full `max_library` and its own `source_chars`/`global_chars` budget;
+   nothing is divided. Query embeddings run in parallel on a pool of at most 4;
+   SQLite reads stay on the request thread. A hit an earlier sub-query already
+   sent is skipped. Feed and web run once, on the whole question. A definition
+   sub-query orders its hits newest first, after the card.
+5. **Documents sent first**: workbook definition cards ("... (workbook
+   definition)", full card up to `CARD_CHARS`), then one "Figures: report (year)"
+   document per report with its rows and `match` tags (own budget per sub-query,
+   `FIGURES_CHARS`; rows left out are named). A report with no landing URL says
+   "No link on file ... Cite it by name." Citations resolve through the existing
+   `sent_docs` machinery, so each cited figure links to the report's landing URL;
+   with no URL the sources list shows the name and "no link on file" (both
+   renderers). A text block of lookup notes (older editions left out, "no stored
+   figure matches", ambiguity) and the split plan goes just before the question.
+   `PRESTEP_RULES` is appended to the system prompt only when the pre-step ran:
+   cite every figure, say the `match` gap in plain words, newest edition unless
+   change over time, say plainly when nothing is close, never average across
+   bases, workbook definition first, answer the rest normally.
+6. **Log (B4)**: `ask_questions.prestep_json` (detected metrics, signals, split or
+   fallback, each sub-query's figure rows, cards, articles and rows left out,
+   match mix, estimate, budget left) and `prestep_cost_usd` (the split call; also
+   inside `cost_usd`, so it counts against the cap). Failed turns record it too.
+   `/admin/fpa-buddy/report` shows a "Benchmark lookup" summary per turn with the
+   detail one tap away; a fallback always reads in words.
+
 **Rejected, never coerced.** Per file: a header other than the 16 columns in
 order, a row with a field count other than 16, a row count, byte count or
 sha256 different from the manifest, a slug that is not the filename stem or is

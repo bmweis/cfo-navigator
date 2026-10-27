@@ -897,6 +897,7 @@ def _seed_model_catalog():
     try:
         lib.seed_model_catalog()
         lib.seed_model_roles()
+        lib.seed_prestep_role()
     except Exception:
         pass
     finally:
@@ -25275,6 +25276,8 @@ function srcListHtml(d) {{
     // citation has no key and every legacy web source was a trusted one.
     if (c.type === 'web' && c.trusted === false) ownTag += ' <span class="ask-src-open">Open web</span>';
     // The emoji rides inside the pill so a long title can never drop below it.
+    // A benchmark report with no landing URL is cited by name, not as a link to this page.
+    if (!c.url) return '<li><span>' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span> ' : '') + '[' + c.n + '] ' + escapeHtml(c.title) + '</span> <span class="ask-src-open">no link on file</span></li>';
     return '<li><a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span>' : '') + '<span>[' + c.n + '] ' + escapeHtml(c.title) + '</span></a>' + ownTag + '</li>';
   }});
   // Suggest-content nudge: always rendered, even with zero citations — that's
@@ -26756,6 +26759,15 @@ _SCRIPT_REGISTRY = [
      "After loading a figures zip, and before relying on figure links in FP&amp;A Buddy answers.",
      ["None beyond the database path"],
      ["python -m scripts.report_figure_landings --db /data/library.db"]),
+    ("probe_prestep.py", "scripts.probe_prestep", "Reusable diagnostic",
+     "Read-only check of what FP&amp;A Buddy's benchmark pre-step would send first for one question: "
+     "the metrics the rules detect, whether a split would run, the workbook definition cards and "
+     "per-report figures documents in order with their match mix, then the first library hits. No "
+     "model call (the split is not made), no write; opens the database with mode=ro.",
+     "After loading figures or metric cards, and whenever a benchmark question looks wrong.",
+     ["None beyond the database path"],
+     ["python -m scripts.probe_prestep --db /data/library.db --question \"What is median NRR at $25M ARR?\"",
+      "python -m scripts.probe_prestep --db /data/library.db --question \"...\" --depth deep"]),
     ("reset_user_password.py", "scripts.reset_user_password", "Recurring and actively useful",
      "Recovery: resets a user's password, or creates an admin account, on the container. The "
      "shared-secret login fallback is retired (issue #627), so this is the way back in when an "
@@ -28570,10 +28582,12 @@ def admin_system_ai(request: Request):
                      for mid in dict.fromkeys([m["id"] for m in _REG] + [r["model_id"] for r in pricing_rows])}
         matchmaker_model = lib.get_role_model("matchmaker")
         matchmaker_blocks = {m["id"]: lib.role_problems("matchmaker", m["id"]) for m in _REG}
+        prestep_model = lib.get_role_model("prestep")
+        prestep_blocks = {m["id"]: lib.role_problems("prestep", m["id"]) for m in _REG}
         buddy_models = {t: lib.get_role_model(f"buddy_{t}") for t in ("quick", "standard", "deep")}
         buddy_blocks = {t: {m["id"]: lib.role_problems(f"buddy_{t}", m["id"]) for m in _REG} for t in buddy_models}
         _ed_ids = [m["id"] for m in _REG]
-        _ed_ids += [r for role in ("enrichment", "matchmaker", "buddy_quick", "buddy_standard", "buddy_deep")
+        _ed_ids += [r for role in ("enrichment", "matchmaker", "buddy_quick", "buddy_standard", "buddy_deep", "prestep")
                     for r in [lib.get_role_model(role)] if r not in _ed_ids]   # a model in use but not in the registry
         roles_editor = {mid: {"allowed": lib.model_allowed_roles(mid),
                               "status": lib.get_model_status(mid) or "available",
@@ -28667,6 +28681,7 @@ def admin_system_ai(request: Request):
 {_card("Enrichment model", _ai_model_config_html(enrich_model))}
 {_card("Matchmaker model", _matchmaker_model_html(matchmaker_model, matchmaker_blocks))}
 {_card("FP&A Buddy tiers", _buddy_tiers_html(buddy_models, buddy_blocks))}
+{_card("Question splitter", _prestep_model_html(prestep_model, prestep_blocks))}
 {_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, role_info))}
 {_allowed_roles_card_html(roles_editor, roles_log)}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
@@ -28737,6 +28752,33 @@ def _matchmaker_model_html(current: str, blocks: dict) -> str:
             f'<script>async function saveMatchmaker(){{var s=document.getElementById("mm-select"),t=document.getElementById("mm-status");'
             f's.disabled=true;t.textContent="Saving…";try{{var r=await fetch("/admin/system/ai/model/save",{{method:"POST",'
             f'headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{role:"matchmaker",model:s.value}})}});'
+            f'if(!r.ok){{var d=await r.json().catch(function(){{return {{}};}});throw new Error(d.error||"");}}'
+            f's.dataset.current=s.value;t.textContent="Saved.";t.style.color="#065f46";}}catch(e){{s.value=s.dataset.current;'
+            f't.textContent=e.message||"Save failed.";t.style.color="#b91c1c";}}finally{{s.disabled=false;}}}}</script>')
+
+
+def _prestep_model_html(current: str, blocks: dict) -> str:
+    """Question splitter picker (#738 Phase B3): the small model FP&A Buddy
+    calls, only for a question that names more than one metric or band or
+    mixes a benchmark ask with a broader one, to split it into parts. Not
+    allowed models are disabled with the reason; the server refuses them too.
+    A failed call falls back to one rules-only lookup and is logged."""
+    from linklib.models import _REGISTRY
+    opts = "".join(
+        f'<option value="{_esc(m["id"])}"{" selected" if m["id"] == current else ""}'
+        f'{" disabled" if blocks.get(m["id"]) and m["id"] != current else ""}>{_esc(m["label"])}'
+        f'{"" if not blocks.get(m["id"]) or m["id"] == current else " (" + _esc(blocks[m["id"]][0]) + ")"}</option>'
+        for m in _REGISTRY)
+    return (f'<select id="ps-select" data-current="{_esc(current)}" onchange="savePrestep()" '
+            f'style="width:100%;max-width:520px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;'
+            f'font:inherit;font-size:15px;background:#fff;">{opts}</select>'
+            f'<span id="ps-status" style="font-size:13px;color:var(--muted);margin-left:8px;"></span>'
+            f'<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;">Used by FP&amp;A Buddy to split a multi-part '
+            f'benchmark question before the lookup. One short call, charged to the user&rsquo;s monthly budget. '
+            f'If it fails, Buddy does one lookup without splitting and the turn log says so. Cheapest model recommended.</p>'
+            f'<script>async function savePrestep(){{var s=document.getElementById("ps-select"),t=document.getElementById("ps-status");'
+            f's.disabled=true;t.textContent="Saving\u2026";try{{var r=await fetch("/admin/system/ai/model/save",{{method:"POST",'
+            f'headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{role:"prestep",model:s.value}})}});'
             f'if(!r.ok){{var d=await r.json().catch(function(){{return {{}};}});throw new Error(d.error||"");}}'
             f's.dataset.current=s.value;t.textContent="Saved.";t.style.color="#065f46";}}catch(e){{s.value=s.dataset.current;'
             f't.textContent=e.message||"Save failed.";t.style.color="#b91c1c";}}finally{{s.disabled=false;}}}}</script>')
@@ -33189,6 +33231,14 @@ def _render_cited_answer(answer: str, citations_json: str,
                         'font-weight:600;color:var(--ink-soft);background:var(--line);'
                         'border-radius:999px;padding:1px 7px;white-space:nowrap;">'
                         'Open web</span>')
+        if not c.get("url"):
+            # A benchmark report with no landing URL is cited by name only.
+            items.append(f'<li><span style="display:inline-flex;gap:5px;align-items:flex-start;max-width:100%;">'
+                         f'<span aria-hidden="true">{_ASK_SOURCE_ICONS.get(c.get("type"), "")}</span>'
+                         f'<span>[{_esc(c.get("n") if c.get("n") is not None else "")}] '
+                         f'{_esc(c.get("title") or "")}</span></span> '
+                         f'<span style="color:var(--muted);font-size:11px;">no link on file</span></li>')
+            continue
         items.append(
             f'<li><a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener" '
             f'style="display:inline-flex;gap:5px;align-items:flex-start;max-width:100%;">'
@@ -33199,6 +33249,59 @@ def _render_cited_answer(answer: str, citations_json: str,
     sources_html = ('<ul style="margin:8px 0 0;padding-left:18px;list-style:none;font-size:13px;'
                     f'display:flex;flex-direction:column;gap:4px;">{"".join(items)}</ul>')
     return answer_html, sources_html
+
+
+def _prestep_report_html(r: dict) -> str:
+    """The benchmark lookup log of one turn for the admin report (#738 B4):
+    one summary line, the full detail one tap away. Empty for a turn the
+    pre-step did not touch. A fallback always shows, in words, so nothing
+    changes quietly."""
+    raw = r.get("prestep_json") or ""
+    if not raw:
+        return ""
+    try:
+        d = json.loads(raw)
+    except ValueError:
+        return ""
+    fallbacks = {"no_key": "the split call could not run (no key)", "call_failed": "the split call failed",
+                 "invalid_json": "the split call returned unusable output",
+                 "over_cap": "the user's remaining budget could not cover a split",
+                 "prestep_error": "the pre-step itself raised an error"}
+    bits = []
+    metrics = d.get("detected") or []
+    bits.append("Metrics: " + (_esc(", ".join(metrics)) if metrics else "none"))
+    if d.get("split_ran"):
+        bits.append(f"split into {len(d.get('subs') or [])} of {d.get('requested_subs')} parts")
+    elif d.get("split_fallback"):
+        bits.append("no split: " + _esc(fallbacks.get(d["split_fallback"], d["split_fallback"])) + "; one rules-only lookup ran")
+    else:
+        bits.append("no split needed")
+    rows = sum(s.get("figure_rows", 0) for s in d.get("subs") or [])
+    bits.append(f"{rows} figure rows")
+    mix = d.get("match_mix") or {}
+    if mix:
+        bits.append("match: " + _esc(", ".join(f"{k} {v}" for k, v in sorted(mix.items()))))
+    extra = float(r.get("prestep_cost_usd") or 0)
+    if extra:
+        bits.append(f"split call ${extra:.4f}")
+    subs = "".join(
+        f'<li>[{_esc(s.get("intent", ""))}] {_esc(", ".join(s.get("metrics") or []) or "no metric")}'
+        f'{" · band " + _esc(s["band"]) if s.get("band") else ""}'
+        f'{" · year " + _esc(s["year"]) if s.get("year") else ""}'
+        f': {s.get("figure_rows", 0)} figure rows, {s.get("cards", 0)} cards, {s.get("library_hits", 0)} articles'
+        f'{", " + str(s["figure_rows_left_out"]) + " left out for length" if s.get("figure_rows_left_out") else ""}</li>'
+        for s in d.get("subs") or [])
+    extras = ""
+    if d.get("notice"):
+        extras += f'<div>User notice: {_esc(d["notice"])}</div>'
+    if d.get("rest_of_question"):
+        extras += f'<div>Rest of question: {_esc(d["rest_of_question"])}</div>'
+    est = d.get("est_extra_usd")
+    if est:
+        extras += f'<div>Estimated extra before running: ${float(est):.4f}; budget left ${float(d.get("remaining_usd") or 0):.4f}</div>' if d.get("remaining_usd") is not None else f'<div>Estimated extra before running: ${float(est):.4f}</div>'
+    return (f'<details style="margin-top:4px;font-size:12px;color:var(--muted);"><summary style="cursor:pointer;">'
+            f'Benchmark lookup: {" · ".join(bits)}</summary>'
+            f'<ul style="margin:6px 0 0;padding-left:18px;">{subs}</ul>{extras}</details>')
 
 
 @app.get("/admin/fpa-buddy/report", response_class=HTMLResponse)
@@ -33244,10 +33347,11 @@ def admin_ask_report(request: Request, user: str = ""):
         # error: this report is admin-only and the cost is real spend.
         failed = (f'<div style="font-size:12px;margin-top:3px;"><span style="color:var(--alert);font-weight:600;">&#9888; Failed</span> '
                   f'<span style="color:var(--muted);">{_esc(r.get("error") or "No answer was produced.")}</span></div>') if r.get("failed") else ""
+        lookup = _prestep_report_html(r)
         return f"""<tr class="turn-row"{attrs}>
   <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])}</td>
   <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(r))}</td>
-  <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}{failed}</td>
+  <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}{failed}{lookup}</td>
   <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
   <td class="admin-table-cell" data-label="Cost" style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}{split}</td>
 </tr>"""

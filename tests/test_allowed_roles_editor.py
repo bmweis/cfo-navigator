@@ -321,8 +321,8 @@ def test_role_columns_have_one_equal_width_and_cells_do_not_wrap():
     assert ".sw-cell{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;white-space:nowrap;" in css
     info = {"claude-haiku-4-5-20251001": {"allowed": [], "assigned": [], "confirmed": [], "status": "available", "pricing": []}}
     html = appmod._allowed_roles_card_html(info, [])
-    assert html.count('<col class="sw-c-role">') == 5
-    assert html.count('<th class="sw-rc">') == 5
+    assert html.count('<col class="sw-c-role">') == 6
+    assert html.count('<th class="sw-rc">') == 6
 
 
 # --- AI page polish (follow-up to 3c) ----------------------------------------

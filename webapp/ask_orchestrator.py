@@ -146,9 +146,11 @@ def run_ask(
     # Skipped for token-only access and the break-glass admin login with
     # no matching `users` row (no user_id to attribute cost to), matching
     # today's unrestricted behavior for those cases.
+    budget_left: float | None = None
     if user_id is not None:
         cap = lib.get_effective_ask_cap(user_id)
         spent = lib.ask_cost_this_month(user_id)
+        budget_left = max(0.0, cap - spent)   # the benchmark pre-step sizes itself to this
         if spent >= cap:
             return {
                 "capped": True,
@@ -169,6 +171,7 @@ def run_ask(
         use_web=use_web,
         opml_path=opml_path if (use_feed or use_web) else None,
         history=history,
+        budget_usd=budget_left,
     )
 
     if getattr(ans, "failed", False):
@@ -195,6 +198,7 @@ def run_ask(
                 is_private=is_private,
                 web_scope=getattr(ans, "web_scope", ""),
                 failed=True, error=ans.error,
+                prestep=getattr(ans, "prestep", None), prestep_cost_usd=getattr(ans, "prestep_cost_usd", 0.0),
             )
             usage_line = {"spent": round(lib.ask_cost_this_month(user_id), 2),
                           "cap": round(lib.get_effective_ask_cap(user_id), 2)}
@@ -238,6 +242,7 @@ def run_ask(
             stop_reason=stop_reason_of(ans),
             is_private=is_private,
             web_scope=getattr(ans, "web_scope", ""),
+            prestep=getattr(ans, "prestep", None), prestep_cost_usd=getattr(ans, "prestep_cost_usd", 0.0),
         )
         new_conversation_id = conversation_id or str(row_id)
         turn_id = row_id
@@ -264,5 +269,8 @@ def run_ask(
         "is_private": bool(is_private),
         # "" unless the answer was cut off at the length limit; the web page
         # and MCP callers show it under the answer.
-        "notice": answer_cutoff_notice(stop_reason_of(ans)),
+        # Also a plain sentence when a split question was cut back to fit the
+        # user's remaining monthly budget (benchmark pre-step).
+        "notice": " ".join(x for x in (answer_cutoff_notice(stop_reason_of(ans)),
+                                       getattr(ans, "prestep_notice", "")) if x),
     }
