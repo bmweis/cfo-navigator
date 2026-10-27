@@ -58,6 +58,9 @@ SPLIT_EST_TOKENS = (1100, 400)
 _BAND_RE = re.compile(
     r"(?:<|>|under |over |above |below )?\$\s?\d[\d,.]*\s?[kmb]\b\+?(?:\s*(?:-|to|–)\s*\$?\s?\d[\d,.]*\s?[kmb]?\b)?",
     re.I)
+_BENCH_CUE = re.compile(
+    r"\b(benchmark\w*|median|percentile|quartile|peers?|typical|average|compare[ds]?|comparison|"
+    r"industry|norms?)\b", re.I)
 _OVER_TIME = re.compile(
     r"\b(trend|over time|year[- ]over[- ]year|yoy|historical|history|has .{0,30} (changed|improved|declined)|"
     r"changed? (since|from)|compared (to|with) (last|prior|previous) year|evolv|over the (last|past) \w+ years)\b", re.I)
@@ -153,6 +156,23 @@ def detect(lib, question: str) -> dict:
         t = m.group(0).strip()
         if t not in bands:
             bands.append(t)
+    # Metric names stored in the figures but not in the registry (full-text
+    # path). Needs benchmark context as well as the name words: a band, or a
+    # benchmark-asking word. Names a registry metric already reaches are skipped.
+    via_fts = False
+    if bands or _BENCH_CUE.search(question or ""):
+        covered: set[str] = set()
+        idx = fg._load_metric_index(lib)
+        for c in canon:
+            covered |= fg._names_for(idx, c)
+        extra = [n for n in fg.detect_stored_metric_names(lib, question)
+                 if _lc_text(n) not in covered and n not in terms]
+        room = MAX_SUBQUERIES - len(terms)
+        extra = extra[:max(room, 0)]
+        if extra:
+            via_fts = True
+            terms = terms + extra
+            canon = canon + extra
     words = len((question or "").split())
     questions = (question or "").count("?")
     # What is left once the metric phrases, bands and benchmark-asking words are
@@ -173,7 +193,7 @@ def detect(lib, question: str) -> dict:
         reasons.append("more than one band")
     if canon and mixed:
         reasons.append("a benchmark ask inside a broader question")
-    return {"metrics": canon, "terms": terms, "found": found, "bands": bands, "over_time": over_time,
+    return {"metrics": canon, "terms": terms, "via_fts": via_fts, "found": found, "bands": bands, "over_time": over_time,
             "definition": definition, "mixed": mixed, "rest_words": len(rest_words), "split_reasons": reasons,
             "needs_split": bool(canon) and bool(reasons)}
 
@@ -451,7 +471,7 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
     ps.active = True
     ps.system_rules = True
     ps.detected = sig["metrics"]
-    ps.signals = {k: sig[k] for k in ("bands", "over_time", "definition", "mixed", "rest_words", "split_reasons")}
+    ps.signals = {k: sig[k] for k in ("bands", "over_time", "definition", "mixed", "rest_words", "split_reasons", "via_fts")}
     ps.remaining_usd = remaining_usd
     reports = {r["report_slug"]: r for r in lib.list_benchmark_reports()}
 

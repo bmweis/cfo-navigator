@@ -905,3 +905,61 @@ def summarize(rows: list[dict]) -> dict:
     vals = [float(r["value_num"]) for r in rows]
     return {"refused": False, "label": "derived, not in report", "count": len(vals),
             "median": _stats.median(vals), "min": min(vals), "max": max(vals), "unit": rows[0].get("unit", "")}
+
+
+# --- metric names found by full-text search (the trigger beyond the registry) --------
+
+_NAME_STOP = set("""the and for are was were what whats how does did can could should would will with that this these
+ those our your their from into than then have has had its not but any per about over under between against among
+ as of at in on to by an a or is be we us it i you do""".split())
+FTS_NAME_MAX = 4
+FTS_NAME_POOL = 2000
+
+
+def _stem(w: str) -> str:
+    for suf in ("ies", "es", "s"):
+        if len(w) > 4 and w.endswith(suf):
+            return w[: -len(suf)] + ("y" if suf == "ies" else "")
+    return w
+
+
+def _sig_tokens(text: str) -> list[str]:
+    return [_stem(t) for t in re.findall(r"[a-z0-9]+", _lc(text)) if len(t) > 2 and t not in _NAME_STOP]
+
+
+def detect_stored_metric_names(lib, text: str) -> list[str]:
+    """Raw metric names in `benchmark_figures` that the question names, for
+    metrics not in the registry. Deterministic, no model call.
+
+    Candidates come from full-text search over the metric column using the
+    question's words. A stored name counts only when it has at least two
+    significant words (an `as`, `of`, `the` do not count) and EVERY one of them
+    appears in the question: a minimum score of 1.0 on at least 2 words, so
+    ordinary questions that share one word with a metric name do not trigger.
+    The caller decides whether the question also carries benchmark context.
+    Longest names first, at most FTS_NAME_MAX."""
+    toks = list(dict.fromkeys(_sig_tokens(text)))
+    if len(toks) < 2:
+        return []
+    q = "metric : (" + " OR ".join(f'"{t}"' for t in toks) + ")"
+    try:
+        names = [r[0] for r in lib.conn.execute(
+            """SELECT DISTINCT f.metric FROM benchmark_figures_fts x
+               JOIN benchmark_figures f ON f.id = x.rowid
+               WHERE benchmark_figures_fts MATCH ? LIMIT ?""", (q, FTS_NAME_POOL))]
+    except Exception:
+        return []
+    have = set(toks)
+    hits = []
+    for n in names:
+        nt = list(dict.fromkeys(_sig_tokens(n)))
+        if len(nt) >= 2 and all(t in have for t in nt):
+            hits.append((len(nt), n))
+    hits.sort(key=lambda h: (-h[0], h[1].casefold()))
+    out: list[str] = []
+    seen: set[str] = set()
+    for _, n in hits:
+        if n.casefold() not in seen:
+            seen.add(n.casefold())
+            out.append(n)
+    return out[:FTS_NAME_MAX]

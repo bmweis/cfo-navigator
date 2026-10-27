@@ -531,3 +531,59 @@ def test_a_benchmark_inside_a_hiring_question_is_split_and_both_answered(lib, mo
     assert ans.prestep["split_ran"] and [s["intent"] for s in ans.prestep["subs"]] == ["benchmark", "other"]
     assert any(d["title"].startswith("Figures:") for d in _docs(c.answer_calls()[0]))
     assert "Answer every part" in "\n".join(_texts(c.answer_calls()[0]))
+
+
+# --- trigger beyond the registry: metric names found by full-text search ---------
+
+def _unregistered_lib(tmp_path):
+    db = Library(str(tmp_path / "u.db"))
+    db.seed_voice_prompts()
+    # No registry at all, and metric names that are in no registry.
+    fx.load_report(db, "ex-2099", [
+        fx.frow(basis="Revenue", band="$20M-$30M", metric="Total employees", value="140", unit="count"),
+        fx.frow(basis="Revenue", band="$20M-$30M", metric="Expense as a percent of revenue", value="88", unit="percent"),
+        fx.frow(basis="Revenue", band="$10M-$20M", metric="Expense as a percent of revenue", value="92", unit="percent"),
+    ])
+    return db
+
+
+def test_unregistered_metric_names_trigger_a_lookup(tmp_path, monkeypatch):
+    db = _unregistered_lib(tmp_path)
+    c = _client(monkeypatch, split_text=json.dumps({"subqueries": [
+        {"intent": "benchmark", "metric": "Total employees", "band": "$20M-$30M", "text": "total employees"},
+        {"intent": "benchmark", "metric": "Expense as a percent of revenue", "band": "$20M-$30M", "text": "expense pct"}],
+        "rest_of_question": ""}))
+    ans = _ask(db, "What are total employees and expense as a percent of revenue at $20-$30M revenue?")
+    assert sorted(ans.prestep["detected"]) == ["Expense as a percent of revenue", "Total employees"]
+    assert ans.prestep["signals"]["via_fts"] is True
+    text = " ".join(_doc_text(d) for d in _docs(c.answer_calls()[0]) if d["title"].startswith("Figures:"))
+    assert "value 140" in text and "value 88" in text and "match: exact" in text
+    db.close()
+
+
+def test_a_single_unregistered_metric_with_a_band_triggers_without_a_split(tmp_path, monkeypatch):
+    db = _unregistered_lib(tmp_path)
+    c = _client(monkeypatch)
+    ans = _ask(db, "What is expense as a percent of revenue for a $25M revenue company?")
+    assert c.split_calls() == [] and ans.prestep["subs"][0]["figure_rows"] >= 1
+    db.close()
+
+
+@pytest.mark.parametrize("q", [
+    "How should we structure our sales compensation plan?",
+    "What is our total plan for employees training next year?",          # both words, no benchmark context
+    "Should we cut expense growth as a percent of our revenue target?",   # name words, no band or benchmark cue
+    "What is the best way to run quarterly planning at $25M revenue?",    # a band, but no stored metric name
+])
+def test_ordinary_questions_do_not_trigger_the_full_text_path(tmp_path, monkeypatch, q):
+    db = _unregistered_lib(tmp_path)
+    c = _client(monkeypatch)
+    ans = _ask(db, q)
+    assert ans.prestep == {} and c.split_calls() == []
+    db.close()
+
+
+def test_the_registry_still_wins_and_fts_adds_only_what_it_does_not_cover(lib, monkeypatch):
+    fx.load_report(lib, "eb-2099", [fx.frow(metric="Total employees", basis="Revenue", band="$20M-$30M", value="9")])
+    sig = bp.detect(lib, "What is median net revenue retention at $25M ARR, and total employees?")
+    assert sig["metrics"][0] == "Net revenue retention" and "Total employees" in sig["metrics"]

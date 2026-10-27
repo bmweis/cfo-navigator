@@ -6949,7 +6949,14 @@ figures as Citations-API documents ahead of the retrieved articles. No tool
 loop, no agents.
 
 1. **Rules, no model call** (`detect`): registry names and aliases found as
-   whole words (`figures.detect_metrics`), bands, change-over-time words,
+   whole words (`figures.detect_metrics`); plus metric names stored in
+   `benchmark_figures` that no registry entry covers (`figures.detect_stored_metric_names`):
+   full-text candidates over the metric column, kept only when the name has at
+   least two significant words and ALL of them are in the question, and only when
+   the question also carries a band or a benchmark word (benchmark, median,
+   percentile, quartile, peers, typical, average, compare, industry, norm), so
+   one shared word or a plain planning question never triggers. At most 4 names;
+   the log's `signals.via_fts` says it happened. Also bands, change-over-time words,
    definition words, and whether the question is mixed (two question marks, over
    40 words, or enough words left once metric phrases, bands and benchmark words
    are removed). No registered metric means the pre-step is inactive and the turn

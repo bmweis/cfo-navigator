@@ -33252,7 +33252,7 @@ def _render_cited_answer(answer: str, citations_json: str,
 
 
 def _prestep_report_html(r: dict) -> str:
-    """The benchmark lookup log of one turn for the admin report (#738 B4):
+    """The benchmark lookup log of one turn for the admin report (issue 738, B4):
     one summary line, the full detail one tap away. Empty for a turn the
     pre-step did not touch. A fallback always shows, in words, so nothing
     changes quietly."""
@@ -41853,7 +41853,7 @@ from webapp import mcp_library as _mcp_library  # noqa: E402
 
 _mcp_library.register_library_tools(_mcp, _lib, OPML_PATH)
 
-# Phase B (#738): benchmark-figure tools (find_figures, coverage, get_digest,
+# Phase B (issue 738): benchmark-figure tools (find_figures, coverage, get_digest,
 # metric_definition), admin-role only. See webapp/mcp_figures.py.
 from webapp import mcp_figures as _mcp_figures  # noqa: E402
 
