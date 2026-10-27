@@ -4233,7 +4233,7 @@ library.db            # NOT in git (personal data, large). Lives beside the code
   stub, are gone: the Archive Queue was retired outright, see the Archive
   Queue retirement bullet below.)** The remaining 7 Library tools are
   grouped into three
-  sections (Archive additions &amp; backup / Existing archive management /
+  sections (Archive additions &amp; backup / Manage archive /
   Tagging), with Archive backup folded into the first section (a live-preview
   follow-up moved it there from a standalone headingless card, which read
   oddly once every other tool had a section heading above it) and Enrich

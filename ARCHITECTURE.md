@@ -8282,7 +8282,7 @@ labeled sections:
   what's already there: Archive Queue (which now contains the merged
   Historical sweep panel) and the ongoing feed-scan button on the same
   page, plus Archive backup.
-- **Existing archive management** — working with what's already saved:
+- **Manage archive** — working with what's already saved:
   Reader content backfill, Content de-dupe.
 - **Tagging** — how tags get created, taught, and kept tidy: Tag cleanup,
   Tagging style, Enrich archive.
@@ -8315,7 +8315,7 @@ Reflowed into a `.lib-two-col` CSS grid (`grid-template-columns:1fr 1fr`,
 plain DOM-order auto-placement — no explicit `grid-column`/`grid-row`
 needed since 4 items in a 2-column grid naturally fill row-by-row) pairing
 Open Reader/flow with "Saving articles from anywhere" on top, and "Archive
-additions & backup" with "Existing archive management"/"Tagging" below.
+additions & backup" with "Manage archive"/"Tagging" below.
 Collapses to a single column below 900px, same breakpoint convention as
 every other responsive section on the site — DOM order (top-left,
 top-right, bottom-left, bottom-right) is also the sensible mobile reading
@@ -8395,11 +8395,11 @@ inner accordion can never rotate the outer quadrant's caret (verified live).
 
 **Two independent flowing columns, NOT a row-coupled grid.** `.lib-cols` is a
 flex row of two `.lib-col` flex columns: left holds New content then Tag
-management, right holds Existing archive management then Archive additions &
+management, right holds Manage archive then Archive additions &
 backup. Each column lays out on its own, so **expanding a quadrant in one
 column never moves anything in the other** (verified live in both directions:
 opening New content leaves both right-column headings at their exact Y, and
-opening Existing archive management leaves both left-column headings put).
+opening Manage archive leaves both left-column headings put).
 
 *This reverses an earlier round of this build*, which used
 `grid-template-areas` with explicit rows to guarantee that row-1 and row-2
@@ -8414,7 +8414,7 @@ backup") is explicitly no longer required.
   two capture-path accordions under one quadrant heading, with an `<h3>`
   separating them, so the two halves stay visually distinct rather than blending
   into one block.
-- **Upper-right** — Existing archive management (unchanged content).
+- **Upper-right** — Manage archive (unchanged content).
 - **Lower-left** — Tag management (unchanged content).
 - **Lower-right** — Archive additions & backup (unchanged content).
 
@@ -8424,7 +8424,7 @@ its card moved out of `_LIBRARY_TOOLS` entirely and into the System
 hub-nav group on `/admin` (now at `/admin/library-backup`, a deliberate
 exception to the `/admin/reader/*` rename below — see that section's own
 note on why the backup page keeps the word "library"). `/admin/library`
-is three quadrants now (New content, Existing archive management, Tag
+is three quadrants now (New content, Manage archive, Tag
 management), not four; the two-independent-columns layout described
 above is otherwise unchanged, just with the right column now holding a
 single quadrant instead of two stacked ones. The five other
@@ -8512,7 +8512,7 @@ contract.
 `/admin/library/review-removals` ("Remove content" — see the quadrant
 bullets above) is removed outright, along with its three sub-routes
 (`/check-link`, `/keep`, `/remove`), its `_LIBRARY_TOOLS` entry, its slot in
-the "Existing archive management" quadrant, and its `webapp.tasks`
+the "Manage archive" quadrant, and its `webapp.tasks`
 open-task badge (`lib.flagged_count()`). It was scaffolding for the initial
 bulk Feedly import — a Claude-judged "is this off-audience?" pre-filter
 (podcasts, VC-career content, annual predictions) that surfaced flagged
@@ -8597,7 +8597,7 @@ governing rule, removed) — with `test_rules_version` updated to match.
 
 Beyond that dedicated file, coverage was also scattered across
 `tests/test_admin_library_layout.py` (a quadrant-contents assertion, updated
-for the "Existing archive management" quadrant's tool count),
+for the "Manage archive" quadrant's tool count),
 `tests/test_feed_cookie_flag.py` (a separate quadrant-tool-count assertion
 that also needed updating — `lib-q-existing` dropped from 4 to 3 tools),
 `tests/test_task_badges.py` (`flagged_count()` shape — the removed test
@@ -8815,8 +8815,8 @@ contents are now a collapsible **Reader** group on `/admin`, nested inside
 CFO Toolbox alongside the Software sub-group and the Communities card.
 
 **Structure: two levels of nesting, everything collapsed on load.** Reader
-group → three quadrants (Add content, Existing archive management, Tag
-management) → the tool cards inside each. The Benchmark digests card (`/admin/reader/digests`) and the Benchmark figures card (`/admin/reader/figures`) sit at the top of Add content, ahead of the capture accordions. `webapp/app.py`'s
+group → three quadrants (Add content, Manage archive, Tag
+management) → the tool cards inside each. Manage archive lists Reader content backfill, Content de-dupe, Bulk delete articles, Benchmark digests (`/admin/reader/digests`) and Benchmark figures (`/admin/reader/figures`), in that order; Add content holds only the capture accordions (bookmarklet and Share-Sheet shortcut). `webapp/app.py`'s
 `_reader_admin_quadrants(task_counts)` is what used to be the
 `admin_library()` route body, minus the page shell: it returns those
 quadrants as pre-rendered HTML strings, which `admin_page()` drops straight

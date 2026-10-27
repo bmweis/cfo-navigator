@@ -718,6 +718,15 @@ narrow while the page shell matches every other admin page. `.page-form`'s
 page has its own nav chrome — reserve it for a standalone, single-purpose
 public form with nothing else on the page.
 
+The centered 900px form is for single-record edit forms only. An admin loader
+or tool page (Benchmark digests, Benchmark figures, Bulk delete articles, the
+backup and backfill pages) is not an edit form: back link, `<h1>`, intro,
+cards and tables all share one left edge on `.page-standard`, tables sit in
+`.table-frame` at full width, and a paragraph or form that reads better narrow
+is capped with `max-width` (70ch for prose, 900px for a form) and left-aligned,
+never `margin:0 auto` (2026-10 fix: digests and figures had wrapped their whole
+body in the edit-form wrapper).
+
 Admin data tables sit on the same 1300px Standard tier as everything
 else, not a wider dedicated tier of their own — they already carry their
 own `min-width` floors and `overflow-x:auto` horizontal scroll (PR 12,

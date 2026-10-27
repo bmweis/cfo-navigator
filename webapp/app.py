@@ -31131,16 +31131,7 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
     # here as a _lib_card above them, which buried it four expansions deep from
     # /admin (CFO Toolbox -> Reader -> New content -> the card). It's now a
     # sibling of the three quadrants instead — see the return statement below.
-    digests_card_html = _lib_card(
-        "/admin/reader/digests", lib_by_href["/admin/reader/digests"][0],
-        lib_by_href["/admin/reader/digests"][1],
-        _badge_for_href("/admin/reader/digests", task_counts.get("/admin/reader/digests", 0)))
-    figures_card_html = _lib_card(
-        "/admin/reader/figures", lib_by_href["/admin/reader/figures"][0],
-        lib_by_href["/admin/reader/figures"][1],
-        _badge_for_href("/admin/reader/figures", task_counts.get("/admin/reader/figures", 0)))
-    saving_articles_body = f"""<div style="margin:0 0 18px;display:grid;gap:12px;">{digests_card_html}{figures_card_html}</div>
-<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
+    saving_articles_body = f"""<p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
 <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving to the archive</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 
@@ -31220,20 +31211,21 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
 
 <p style="color:var(--muted);font-size:12.5px;line-height:1.6;margin:10px 0 0;">If you ever rotate <code>LINKLIB_SAVE_TOKEN</code> or change <code>LINKLIB_PUBLIC_BASE</code>, all four snippets above stop working at once&mdash;they share the same token, and the old copies embed the old values. Set them up again from the instructions above.</p>"""
 
-    # 5, not the literal 1 card: the Benchmark digests card plus the four
-    # capture accordions (archive and Read Later, bookmarklet and Share Sheet).
-    # Each is a real tool a person uses. `hrefs` is empty, so this quadrant
-    # carries no task badge of its own, and _lib_quadrant's count_override is
-    # deliberately badge-independent, so the count can't orphan a badge from the
-    # page it aggregates.
+    # 4, not the literal 1 card: the four capture accordions (archive and Read
+    # Later, bookmarklet and Share Sheet), each a real tool a person uses. The
+    # Benchmark digests and figures loaders moved to Manage archive. `hrefs` is
+    # empty, so this quadrant carries no task badge of its own, and
+    # _lib_quadrant's count_override is deliberately badge-independent, so the
+    # count can't orphan a badge from the page it aggregates.
     saving_articles_html = _lib_quadrant("Add content", saving_articles_body,
-                                         [], count_override=5)
+                                         [], count_override=4)
 
     existing_mgmt_html = _lib_section(
-        "Existing archive management",
+        "Manage archive",
         ["/admin/reader/backfill-content", "/admin/reader/dedupe",
-         "/admin/reader/bulk-delete"],
-        "Working with what's already saved.")
+         "/admin/reader/bulk-delete", "/admin/reader/digests",
+         "/admin/reader/figures"],
+        "Working with what's already saved, including the benchmark digests and figures loaders.")
 
     tag_mgmt_html = _lib_section(
         "Tag management",
@@ -37428,11 +37420,10 @@ def _digests_form_page(*, bundle: str = "", error: str = "", status: int = 200) 
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Benchmark digests</h1>
-<div style="max-width:900px;margin:0 auto;">
-<p style="color:var(--muted);margin:0 0 18px;">Loads digests of third-party benchmark reports into the Archive so FP&amp;A Buddy can answer from them. Nothing is fetched and no AI runs: each digest is stored exactly as written in the bundle.</p>
+<p style="color:var(--muted);margin:0 0 18px;max-width:70ch;">Loads digests of third-party benchmark reports into the Archive so FP&amp;A Buddy can answer from them. Nothing is fetched and no AI runs: each digest is stored exactly as written in the bundle.</p>
 {notice}
 <form method="post" action="/admin/reader/digests/preview" enctype="multipart/form-data"
-      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;">
+      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;max-width:900px;">
   <label for="digest-file" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Bundle file</label>
   <input type="file" id="digest-file" name="file" accept=".md,.txt,text/markdown,text/plain" style="max-width:100%;margin:0 0 14px;">
   <label for="digest-text" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Or paste the bundle</label>
@@ -37444,9 +37435,9 @@ def _digests_form_page(*, bundle: str = "", error: str = "", status: int = 200) 
 </form>
 
 <h2 style="font-size:16px;margin:32px 0 10px;">Bundle format</h2>
-<p style="font-size:13.5px;color:var(--muted);margin:0 0 10px;">Digests are separated by a line holding only <code>=====</code>. The headers come first, one line each, then <code>CONTENT:</code> on its own line and the markdown, which runs to the next separator or the end of the file. The publisher in the example is invented.</p>
-<pre style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:12.5px;line-height:1.5;overflow-x:auto;margin:0 0 14px;">{_esc(_DIGEST_FORMAT_EXAMPLE)}</pre>
-<ul style="font-size:13.5px;color:var(--ink-soft);line-height:1.65;padding-left:20px;margin:0 0 14px;">
+<p style="font-size:13.5px;color:var(--muted);margin:0 0 10px;max-width:900px;">Digests are separated by a line holding only <code>=====</code>. The headers come first, one line each, then <code>CONTENT:</code> on its own line and the markdown, which runs to the next separator or the end of the file. The publisher in the example is invented.</p>
+<pre style="max-width:900px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:12.5px;line-height:1.5;overflow-x:auto;margin:0 0 14px;">{_esc(_DIGEST_FORMAT_EXAMPLE)}</pre>
+<ul style="max-width:900px;font-size:13.5px;color:var(--ink-soft);line-height:1.65;padding-left:20px;margin:0 0 14px;">
   <li><strong>URL</strong> is the report landing page plus <code>?digest=&lt;slug&gt;</code>. The slug keeps two digests of one report as two rows. A <code>#fragment</code> is dropped, as are <code>source</code>, <code>ref</code>, <code>amp</code> and <code>utm_*</code> parameters.</li>
   <li><strong>PUBLISHED</strong> is a year, a month or a day. A partial date becomes the first day of the period at midnight UTC, so <code>2099-03</code> is stored as 2099-03-01, and the Reader shows it as the 1st of that month.</li>
   <li><strong>TAGS</strong> is optional and comma-separated. <code>benchmark-digest</code> is always added; it is the tag that keeps a digest from being rewritten.</li>
@@ -37455,7 +37446,6 @@ def _digests_form_page(*, bundle: str = "", error: str = "", status: int = 200) 
   <li><strong>Loading the same URL again overwrites that digest</strong> (its text, tags and date). A URL that holds a saved article that is not a digest is refused, never overwritten. If one digest has an error, none load.</li>
   <li><strong>Digests are skipped</strong> by the enrich backfill, forced re-enrich, the Reader content backfill, the purge list and the de-dupe scan, so they stay as written.</li>
 </ul>
-</div>
 </div>"""
     return HTMLResponse(_page("Benchmark digests—Admin", "Admin", body, authed=True), status_code=status)
 
@@ -37765,11 +37755,10 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Benchmark figures</h1>
-<div style="max-width:900px;margin:0 auto;">
-<p style="color:var(--muted);margin:0 0 18px;">Stores every figure extracted from a benchmark report, exactly as written, so FP&amp;A Buddy can later look a number up instead of reading it out of digest text. Loading figures changes no Buddy answer yet.</p>
+<p style="color:var(--muted);margin:0 0 18px;max-width:70ch;">Stores every figure extracted from a benchmark report, exactly as written, so FP&amp;A Buddy can later look a number up instead of reading it out of digest text. Loading figures changes no Buddy answer yet.</p>
 {msg}
 <form method="post" action="/admin/reader/figures/preview" enctype="multipart/form-data"
-      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;">
+      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;max-width:900px;">
   <label for="figures-zip" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Figures zip</label>
   <input type="file" id="figures-zip" name="zip" accept=".zip,application/zip" style="max-width:100%;margin:0 0 14px;">
   <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -37779,12 +37768,12 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
 </form>
 
 <h2 style="font-size:16px;margin:28px 0 10px;">What is loaded</h2>
-<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;">{summary["reports"]:,} reports, {summary["figures"]:,} figures, {summary["metrics"]:,} distinct metric names. {summary["null_value_num"]:,} {"figure has" if summary["null_value_num"] == 1 else "figures have"} a value that is not a plain number. Metric registry: {summary["registry"]:,} metrics, {summary["aliases"]:,} aliases. Metric name map: {summary["name_map"]:,} rows (filled by a later job).</p>
+<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;max-width:900px;">{summary["reports"]:,} reports, {summary["figures"]:,} figures, {summary["metrics"]:,} distinct metric names. {summary["null_value_num"]:,} {"figure has" if summary["null_value_num"] == 1 else "figures have"} a value that is not a plain number. Metric registry: {summary["registry"]:,} metrics, {summary["aliases"]:,} aliases. Metric name map: {summary["name_map"]:,} rows (filled by a later job).</p>
 {reports_table}
 
 <h2 style="font-size:16px;margin:28px 0 10px;">Metric registry</h2>
 <form method="post" action="/admin/reader/figures/registry" enctype="multipart/form-data"
-      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;">
+      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;max-width:900px;">
   <label for="registry-tsv" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Registry seed (TSV)</label>
   <input type="file" id="registry-tsv" name="tsv" accept=".tsv,.txt,text/tab-separated-values,text/plain" style="max-width:100%;margin:0 0 14px;">
   <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -37794,7 +37783,7 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
 </form>
 
 <h2 style="font-size:16px;margin:32px 0 10px;">Zip format</h2>
-<ul style="font-size:13.5px;color:var(--ink-soft);line-height:1.65;padding-left:20px;margin:0 0 14px;">
+<ul style="max-width:900px;font-size:13.5px;color:var(--ink-soft);line-height:1.65;padding-left:20px;margin:0 0 14px;">
   <li><strong>MANIFEST.tsv</strong> at the top of the zip, tab-separated, header exactly <code>report_slug</code>, <code>file</code>, <code>rows</code>, <code>bytes</code>, <code>sha256</code>. One line per CSV. <code>report_slug</code> is the file name without <code>.csv</code>.</li>
   <li><strong>Each CSV</strong> is UTF-8 with this header, in this order: {cols}. Every row has exactly 16 fields.</li>
   <li><strong>Rejected, never fixed up:</strong> a wrong header, a row with the wrong number of fields, a row count, byte count or sha256 that differs from the manifest, a file the manifest lists but the zip lacks, a file in the zip the manifest does not list, and text that is not UTF-8. A bad file is refused on its own; the other files can still load.</li>
@@ -37803,7 +37792,6 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
   <li><strong>Registry seed:</strong> three tab-separated columns per line: the canonical metric, its card URL, and a <code>Contains:</code> line whose comma-separated terms become aliases (anything from <code>sources:</code> on is dropped).</li>
   <li>The check &ldquo;Figures loaded match their manifests&rdquo; on <a href="/admin/checks">Checks</a> fails if a report is short or missing, for example after a restore to an older backup. Load the zip again to fix it.</li>
 </ul>
-</div>
 </div>"""
     return HTMLResponse(_page("Benchmark figures—Admin", "Admin", body, authed=True), status_code=status)
 
