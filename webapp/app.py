@@ -64,6 +64,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import markdown as _markdown
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
@@ -25831,11 +25832,17 @@ async def ask_similar(request: Request):
     the same shared rule the past-questions list uses (Library.ask_visibility_clause):
     never another user's private or hidden question; an admin sees all, labelled."""
     _require_member(request)
-    from linklib.similar_questions import rank_similar
     payload = await request.json()
     question = (payload.get("question") or "").strip()[:2000]
     if not question:
         return {"suggestions": []}
+    # SQLite reads plus the ranking pass are blocking; keep them off the event
+    # loop like /ask (issue #738, A1).
+    return await run_in_threadpool(_ask_similar_blocking, request, question)
+
+
+def _ask_similar_blocking(request: Request, question: str) -> dict:
+    from linklib.similar_questions import rank_similar
     authed = _is_authed(request)
     lib = _lib()
     try:
@@ -25891,6 +25898,18 @@ async def ask(request: Request):
     use_feed    = "feed" in raw_sources or "web" in raw_sources
     use_web     = "open_web" in raw_sources
 
+    # Everything below is blocking (SQLite, retrieval, Exa, the Claude call,
+    # often many seconds). It runs in the threadpool so one slow answer can't
+    # stall every other request on the process (issue #738, A1).
+    return await run_in_threadpool(
+        _ask_blocking, request, question, model=model, effort=effort,
+        use_library=use_library, use_feed=use_feed, use_web=use_web,
+        conversation_id=conversation_id, is_private=is_private)
+
+
+def _ask_blocking(request: Request, question: str, *, model: str, effort: str,
+                  use_library: bool, use_feed: bool, use_web: bool,
+                  conversation_id: str, is_private: bool):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
@@ -26381,6 +26400,7 @@ _LIBRARY_TOOLS = [
     ("/admin/reader/tag-management", "Tag cleanup and style", "Merge, rename, or remove existing tags, and edit the guide that steers how new ones get chosen."),
     ("/admin/reader/enrich",       "Enrich archive",      "Uses Claude to draft a summary and tags for each saved article. This is where new tags get created."),
     ("/admin/reader/digests",      "Benchmark digests",   "Load digests of third-party benchmark reports into the Archive from a text bundle, so FP&amp;A Buddy can answer from them. Nothing is fetched and no AI runs; each digest is stored as written and skipped by every automatic rewrite."),
+    ("/admin/reader/figures",      "Benchmark figures",   "Load the figures extracted from benchmark reports (a zip of CSVs with a manifest), stored exactly as written, plus the metric registry. Checked against the manifest; changes no FP&amp;A Buddy answer yet."),
     ("/admin/reader/bulk-delete",   "Bulk delete articles", "Permanently remove a specific list of articles you've already decided aren't needed&mdash;paste their URLs into the CSV template, mark <code>confirm_delete</code>, and re-upload. For a known list, not a scan&mdash;different from the &lt;60-word Purge tool under Reader content backfill. A single article can also be removed straight from its Reader toolbar."),
 ]
 
@@ -27440,6 +27460,8 @@ _TABLE_GROUPS: list[tuple[str, list[str]]] = [
                             "dedupe_decisions", "article_embeddings", "ask_questions", "ask_feedback",
                             "content_refetch_log", "url_correction_log",
                             "feed_sections", "feeds"]),
+    ("Benchmark figures", ["benchmark_reports", "benchmark_figures", "benchmark_figures_fts",
+                           "metric_registry", "metric_aliases", "metric_name_map"]),
     ("Site utilities and system", ["settings", "contacts", "contact_audit_log", "archive_audit_log",
                                   "email_failures", "backup_log", "integrity_check_log", "job_run_log",
                                   "enrichment_cost", "manual_overhead", "field_reviews",
@@ -29714,6 +29736,7 @@ _LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "og:url threading",
         "Original content mirrored for retrieval",
         "Every live piece has a share card",
+        "Figures loaded match their manifests",
     )),
     ("Code and repo health", (
         "Dead code / unused imports",
@@ -31063,7 +31086,11 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
         "/admin/reader/digests", lib_by_href["/admin/reader/digests"][0],
         lib_by_href["/admin/reader/digests"][1],
         _badge_for_href("/admin/reader/digests", task_counts.get("/admin/reader/digests", 0)))
-    saving_articles_body = f"""<div style="margin:0 0 18px;">{digests_card_html}</div>
+    figures_card_html = _lib_card(
+        "/admin/reader/figures", lib_by_href["/admin/reader/figures"][0],
+        lib_by_href["/admin/reader/figures"][1],
+        _badge_for_href("/admin/reader/figures", task_counts.get("/admin/reader/figures", 0)))
+    saving_articles_body = f"""<div style="margin:0 0 18px;display:grid;gap:12px;">{digests_card_html}{figures_card_html}</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 14px;">Two capture pairs&mdash;a bookmarklet and a Share-Sheet shortcut&mdash;for saving a page by hand, one pair per destination.</p>
 <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;">Saving to the archive</div>
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
@@ -37542,6 +37569,326 @@ async def admin_digests_load(request: Request):
 <p style="margin:18px 0 0;"><a href="/admin/reader/digests" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Load another bundle</a></p>
 </div>"""
     return HTMLResponse(_page("Digests loaded—Admin", "Admin", body, authed=True))
+
+
+# ---------------------------------------------------------------------------
+# Benchmark figures (issue #738, Phase A): the extracted figures of each
+# benchmark report, loaded from a zip (MANIFEST.tsv plus one CSV per report).
+# Four routes: the page, a preview that writes nothing, the load (which
+# re-parses the zip itself and loads each clean report in its own
+# transaction), and the metric-registry seed. Parsing and validation live in
+# linklib/figures.py; the writer is Library.replace_benchmark_report. See
+# ARCHITECTURE.md ("Benchmark figures").
+# ---------------------------------------------------------------------------
+
+_FIGURES_FORM_MAX_BYTES = 80 * 1024 * 1024   # the base64 copy the preview carries to the load
+_FIGURES_TH = _DIGEST_TH
+
+
+def _figures_upload_bytes(form, name: str) -> bytes:
+    up = form.get(name)
+    return b"" if up is None or isinstance(up, str) else up.file.read()
+
+
+def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HTMLResponse:
+    from linklib import figures as _fg
+    lib = _lib()
+    try:
+        summary = lib.figures_summary()
+        reports = lib.list_benchmark_reports()
+    finally:
+        lib.close()
+    msg = (_digest_notice(_esc(error)) if error else "") + (_digest_notice(notice, "info") if notice else "")
+    report_rows = "".join(
+        f'<tr><td style="padding:10px 12px;font-size:13px;overflow-wrap:anywhere;">{_esc(r["report_slug"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;">{_esc(r["report"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;">{_esc(r["report_year"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;'
+        + ("color:var(--alert);font-weight:600;" if r["stored_rows"] != r["row_count"] else "")
+        + f'">{r["stored_rows"]:,} of {r["row_count"]:,}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;">{_esc((r["loaded_at"] or "")[:10])}</td></tr>'
+        for r in reports)
+    reports_table = (f"""<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_NAME}px;">Report slug</th>
+  <th style="{_FIGURES_TH}">Report</th>
+  <th style="{_FIGURES_TH}width:{_COL_WIDTH_COUNT}px;">Year</th>
+  <th style="{_FIGURES_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Rows stored</th>
+  <th style="{_FIGURES_TH}width:{_COL_WIDTH_DATE}px;">Loaded</th>
+</tr></thead>
+<tbody>{report_rows}</tbody>
+</table>
+</div>""" if reports else '<p style="color:var(--muted);font-size:13.5px;margin:0;">No reports loaded yet.</p>')
+    cols = ", ".join(f"<code>{c}</code>" for c in _fg.COLUMNS)
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
+<h1>Benchmark figures</h1>
+<div style="max-width:900px;margin:0 auto;">
+<p style="color:var(--muted);margin:0 0 18px;">Stores every figure extracted from a benchmark report, exactly as written, so FP&amp;A Buddy can later look a number up instead of reading it out of digest text. Loading figures changes no Buddy answer yet.</p>
+{msg}
+<form method="post" action="/admin/reader/figures/preview" enctype="multipart/form-data"
+      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;">
+  <label for="figures-zip" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Figures zip</label>
+  <input type="file" id="figures-zip" name="zip" accept=".zip,application/zip" style="max-width:100%;margin:0 0 14px;">
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Preview</button>
+    <span style="font-size:12.5px;color:var(--muted);">Preview writes nothing.</span>
+  </div>
+</form>
+
+<h2 style="font-size:16px;margin:28px 0 10px;">What is loaded</h2>
+<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;">{summary["reports"]:,} reports, {summary["figures"]:,} figures, {summary["metrics"]:,} distinct metric names. {summary["null_value_num"]:,} {"figure has" if summary["null_value_num"] == 1 else "figures have"} a value that is not a plain number. Metric registry: {summary["registry"]:,} metrics, {summary["aliases"]:,} aliases. Metric name map: {summary["name_map"]:,} rows (filled by a later job).</p>
+{reports_table}
+
+<h2 style="font-size:16px;margin:28px 0 10px;">Metric registry</h2>
+<form method="post" action="/admin/reader/figures/registry" enctype="multipart/form-data"
+      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;">
+  <label for="registry-tsv" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Registry seed (TSV)</label>
+  <input type="file" id="registry-tsv" name="tsv" accept=".tsv,.txt,text/tab-separated-values,text/plain" style="max-width:100%;margin:0 0 14px;">
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Seed registry</button>
+    <span style="font-size:12.5px;color:var(--muted);">Safe to run again. An alias edited by hand is never changed.</span>
+  </div>
+</form>
+
+<h2 style="font-size:16px;margin:32px 0 10px;">Zip format</h2>
+<ul style="font-size:13.5px;color:var(--ink-soft);line-height:1.65;padding-left:20px;margin:0 0 14px;">
+  <li><strong>MANIFEST.tsv</strong> at the top of the zip, tab-separated, header exactly <code>report_slug</code>, <code>file</code>, <code>rows</code>, <code>bytes</code>, <code>sha256</code>. One line per CSV. <code>report_slug</code> is the file name without <code>.csv</code>.</li>
+  <li><strong>Each CSV</strong> is UTF-8 with this header, in this order: {cols}. Every row has exactly 16 fields.</li>
+  <li><strong>Rejected, never fixed up:</strong> a wrong header, a row with the wrong number of fields, a row count, byte count or sha256 that differs from the manifest, a file the manifest lists but the zip lacks, a file in the zip the manifest does not list, and text that is not UTF-8. A bad file is refused on its own; the other files can still load.</li>
+  <li><strong>Loading a report again replaces it.</strong> Its old rows are deleted and the new ones inserted in one step, so a failure leaves the old rows in place.</li>
+  <li><strong>Values are stored as written.</strong> A numeric copy is kept only when the value is one plain number (a leading <code>$</code>, a trailing <code>%</code>, <code>x</code> or <code>M</code>, comma thousands and parentheses for negative are allowed). Anything else, such as a range or <code>N/A</code>, has no numeric copy.</li>
+  <li><strong>Registry seed:</strong> three tab-separated columns per line: the canonical metric, its card URL, and a <code>Contains:</code> line whose comma-separated terms become aliases (anything from <code>sources:</code> on is dropped).</li>
+  <li>The check &ldquo;Figures loaded match their manifests&rdquo; on <a href="/admin/checks">Checks</a> fails if a report is short or missing, for example after a restore to an older backup. Load the zip again to fix it.</li>
+</ul>
+</div>
+</div>"""
+    return HTMLResponse(_page("Benchmark figures—Admin", "Admin", body, authed=True), status_code=status)
+
+
+def _figures_status_cell(f, existing: dict[str, int]) -> str:
+    if not f.ok:
+        return '<span style="color:var(--alert);font-weight:600;">Error</span>'
+    old = existing.get(f.report_slug, 0)
+    return f"Will replace {old:,} rows" if old else "New"
+
+
+def _figures_preview_page(z, existing: dict[str, int], zip_b64: str) -> HTMLResponse:
+    rows = []
+    for f in z.files:
+        # The reason sits under the slug, not in the Status column, so it is
+        # visible on a phone without scrolling the table sideways.
+        notes = "".join(
+            f'<div style="font-size:12px;color:var(--alert);margin-top:4px;line-height:1.45;">Error: {_esc(e)}</div>'
+            for e in f.errors) + "".join(
+            f'<div style="font-size:12px;color:var(--caution);margin-top:4px;line-height:1.45;">{_esc(n)}</div>'
+            for n in f.notes)
+        sha = "" if f.sha_ok is None else ("Matches" if f.sha_ok else '<span style="color:var(--alert);">Differs</span>')
+        rows.append(
+            f'<tr><td style="padding:10px 12px;font-size:13px;vertical-align:top;overflow-wrap:anywhere;">'
+            f'<strong>{_esc(f.report_slug)}</strong>{notes}</td>'
+            f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">'
+            f'{"" if f.manifest_rows is None else f"{f.manifest_rows:,}"}</td>'
+            f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">'
+            f'{"" if f.parsed_rows is None else f"{f.parsed_rows:,}"}</td>'
+            f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{sha}</td>'
+            f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_figures_status_cell(f, existing)}</td></tr>')
+    table = f"""{_ADMIN_SCROLL_HINT_HTML}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
+<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_NAME}px;">Report slug</th>
+  <th style="{_FIGURES_TH}width:110px;">Manifest rows</th>
+  <th style="{_FIGURES_TH}width:110px;">Rows parsed</th>
+  <th style="{_FIGURES_TH}width:{_COL_WIDTH_STATUS}px;">sha256</th>
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_STATUS_AGE}px;">Status</th>
+</tr></thead>
+<tbody>{"".join(rows)}</tbody>
+</table>
+</div>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>""" if rows else ""
+    notices = "".join(_digest_notice(_esc(e)) for e in z.errors)
+    notices += "".join(_digest_notice(_esc(n), "info") for n in z.notes)
+    good = z.loadable
+    n_err = sum(1 for f in z.files if not f.ok)
+    if good:
+        skip = (f' The {n_err} file{"s" if n_err != 1 else ""} marked Error will be skipped.' if n_err else "")
+        action = f"""<form method="post" action="/admin/reader/figures/load" style="margin:16px 0 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+  <input type="hidden" name="zip_b64" value="{_esc(zip_b64)}">
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Load {len(good)} report{"s" if len(good) != 1 else ""}</button>
+  <span style="font-size:12.5px;color:var(--muted);">Each report loads on its own; a failure leaves that report's old rows in place.{skip}</span>
+</form>"""
+    else:
+        action = '<p style="font-size:13.5px;color:var(--muted);margin:16px 0 0;">Nothing here can load. Fix the zip and preview again.</p>'
+    summary = (f'{len(z.files)} file{"s" if len(z.files) != 1 else ""}: {len(good)} ready, {n_err} with errors. '
+               'Nothing has been written.')
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/reader/figures" style="font-size:13px;color:var(--muted);">&larr; Benchmark figures</a></p>
+<h1>Preview</h1>
+<p style="color:var(--muted);margin:0 0 16px;">{_esc(summary)}</p>
+{notices}{table}{action}
+</div>"""
+    return HTMLResponse(_page("Preview figures—Admin", "Admin", body, authed=True),
+                        status_code=200 if (good or not z.errors) else 400)
+
+
+@app.get("/admin/reader/figures", response_class=HTMLResponse)
+def admin_figures(request: Request):
+    gate = _digest_gate(request, post=False)
+    if gate is not None:
+        return gate
+    return _figures_page()
+
+
+@app.post("/admin/reader/figures/preview", response_class=HTMLResponse)
+async def admin_figures_preview(request: Request):
+    """Parses the zip and shows what loading it would do. Writes nothing."""
+    _digest_gate(request, post=True)
+    import base64
+    from linklib.figures import parse_zip
+    form = await request.form(max_part_size=_FIGURES_FORM_MAX_BYTES)
+    data = _figures_upload_bytes(form, "zip")
+    if not data:
+        return _figures_page(error="Choose a zip file.", status=400)
+
+    def _work():
+        z = parse_zip(data)
+        lib = _lib()
+        try:
+            existing = lib.benchmark_figure_counts()
+        finally:
+            lib.close()
+        return z, existing
+    z, existing = await run_in_threadpool(_work)
+    return _figures_preview_page(z, existing, base64.b64encode(data).decode("ascii"))
+
+
+@app.post("/admin/reader/figures/load", response_class=HTMLResponse)
+async def admin_figures_load(request: Request):
+    """Loads the zip. Re-parses it here (never trusts the preview) and loads
+    each clean report in its own transaction; files with errors are skipped.
+    Writes one archive_audit_log row and one line to figures-audit.jsonl."""
+    _digest_gate(request, post=True)
+    import base64
+    import binascii
+    from linklib import figures as _fg
+    form = await request.form(max_part_size=_FIGURES_FORM_MAX_BYTES)
+    try:
+        data = base64.b64decode(form.get("zip_b64") or "", validate=True)
+    except (binascii.Error, ValueError):
+        data = b""
+    if not data:
+        return _figures_page(error="Nothing to load. Preview the zip first.", status=400)
+    username = (_current_claims(request) or {}).get("username", "") or ""
+
+    def _work():
+        z = _fg.parse_zip(data)
+        results = []
+        lib = _lib()
+        try:
+            for f in z.files:
+                if not f.ok or z.errors:
+                    results.append({"slug": f.report_slug, "result": "Error", "note": " ".join(f.errors)})
+                    continue
+                try:
+                    out = lib.replace_benchmark_report(f.meta(), f.rows, loaded_by=username)
+                except Exception as exc:
+                    results.append({"slug": f.report_slug, "result": "Error", "note": str(exc)})
+                    continue
+                if out["replaced"]:
+                    results.append({"slug": f.report_slug, "result": f'Replaced {out["replaced"]:,}',
+                                    "note": f'Now {out["loaded"]:,} rows', "loaded": out["loaded"],
+                                    "replaced": out["replaced"]})
+                else:
+                    results.append({"slug": f.report_slug, "result": f'Loaded {out["loaded"]:,}',
+                                    "note": "", "loaded": out["loaded"], "replaced": 0})
+            done = [r for r in results if "loaded" in r]
+            if done:
+                _log_archive_audit(
+                    lib, request, "add", None,
+                    detail=(f"figures load: zip {z.zip_sha256[:12]}; "
+                            + "; ".join(f'{r["slug"]} {r["result"]}' for r in done)))
+        finally:
+            lib.close()
+        _fg.append_audit(DB_PATH, {
+            "event": "figures_load", "user": username, "zip_sha256": z.zip_sha256,
+            "reports": [{"report_slug": r["slug"], "result": r["result"],
+                         "loaded": r.get("loaded"), "replaced": r.get("replaced"),
+                         **({"error": r["note"]} if r["result"] == "Error" else {})}
+                        for r in results]})
+        return z, results
+
+    z, results = await run_in_threadpool(_work)
+    if any("loaded" in r for r in results):
+        backup.maybe_backup(DB_PATH)
+    n_ok = sum(1 for r in results if "loaded" in r)
+    body_rows = "".join(
+        f'<tr><td style="padding:10px 12px;font-size:13px;vertical-align:top;overflow-wrap:anywhere;">{_esc(r["slug"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;'
+        + ("color:var(--alert);font-weight:600;" if r["result"] == "Error" else "")
+        + f'">{_esc(r["result"])}'
+        + (f'<div style="font-size:12px;color:var(--muted);margin-top:2px;font-weight:400;">{_esc(r["note"])}</div>'
+           if r["note"] else "")
+        + '</td></tr>'
+        for r in results)
+    notices = "".join(_digest_notice(_esc(e)) for e in z.errors)
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/reader/figures" style="font-size:13px;color:var(--muted);">&larr; Benchmark figures</a></p>
+<h1>Load result</h1>
+<p style="color:var(--muted);margin:0 0 16px;">{n_ok} of {len(results)} report{"s" if len(results) != 1 else ""} loaded.</p>
+{notices}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_NARROW}px;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="{_FIGURES_TH}">Report slug</th>
+  <th style="{_FIGURES_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Result</th>
+</tr></thead>
+<tbody>{body_rows}</tbody>
+</table>
+</div>
+<p style="margin:18px 0 0;"><a href="/admin/reader/figures" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Back to Benchmark figures</a></p>
+</div>"""
+    return HTMLResponse(_page("Figures loaded—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/reader/figures/registry", response_class=HTMLResponse)
+async def admin_figures_registry(request: Request):
+    """Seeds metric_registry and metric_aliases from a TSV. Any bad line
+    refuses the whole file; otherwise idempotent (see seed_metric_registry)."""
+    _digest_gate(request, post=True)
+    from linklib.figures import parse_registry_tsv
+    form = await request.form(max_part_size=_DIGESTS_FORM_MAX_BYTES)
+    data = _figures_upload_bytes(form, "tsv")
+    if not data:
+        return _figures_page(error="Choose a registry TSV file.", status=400)
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return _figures_page(error="The registry file is not UTF-8 text. Nothing was written.", status=400)
+    rows, errors = parse_registry_tsv(text)
+    if errors:
+        return _figures_page(error="Nothing was written. " + " ".join(errors), status=400)
+
+    def _work():
+        lib = _lib()
+        try:
+            out = lib.seed_metric_registry(rows)
+            _log_archive_audit(lib, request, "edit", None,
+                               detail=(f"metric registry seed: {out['metrics_added']} metrics added, "
+                                       f"{out['metrics_updated']} updated, {out['aliases_added']} aliases added"))
+            return out
+        finally:
+            lib.close()
+    out = await run_in_threadpool(_work)
+    note = (f"Registry seeded from {len(rows)} lines: {out['metrics_added']} metrics added, "
+            f"{out['metrics_updated']} updated; {out['aliases_added']} aliases added, "
+            f"{out['aliases_updated']} moved, {out['aliases_kept_edited']} kept because they were edited.")
+    if out["conflicts"]:
+        note += " Conflicts: " + "; ".join(out["conflicts"]) + "."
+    return _figures_page(notice=_esc(note))
 
 
 def _backup_status_banner(backup_rows: list[dict]) -> str:

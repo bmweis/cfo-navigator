@@ -332,6 +332,24 @@ def original_content_mirror_problems() -> list[str]:
     return problems
 
 
+# --- Benchmark figures (issue #738, Phase A) ---------------------------------
+# Every loaded report holds exactly the row count its manifest recorded, and
+# no figure belongs to a report with no record. benchmark_reports is written
+# in the same transaction as its figures, so a mismatch means something else
+# changed the table: most often a restore that swapped in an older database.
+# The fix is the same either way: load the zip again at /admin/reader/figures.
+def figures_manifest_problems() -> list[str]:
+    from webapp.app import _lib
+    lib = _lib()
+    try:
+        problems = lib.figures_manifest_problems()
+    finally:
+        lib.close()
+    if problems:
+        problems.append("Fix: load the figures zip again at /admin/reader/figures")
+    return problems
+
+
 # --- Voice review queue (2026-09) --------------------------------------------
 # Informational, not pass/fail — an open queue count of >0 isn't a bug, it's
 # work waiting on Brian, the same reason the pricing/model-freshness banners
@@ -752,6 +770,12 @@ def run_all() -> list[dict]:
         "name": "Original content mirrored for retrieval", "where": "Live + CI", "ok": not om,
         "what": "Every original piece with a body is mirrored, so FP&A Buddy can find and cite it.",
         "detail": "; ".join(om) if om else "Every row with body_md has a valid mirror."})
+
+    fm = figures_manifest_problems()
+    results.append({
+        "name": "Figures loaded match their manifests", "where": "Live + CI", "ok": not fm,
+        "what": "Every loaded benchmark report holds the rows its manifest recorded.",
+        "detail": "; ".join(fm) if fm else "Every loaded report matches its manifest."})
 
     og = og_card_missing_problems()
     results.append({

@@ -1628,6 +1628,109 @@ CREATE TABLE IF NOT EXISTS thin_fetch_audit_dismissals (
     note         TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (entity_type, entity_id, field_name)
 );
+
+-- Benchmark figures (issue #738, Phase A). Every figure extracted from a
+-- third-party benchmark report, stored losslessly so FP&A Buddy can reach a
+-- number exactly instead of through digest prose. Loaded from a zip (a
+-- MANIFEST.tsv plus one CSV per report) at /admin/reader/figures; see
+-- linklib/figures.py for the format. NOT the `benchmarks` table above, which
+-- holds the Resources page's links.
+--
+-- benchmark_reports: one row per report, the manifest's record of what was
+-- loaded. row_count and sha256 come from MANIFEST.tsv; the /admin/checks
+-- invariant "Figures loaded match their manifests" compares row_count with
+-- the figures actually present (a restore that swaps in an older database
+-- shows up there). source/report/report_year are copied from the CSV's first
+-- row. landing_url/article_id are set only when exactly one benchmark-digest
+-- article has the report name as its source; otherwise NULL.
+CREATE TABLE IF NOT EXISTS benchmark_reports (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_slug TEXT NOT NULL UNIQUE,      -- the CSV filename stem
+    source      TEXT NOT NULL DEFAULT '',
+    report      TEXT NOT NULL DEFAULT '',
+    report_year TEXT NOT NULL DEFAULT '',
+    landing_url TEXT,
+    article_id  INTEGER,
+    row_count   INTEGER NOT NULL DEFAULT 0,
+    sha256      TEXT NOT NULL DEFAULT '',
+    loaded_at   TEXT NOT NULL,
+    loaded_by   TEXT NOT NULL DEFAULT ''
+);
+
+-- benchmark_figures: one row per CSV row, the 16 columns stored verbatim as
+-- TEXT (`value` is never rewritten). value_num is a convenience copy, set
+-- only when `value` parses unambiguously as a plain number
+-- (figures.parse_value_num); otherwise NULL. row_no is the 1-based data-row
+-- position in the CSV.
+CREATE TABLE IF NOT EXISTS benchmark_figures (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_slug TEXT NOT NULL,
+    row_no      INTEGER NOT NULL,
+    source      TEXT NOT NULL DEFAULT '',
+    report      TEXT NOT NULL DEFAULT '',
+    report_year TEXT NOT NULL DEFAULT '',
+    data_period TEXT NOT NULL DEFAULT '',
+    band_basis  TEXT NOT NULL DEFAULT '',
+    band        TEXT NOT NULL DEFAULT '',
+    segment     TEXT NOT NULL DEFAULT '',
+    metric      TEXT NOT NULL DEFAULT '',
+    denominator TEXT NOT NULL DEFAULT '',
+    statistic   TEXT NOT NULL DEFAULT '',
+    value       TEXT NOT NULL DEFAULT '',
+    unit        TEXT NOT NULL DEFAULT '',
+    n           TEXT NOT NULL DEFAULT '',
+    page        TEXT NOT NULL DEFAULT '',
+    read_from   TEXT NOT NULL DEFAULT '',
+    note        TEXT NOT NULL DEFAULT '',
+    value_num   REAL,
+    UNIQUE (report_slug, row_no)
+);
+CREATE INDEX IF NOT EXISTS idx_benchmark_figures_metric ON benchmark_figures(metric);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS benchmark_figures_fts USING fts5(
+    metric, segment, band, note, report,
+    content='benchmark_figures',
+    content_rowid='id',
+    tokenize='porter unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS benchmark_figures_ai AFTER INSERT ON benchmark_figures BEGIN
+    INSERT INTO benchmark_figures_fts(rowid, metric, segment, band, note, report)
+    VALUES (new.id, new.metric, new.segment, new.band, new.note, new.report);
+END;
+CREATE TRIGGER IF NOT EXISTS benchmark_figures_ad AFTER DELETE ON benchmark_figures BEGIN
+    INSERT INTO benchmark_figures_fts(benchmark_figures_fts, rowid, metric, segment, band, note, report)
+    VALUES ('delete', old.id, old.metric, old.segment, old.band, old.note, old.report);
+END;
+CREATE TRIGGER IF NOT EXISTS benchmark_figures_au AFTER UPDATE ON benchmark_figures BEGIN
+    INSERT INTO benchmark_figures_fts(benchmark_figures_fts, rowid, metric, segment, band, note, report)
+    VALUES ('delete', old.id, old.metric, old.segment, old.band, old.note, old.report);
+    INSERT INTO benchmark_figures_fts(rowid, metric, segment, band, note, report)
+    VALUES (new.id, new.metric, new.segment, new.band, new.note, new.report);
+END;
+
+-- Metric registry: Brian's canonical metric list (one row per metric, with
+-- the card URL and the "Contains:" line it was seeded from) and its aliases
+-- (lowercase, one canonical metric each). Seeded from a TSV upload on
+-- /admin/reader/figures; reseeding never overwrites an alias with edited=1.
+CREATE TABLE IF NOT EXISTS metric_registry (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_metric TEXT NOT NULL UNIQUE,
+    card_url         TEXT NOT NULL DEFAULT '',
+    aliases_line     TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS metric_aliases (
+    alias            TEXT PRIMARY KEY,      -- lowercase
+    canonical_metric TEXT NOT NULL,
+    edited           INTEGER NOT NULL DEFAULT 0
+);
+
+-- metric_name_map: raw metric names from benchmark_figures (lowercase) mapped
+-- to a canonical metric. Created empty in Phase A; a later job fills it.
+CREATE TABLE IF NOT EXISTS metric_name_map (
+    raw_name_lower   TEXT PRIMARY KEY,
+    canonical_metric TEXT,
+    status           TEXT NOT NULL DEFAULT ''
+);
 """
 
 # Indexes that reference a column added via the ALTER TABLE migration list in
@@ -7951,6 +8054,170 @@ class Library:
             (article_id, item_id),
         )
         self.conn.commit()
+
+    # --- Benchmark figures (issue #738, Phase A) -------------------------------
+    # Parsing and validation live in linklib/figures.py; these methods only
+    # write what that module has already checked. See ARCHITECTURE.md
+    # ("Benchmark figures").
+
+    _FIGURE_COLUMNS = ("source", "report", "report_year", "data_period", "band_basis",
+                       "band", "segment", "metric", "denominator", "statistic", "value",
+                       "unit", "n", "page", "read_from", "note")
+
+    def benchmark_figure_counts(self) -> dict[str, int]:
+        """report_slug -> number of figure rows stored now."""
+        return {r[0]: r[1] for r in self.conn.execute(
+            "SELECT report_slug, COUNT(*) FROM benchmark_figures GROUP BY report_slug")}
+
+    def _match_digest_for_report(self, report: str) -> tuple[int | None, str | None]:
+        """(article_id, landing_url) for the benchmark digest of this report,
+        only when exactly one digest article has the report name as its
+        source. Several digests of one report, or none, give (None, None):
+        never a guess."""
+        name = (report or "").strip()
+        if not name:
+            return None, None
+        rows = self.conn.execute(
+            "SELECT id, url FROM articles WHERE lower(source) = lower(?) AND tags_json LIKE ?",
+            (name, f'%"{DIGEST_TAG}"%')).fetchall()
+        if len(rows) != 1:
+            return None, None
+        from urllib.parse import urlsplit, urlunsplit
+        parts = urlsplit(rows[0]["url"])
+        return rows[0]["id"], urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+    def replace_benchmark_report(self, meta: dict, rows: list[dict], loaded_by: str = "") -> dict:
+        """Replace one report's figures in ONE transaction: delete its rows,
+        insert the new ones, upsert its benchmark_reports record. Any error
+        rolls the whole report back, so a report is never half loaded.
+        Returns {"replaced": old_rows, "loaded": new_rows}."""
+        slug = meta["report_slug"]
+        if self.conn.in_transaction:
+            self.conn.commit()
+        cols = self._FIGURE_COLUMNS
+        insert = (f"INSERT INTO benchmark_figures (report_slug, row_no, {', '.join(cols)}, value_num) "
+                  f"VALUES (?, ?, {', '.join('?' for _ in cols)}, ?)")
+        try:
+            old = self.conn.execute("SELECT COUNT(*) FROM benchmark_figures WHERE report_slug = ?",
+                                    (slug,)).fetchone()[0]
+            self.conn.execute("DELETE FROM benchmark_figures WHERE report_slug = ?", (slug,))
+            self.conn.executemany(insert, [
+                (slug, r["row_no"], *(r[c] for c in cols), r.get("value_num")) for r in rows])
+            article_id, landing_url = self._match_digest_for_report(meta.get("report", ""))
+            self.conn.execute(
+                """INSERT INTO benchmark_reports
+                   (report_slug, source, report, report_year, landing_url, article_id,
+                    row_count, sha256, loaded_at, loaded_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(report_slug) DO UPDATE SET
+                     source=excluded.source, report=excluded.report,
+                     report_year=excluded.report_year, landing_url=excluded.landing_url,
+                     article_id=excluded.article_id, row_count=excluded.row_count,
+                     sha256=excluded.sha256, loaded_at=excluded.loaded_at,
+                     loaded_by=excluded.loaded_by""",
+                (slug, meta.get("source", ""), meta.get("report", ""), meta.get("report_year", ""),
+                 landing_url, article_id, int(meta["row_count"]), meta.get("sha256", ""),
+                 _now(), loaded_by or ""))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return {"replaced": old, "loaded": len(rows)}
+
+    def list_benchmark_reports(self) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT r.*, (SELECT COUNT(*) FROM benchmark_figures f
+                            WHERE f.report_slug = r.report_slug) AS stored_rows
+               FROM benchmark_reports r ORDER BY r.report_slug""").fetchall()
+        return [dict(r) for r in rows]
+
+    def figures_summary(self) -> dict:
+        one = lambda sql: self.conn.execute(sql).fetchone()[0]
+        return {
+            "reports": one("SELECT COUNT(*) FROM benchmark_reports"),
+            "figures": one("SELECT COUNT(*) FROM benchmark_figures"),
+            "null_value_num": one("SELECT COUNT(*) FROM benchmark_figures WHERE value_num IS NULL"),
+            "metrics": one("SELECT COUNT(DISTINCT lower(metric)) FROM benchmark_figures"),
+            "registry": one("SELECT COUNT(*) FROM metric_registry"),
+            "aliases": one("SELECT COUNT(*) FROM metric_aliases"),
+            "name_map": one("SELECT COUNT(*) FROM metric_name_map"),
+        }
+
+    def figures_manifest_problems(self) -> list[str]:
+        """Every loaded report holds exactly its manifest row_count, and every
+        report_slug in benchmark_figures has a benchmark_reports record. A
+        restore that swaps in an older database fails here, naming what is
+        missing or short."""
+        problems = []
+        for r in self.conn.execute(
+                """SELECT r.report_slug, r.row_count,
+                          (SELECT COUNT(*) FROM benchmark_figures f
+                           WHERE f.report_slug = r.report_slug) AS stored
+                   FROM benchmark_reports r ORDER BY r.report_slug"""):
+            if r["stored"] == 0 and r["row_count"] > 0:
+                problems.append(f"{r['report_slug']}: missing (manifest says {r['row_count']:,} rows, 0 stored)")
+            elif r["stored"] != r["row_count"]:
+                word = "short" if r["stored"] < r["row_count"] else "over"
+                problems.append(f"{r['report_slug']}: {word} ({r['stored']:,} stored, "
+                                f"manifest says {r['row_count']:,})")
+        for r in self.conn.execute(
+                """SELECT report_slug, COUNT(*) AS n FROM benchmark_figures
+                   WHERE report_slug NOT IN (SELECT report_slug FROM benchmark_reports)
+                   GROUP BY report_slug ORDER BY report_slug"""):
+            problems.append(f"{r['report_slug']}: {r['n']:,} figures with no report record")
+        return problems
+
+    def seed_metric_registry(self, rows) -> dict:
+        """Upsert the canonical metrics and their aliases from a parsed seed
+        (figures.parse_registry_tsv). Idempotent. An alias marked edited=1 is
+        never changed. An alias already claimed by another metric in this
+        same seed keeps its first owner and is reported. One transaction."""
+        if self.conn.in_transaction:
+            self.conn.commit()
+        out = {"metrics_added": 0, "metrics_updated": 0, "aliases_added": 0,
+               "aliases_updated": 0, "aliases_kept_edited": 0, "conflicts": []}
+        claimed: dict[str, str] = {}
+        try:
+            for r in rows:
+                cur = self.conn.execute(
+                    "SELECT card_url, aliases_line FROM metric_registry WHERE canonical_metric = ?",
+                    (r.canonical_metric,)).fetchone()
+                if cur is None:
+                    self.conn.execute(
+                        "INSERT INTO metric_registry (canonical_metric, card_url, aliases_line) VALUES (?, ?, ?)",
+                        (r.canonical_metric, r.card_url, r.aliases_line))
+                    out["metrics_added"] += 1
+                elif (cur["card_url"], cur["aliases_line"]) != (r.card_url, r.aliases_line):
+                    self.conn.execute(
+                        "UPDATE metric_registry SET card_url = ?, aliases_line = ? WHERE canonical_metric = ?",
+                        (r.card_url, r.aliases_line, r.canonical_metric))
+                    out["metrics_updated"] += 1
+                for alias in [r.canonical_metric.lower(), *r.aliases]:
+                    if alias in claimed and claimed[alias] != r.canonical_metric:
+                        out["conflicts"].append(
+                            f"{alias!r} is listed under {claimed[alias]!r} and {r.canonical_metric!r}; kept {claimed[alias]!r}")
+                        continue
+                    claimed[alias] = r.canonical_metric
+                    row = self.conn.execute(
+                        "SELECT canonical_metric, edited FROM metric_aliases WHERE alias = ?",
+                        (alias,)).fetchone()
+                    if row is None:
+                        self.conn.execute(
+                            "INSERT INTO metric_aliases (alias, canonical_metric) VALUES (?, ?)",
+                            (alias, r.canonical_metric))
+                        out["aliases_added"] += 1
+                    elif row["edited"]:
+                        out["aliases_kept_edited"] += 1
+                    elif row["canonical_metric"] != r.canonical_metric:
+                        self.conn.execute(
+                            "UPDATE metric_aliases SET canonical_metric = ? WHERE alias = ?",
+                            (r.canonical_metric, alias))
+                        out["aliases_updated"] += 1
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return out
 
     def list_unmirrored_original_content(self) -> list[dict]:
         """Every original_content row that SHOULD have a working articles

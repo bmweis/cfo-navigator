@@ -166,6 +166,12 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
 - [ ] `/admin/inbox/contact-submissions` loads (spot-check non-article tables) — the
       Archive Queue itself (`/admin/library/queue`) was retired in 2026-09 (PR 3), so
       there's no longer a queue page to check here
+- [ ] Open `/admin/checks` and look at **Figures loaded match their manifests**.
+      A snapshot taken before a figures load is missing or short on those
+      reports, and the row names each one. Fix it by loading the same figures
+      zip again at `/admin/reader/figures` (a reload is idempotent). The load
+      history is in `figures-audit.jsonl` beside the database, which the
+      restore does not replace.
 - [ ] If you restored an older snapshot: diff against the step-1 download
       for member saves / contacts / ask history created since the snapshot,
       and re-add anything worth keeping (article re-saves are idempotent —
