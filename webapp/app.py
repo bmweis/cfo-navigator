@@ -28758,7 +28758,7 @@ def _matchmaker_model_html(current: str, blocks: dict) -> str:
 
 
 def _prestep_model_html(current: str, blocks: dict) -> str:
-    """Question splitter picker (#738 Phase B3): the small model FP&A Buddy
+    """Question splitter picker (issue 738, Phase B3): the small model FP&A Buddy
     calls, only for a question that names more than one metric or band or
     mixes a benchmark ask with a broader one, to split it into parts. Not
     allowed models are disabled with the reason; the server refuses them too.
