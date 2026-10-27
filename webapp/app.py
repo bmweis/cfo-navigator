@@ -26749,6 +26749,13 @@ _SCRIPT_REGISTRY = [
      ["OPENAI_API_KEY (optional; without it only the full-text half prints)"],
      ["python -m scripts.probe_digest_rank --db /data/library.db --question \"...\" --watch 4801,4802",
       "python -m scripts.probe_digest_rank --db /data/library.db --question \"...\" --watch-text \"High Alpha\""]),
+    ("report_figure_landings.py", "scripts.report_figure_landings", "Reusable diagnostic",
+     "Read-only report of how many loaded benchmark reports resolve to a landing URL, by which "
+     "rule (set on /admin/reader/figures, stored, linked digest, or digest slug), and which do "
+     "not. Opens the database with mode=ro; no network, no model call.",
+     "After loading a figures zip, and before relying on figure links in FP&amp;A Buddy answers.",
+     ["None beyond the database path"],
+     ["python -m scripts.report_figure_landings --db /data/library.db"]),
     ("reset_user_password.py", "scripts.reset_user_password", "Recurring and actively useful",
      "Recovery: resets a user's password, or creates an admin account, on the container. The "
      "shared-secret login fallback is retired (issue #627), so this is the way back in when an "
@@ -37596,26 +37603,56 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
     try:
         summary = lib.figures_summary()
         reports = lib.list_benchmark_reports()
+        landings = _fg.resolve_landings(lib)
     finally:
         lib.close()
     msg = (_digest_notice(_esc(error)) if error else "") + (_digest_notice(notice, "info") if notice else "")
+    _how = {"manual": "set here", "landing_url": "stored landing URL", "article": "from the linked digest",
+            "digest_slug": "from the digest with this slug", "none": ""}
+
+    def _landing_cell(r) -> str:
+        land = landings.get(r["report_slug"], {"url": "", "how": "none"})
+        if land["url"]:
+            shown = (f'<a href="{_esc(land["url"])}" target="_blank" rel="noopener" '
+                     f'style="overflow-wrap:anywhere;">{_esc(land["url"])}</a>'
+                     f'<span style="display:block;font-size:12px;color:var(--muted);">{_how[land["how"]]}</span>')
+        else:
+            shown = ('<span style="color:var(--alert);font-weight:600;">Not set</span>'
+                     '<span style="display:block;font-size:12px;color:var(--muted);">'
+                     'Cited by name, with &ldquo;no link on file&rdquo;.</span>')
+        manual = _esc(r.get("landing_url_manual") or "")
+        form = (f'<form method="post" action="/admin/reader/figures/landing" '
+                f'style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">'
+                f'<input type="hidden" name="report_slug" value="{_esc(r["report_slug"])}">'
+                f'<label for="landing-{_esc(r["report_slug"])}" style="position:absolute;left:-9999px;">Landing URL for {_esc(r["report_slug"])}</label>'
+                f'<input type="url" id="landing-{_esc(r["report_slug"])}" name="landing_url" value="{manual}" '
+                f'placeholder="https://" style="flex:1 1 220px;min-width:0;max-width:100%;font-size:13px;padding:6px 8px;">'
+                f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save</button></form>')
+        return shown + form
+
     report_rows = "".join(
-        f'<tr><td style="padding:10px 12px;font-size:13px;overflow-wrap:anywhere;">{_esc(r["report_slug"])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;">{_esc(r["report"])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;">{_esc(r["report_year"])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;'
+        f'<tr><td style="padding:10px 12px;font-size:13px;overflow-wrap:anywhere;vertical-align:top;">{_esc(r["report_slug"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_esc(r["report"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_esc(r["report_year"])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;'
         + ("color:var(--alert);font-weight:600;" if r["stored_rows"] != r["row_count"] else "")
         + f'">{r["stored_rows"]:,} of {r["row_count"]:,}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;">{_esc((r["loaded_at"] or "")[:10])}</td></tr>'
+        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc((r["loaded_at"] or "")[:10])}</td>'
+        f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;">{_landing_cell(r)}</td></tr>'
         for r in reports)
-    reports_table = (f"""<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">
+    linked = sum(1 for v in landings.values() if v["url"])
+    link_summary = (f'<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;">{linked:,} of {len(landings):,} reports '
+                    f'have a landing URL. FP&amp;A Buddy links each figure to it; a report without one is cited by name with &ldquo;no link on file&rdquo;.</p>'
+                    if landings else "")
+    reports_table = (f"""{link_summary}<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
+<table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
 <thead><tr style="background:var(--accent-light);">
   <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_NAME}px;">Report slug</th>
   <th style="{_FIGURES_TH}">Report</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_COUNT}px;">Year</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Rows stored</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_DATE}px;">Loaded</th>
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_MESSAGE}px;">Landing URL</th>
 </tr></thead>
 <tbody>{report_rows}</tbody>
 </table>
@@ -37852,6 +37889,33 @@ async def admin_figures_load(request: Request):
 <p style="margin:18px 0 0;"><a href="/admin/reader/figures" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Back to Benchmark figures</a></p>
 </div>"""
     return HTMLResponse(_page("Figures loaded—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/reader/figures/landing", response_class=HTMLResponse)
+async def admin_figures_landing(request: Request):
+    """Sets or clears one report's admin-typed landing URL (Phase B, B0)."""
+    _digest_gate(request, post=True)
+    form = await request.form()
+    slug = str(form.get("report_slug") or "").strip()
+    url = str(form.get("landing_url") or "").strip()
+
+    def _work():
+        lib = _lib()
+        try:
+            try:
+                ok = lib.set_report_landing_manual(slug, url)
+            except ValueError as e:
+                return str(e), False
+            if ok:
+                _log_archive_audit(lib, request, "edit", None,
+                                   detail=f"benchmark report landing URL {'set' if url else 'cleared'}: {slug}")
+            return ("" if ok else "That report is not loaded."), ok
+        finally:
+            lib.close()
+    msg, ok = await run_in_threadpool(_work)
+    if not ok:
+        return _figures_page(error=msg, status=400)
+    return _figures_page(notice=_esc(f"Landing URL {'saved' if url else 'cleared'} for {slug}."))
 
 
 @app.post("/admin/reader/figures/registry", response_class=HTMLResponse)
@@ -41684,6 +41748,12 @@ _mcp_toolbox.register_toolbox_tools(_mcp, _lib)
 from webapp import mcp_library as _mcp_library  # noqa: E402
 
 _mcp_library.register_library_tools(_mcp, _lib, OPML_PATH)
+
+# Phase B (#738): benchmark-figure tools (find_figures, coverage, get_digest,
+# metric_definition), admin-role only. See webapp/mcp_figures.py.
+from webapp import mcp_figures as _mcp_figures  # noqa: E402
+
+_mcp_figures.register_figures_tools(_mcp, _lib)
 
 # MCP Phase 5: FP&A Buddy & Matchmaker proxy tools (ask_fpa_buddy,
 # ask_matchmaker) — any valid token, any role (require_caller, same as

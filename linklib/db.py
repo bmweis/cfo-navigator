@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import sys
@@ -1651,6 +1652,9 @@ CREATE TABLE IF NOT EXISTS benchmark_reports (
     report_year TEXT NOT NULL DEFAULT '',
     landing_url TEXT,
     article_id  INTEGER,
+    -- Phase B: an admin-typed landing URL; a reload never touches it, and it
+    -- wins over landing_url (figures.resolve_landings).
+    landing_url_manual TEXT NOT NULL DEFAULT '',
     row_count   INTEGER NOT NULL DEFAULT 0,
     sha256      TEXT NOT NULL DEFAULT '',
     loaded_at   TEXT NOT NULL,
@@ -1982,6 +1986,7 @@ class Library:
         # Migrate: add columns that were added after initial schema
         for _col_sql in [
             "ALTER TABLE model_catalog ADD COLUMN allowed_roles TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE benchmark_reports ADD COLUMN landing_url_manual TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tools ADD COLUMN vendor_email TEXT NOT NULL DEFAULT ''",
@@ -8123,6 +8128,18 @@ class Library:
             self.conn.rollback()
             raise
         return {"replaced": old, "loaded": len(rows)}
+
+    def set_report_landing_manual(self, report_slug: str, url: str) -> bool:
+        """Set (or clear, with "") the admin-typed landing URL of a loaded
+        report. http(s) only. Returns False for an unknown report; raises
+        ValueError for a URL that is not http(s)."""
+        url = (url or "").strip()
+        if url and not re.match(r"^https?://[^\s]+$", url, re.I):
+            raise ValueError("The landing URL must start with http:// or https:// and have no spaces.")
+        cur = self.conn.execute("UPDATE benchmark_reports SET landing_url_manual = ? WHERE report_slug = ?",
+                                (url, report_slug))
+        self.conn.commit()
+        return cur.rowcount == 1
 
     def list_benchmark_reports(self) -> list[dict]:
         rows = self.conn.execute(

@@ -348,3 +348,560 @@ def parse_registry_tsv(text: str) -> tuple[list[RegistryRow], list[str]]:
     if not rows and not errors:
         errors.append("The file has no rows.")
     return rows, errors
+
+
+# =============================================================================
+# Phase B (issue #738): the query layer. No model calls, no HTML, read-only.
+# Everything below takes an open Library and returns plain dicts, so the admin
+# MCP tools (webapp/mcp_figures.py) and FP&A Buddy's pre-step
+# (linklib/benchmark_prestep.py) read the same stored figures the same way.
+# =============================================================================
+import statistics as _stats
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+# Severity order of a figure's `match` flag: the worst gap on a row names it,
+# and `gaps` lists every gap in words. `different_statistic` and
+# `different_segment` extend the brief's list: without them a p25 row served
+# for a median question would have to be called one of the others.
+MATCH_ORDER = ("exact", "adjacent_band", "different_segment", "different_statistic",
+               "different_basis", "different_definition", "related_metric")
+_MATCH_RANK = {m: i for i, m in enumerate(MATCH_ORDER)}
+
+DEFAULT_LIMIT = 60
+NO_LINK_NOTE = "no link on file"
+
+
+def _lc(s) -> str:
+    return " ".join(str(s or "").split()).casefold()
+
+
+# --- landing URLs (B0) ---------------------------------------------------------
+
+def strip_digest_param(url: str) -> str:
+    """The URL without its `digest` query parameter (other parameters stay)."""
+    p = urlsplit((url or "").strip())
+    q = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True) if k != "digest"]
+    return urlunsplit((p.scheme, p.netloc, p.path, urlencode(q), ""))
+
+
+def _digest_slug_of(url: str) -> str:
+    for k, v in parse_qsl(urlsplit(url or "").query, keep_blank_values=True):
+        if k == "digest":
+            return v
+    return ""
+
+
+def resolve_landings(lib) -> dict[str, dict]:
+    """report_slug -> {"url", "how"} for every loaded report. Order: the
+    admin-set URL, then landing_url, then the linked digest article (digest
+    parameter removed), then the one digest article whose URL carries
+    ?digest=<report_slug>. `how` is manual | landing_url | article |
+    digest_slug | none (url is ""). Several candidates is "none": never a guess."""
+    digests: dict[str, list[str]] = {}
+    for r in lib.conn.execute("SELECT url FROM articles WHERE url LIKE '%digest=%'"):
+        slug = _digest_slug_of(r["url"])
+        if slug:
+            digests.setdefault(slug, []).append(r["url"])
+    out: dict[str, dict] = {}
+    # A database opened read-only before the Phase B migration has no manual
+    # column yet (scripts/report_figure_landings.py); read it as empty.
+    has_manual = any(c[1] == "landing_url_manual"
+                     for c in lib.conn.execute("PRAGMA table_info(benchmark_reports)"))
+    manual_sql = "landing_url_manual" if has_manual else "'' AS landing_url_manual"
+    for r in lib.conn.execute(
+            f"SELECT report_slug, landing_url, {manual_sql}, article_id FROM benchmark_reports"):
+        slug = r["report_slug"]
+        url, how = "", "none"
+        if (r["landing_url_manual"] or "").strip():
+            url, how = r["landing_url_manual"].strip(), "manual"
+        elif (r["landing_url"] or "").strip():
+            url, how = strip_digest_param(r["landing_url"]), "landing_url"
+        elif r["article_id"]:
+            a = lib.conn.execute("SELECT url FROM articles WHERE id = ?", (r["article_id"],)).fetchone()
+            if a and a["url"]:
+                url, how = strip_digest_param(a["url"]), "article"
+        if not url and len(digests.get(slug, [])) == 1:
+            url, how = strip_digest_param(digests[slug][0]), "digest_slug"
+        out[slug] = {"url": url, "how": how}
+    return out
+
+
+# --- metric resolution (B1) ----------------------------------------------------
+
+def _load_metric_index(lib) -> dict:
+    """canonical (lowercase) -> display name; alias (lowercase) -> set of
+    canonical names. Aliases come from metric_aliases AND from each registry
+    row's Contains line, because metric_aliases keeps one owner per alias (the
+    seed's first-wins rule) while the Contains lines show every claimant. An
+    alias a human edited (edited=1) is that metric's alone."""
+    canon: dict[str, str] = {}
+    card: dict[str, str] = {}
+    claims: dict[str, set[str]] = {}
+    for r in lib.conn.execute("SELECT canonical_metric, card_url, aliases_line FROM metric_registry"):
+        c = r["canonical_metric"]
+        canon[c.casefold()] = c
+        card[c] = r["card_url"] or ""
+        for a in split_aliases(r["aliases_line"]):
+            claims.setdefault(a, set()).add(c)
+    for r in lib.conn.execute("SELECT alias, canonical_metric, edited FROM metric_aliases"):
+        a = r["alias"].casefold()
+        if r["edited"]:
+            claims[a] = {r["canonical_metric"]}
+        else:
+            claims.setdefault(a, set()).add(r["canonical_metric"])
+    mapped: dict[str, set[str]] = {}
+    for r in lib.conn.execute(
+            "SELECT raw_name_lower, canonical_metric FROM metric_name_map WHERE canonical_metric IS NOT NULL AND canonical_metric <> ''"):
+        mapped.setdefault(r["canonical_metric"], set()).add(r["raw_name_lower"].casefold())
+    return {"canon": canon, "card": card, "claims": claims, "mapped": mapped}
+
+
+def resolve_metric(lib, text: str, _index: dict | None = None) -> list[dict]:
+    """[{canonical, match}] for a metric phrase. An exact canonical name beats
+    any alias. An alias claimed by several metrics returns all of them with
+    match "ambiguous_alias". An unknown phrase returns []."""
+    idx = _index or _load_metric_index(lib)
+    t = _lc(text)
+    if not t:
+        return []
+    if t in idx["canon"]:
+        return [{"canonical": idx["canon"][t], "match": "canonical"}]
+    owners = sorted(idx["claims"].get(t, ()))
+    if len(owners) == 1:
+        return [{"canonical": owners[0], "match": "alias"}]
+    if len(owners) > 1:
+        return [{"canonical": o, "match": "ambiguous_alias"} for o in owners]
+    for c, names in idx["mapped"].items():
+        if t in names:
+            return [{"canonical": c, "match": "name_map"}]
+    return []
+
+
+def _names_for(idx: dict, canonical: str) -> set[str]:
+    names = {canonical.casefold()}
+    names |= {a for a, owners in idx["claims"].items() if canonical in owners}
+    names |= idx["mapped"].get(canonical, set())
+    return names
+
+
+def detect_metrics(lib, text: str) -> list[dict]:
+    """Metric mentions in free text, by rules only: every registry name or
+    alias that appears as whole words, longest phrase first, a phrase inside a
+    longer one already found is dropped. [{canonical, term, match}] in order of
+    appearance. No model call."""
+    idx = _load_metric_index(lib)
+    low = _lc(text)
+    terms: dict[str, str] = {}
+    for c in idx["canon"]:
+        terms[c] = "canonical"
+    for a in idx["claims"]:
+        terms.setdefault(a, "alias")
+    for c, names in idx["mapped"].items():
+        for n in names:
+            terms.setdefault(n, "name_map")
+    found: list[tuple[int, int, str]] = []
+    taken: list[tuple[int, int]] = []
+    for term in sorted(terms, key=len, reverse=True):
+        if len(term) < 3:
+            continue
+        m = re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", low)
+        if not m:
+            continue
+        s, e = m.span()
+        if any(s >= ts and e <= te for ts, te in taken):
+            continue
+        taken.append((s, e))
+        found.append((s, e, term))
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for s, e, term in sorted(found):
+        for r in resolve_metric(lib, term, idx):
+            key = (r["canonical"], term)
+            if key not in seen:
+                seen.add(key)
+                out.append({"canonical": r["canonical"], "term": term, "match": r["match"]})
+    return out
+
+
+# --- bands ---------------------------------------------------------------------
+
+_BAND_NUM = re.compile(r"(\d+(?:\.\d+)?)\s*([kmb])?(?![a-z])", re.I)
+_UNIT = {"k": 1e3, "m": 1e6, "b": 1e9}
+
+
+def parse_band(text) -> dict | None:
+    """Parse a printed band only so bands can be ordered and compared; the
+    printed text is always kept verbatim elsewhere. {lo, hi, kind} where kind
+    is money ($), pct (%) or count; hi may be inf. None when it cannot be
+    read ("All", "n/a")."""
+    s = str(text or "").strip().lower()
+    if not s:
+        return None
+    s = s.replace(",", "").replace("–", "-").replace("—", "-").replace("−", "-")
+    s = re.sub(r"\bto\b", "-", s)
+    kind = "money" if "$" in s else ("pct" if "%" in s else "count")
+    nums = [(float(m.group(1)), (m.group(2) or "").lower()) for m in _BAND_NUM.finditer(s)]
+    if not nums:
+        return None
+    if kind == "count" and any(u for _, u in nums):
+        kind = "money"
+    if len(nums) >= 2:
+        (a, ua), (b, ub) = nums[0], nums[1]
+        ua = ua or ub
+        lo, hi = a * _UNIT.get(ua, 1), b * _UNIT.get(ub, 1)
+        if hi < lo:
+            lo, hi = hi, lo
+        return {"lo": lo, "hi": hi, "kind": kind}
+    n, u = nums[0]
+    v = n * _UNIT.get(u, 1)
+    if re.search(r"(<|under|below|less than|up to)", s):
+        return {"lo": 0.0, "hi": v, "kind": kind}
+    if re.search(r"(>|over|above|more than|at least)|\+", s):
+        return {"lo": v, "hi": float("inf"), "kind": kind}
+    return {"lo": v, "hi": v, "kind": kind}
+
+
+_BASIS = {"annual recurring revenue": "arr", "arr": "arr", "revenue": "revenue",
+          "annual revenue": "revenue", "employees": "employees", "headcount": "employees",
+          "fte": "employees", "ftes": "employees"}
+
+
+def _basis_key(s) -> str:
+    t = _lc(s)
+    return _BASIS.get(t, t)
+
+
+# --- editions ------------------------------------------------------------------
+
+_YEAR_IN_NAME = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def _family(row: dict) -> tuple[str, str]:
+    name = _YEAR_IN_NAME.sub("", row.get("report") or "")
+    return (_lc(row.get("source")), _lc(name))
+
+
+def _year_num(y) -> int:
+    m = re.search(r"\d{4}", str(y or ""))
+    return int(m.group()) if m else -1
+
+
+# --- find_figures --------------------------------------------------------------
+
+_FTS_STOP = {"the", "of", "and", "for", "a", "an", "in", "to", "per", "by", "rate", "ratio", "metric"}
+
+
+def _fts_metric_rows(lib, text: str, cap: int = 400) -> list[dict]:
+    toks = [t for t in re.findall(r"[a-z0-9]+", _lc(text)) if len(t) > 2 and t not in _FTS_STOP]
+    if not toks:
+        return []
+    q = "metric : (" + " AND ".join(f'"{t}"' for t in toks) + ")"
+    try:
+        rows = lib.conn.execute(
+            """SELECT f.* FROM benchmark_figures_fts x JOIN benchmark_figures f ON f.id = x.rowid
+               WHERE benchmark_figures_fts MATCH ? ORDER BY bm25(benchmark_figures_fts) LIMIT ?""",
+            (q, cap)).fetchall()
+    except Exception:
+        return []
+    return [dict(r) for r in rows]
+
+
+def _row_out(r: dict, landings: dict, canonical: str) -> dict:
+    land = landings.get(r["report_slug"], {"url": "", "how": "none"})
+    return {
+        "report_slug": r["report_slug"], "source": r["source"], "report": r["report"],
+        "report_year": r["report_year"], "data_period": r["data_period"],
+        "band_basis": r["band_basis"], "band": r["band"], "segment": r["segment"],
+        "metric": r["metric"], "canonical_metric": canonical, "denominator": r["denominator"],
+        "statistic": r["statistic"], "value": r["value"], "value_num": r["value_num"],
+        "unit": r["unit"], "n": r["n"], "page": r["page"],
+        "link": land["url"], "link_note": "" if land["url"] else NO_LINK_NOTE,
+        "match": "exact", "gaps": [],
+    }
+
+
+def _flag(row: dict, match: str, gap: str) -> None:
+    row["gaps"].append(gap)
+    if _MATCH_RANK[match] > _MATCH_RANK[row["match"]]:
+        row["match"] = match
+
+
+def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year=None,
+                 basis=None, denominator=None, all_editions: bool = False,
+                 limit: int = DEFAULT_LIMIT) -> dict:
+    """Stored figures for a metric, exact matches first, every gap disclosed.
+
+    Returns {rows, resolution, notes, total_matching, returned, truncated,
+    unplaced_bands}. Each row carries the figure's own fields verbatim plus
+    `match` (see MATCH_ORDER), `gaps` (plain-words list of how it differs from
+    the request), `canonical_metric` and `link` (the report's landing URL, or
+    "" with link_note "no link on file"). Within each report, rows that agree
+    with a requested basis, denominator, segment or statistic are kept and the
+    rest dropped; when none agree, the report's rows are kept and flagged.
+    A requested band returns the containing band, or else the bands either
+    side. The newest edition per publisher and report family is used unless
+    all_editions=True or `year` is given."""
+    idx = _load_metric_index(lib)
+    landings = resolve_landings(lib)
+    notes: list[str] = []
+    resolution = resolve_metric(lib, metric, idx)
+    ambiguous = len(resolution) > 1 and all(r["match"] == "ambiguous_alias" for r in resolution)
+    if ambiguous:
+        notes.append(f"'{metric}' is used for more than one metric ("
+                     + ", ".join(r["canonical"] for r in resolution)
+                     + "); figures for each are returned and none is assumed.")
+
+    cand: list[tuple[dict, str]] = []     # (row, canonical)
+    seen_ids: set[int] = set()
+    related = False
+    targets = [r["canonical"] for r in resolution]
+    for canonical in targets:
+        names = _names_for(idx, canonical) | {_lc(metric)}
+        marks = ",".join("?" for _ in names)
+        for r in lib.conn.execute(
+                f"SELECT * FROM benchmark_figures WHERE lower(trim(metric)) IN ({marks})", tuple(names)):
+            if r["id"] not in seen_ids:
+                seen_ids.add(r["id"])
+                cand.append((dict(r), canonical))
+    if not resolution:
+        for r in lib.conn.execute("SELECT * FROM benchmark_figures WHERE lower(trim(metric)) = ?", (_lc(metric),)):
+            seen_ids.add(r["id"])
+            cand.append((dict(r), ""))
+    if not cand:
+        for r in _fts_metric_rows(lib, metric):
+            cand.append((r, targets[0] if len(targets) == 1 else ""))
+        related = bool(cand)
+        if related:
+            notes.append(f"No figure is stored under '{metric}' or a registered name for it; these are "
+                         "figures whose metric name contains the same words, which may measure something different.")
+
+    rows = [_row_out(r, landings, canon) for r, canon in cand]
+    for row in rows:
+        if related:
+            _flag(row, "related_metric", "metric name only partly matches the request")
+        if ambiguous:
+            _flag(row, "different_definition", "the requested term names more than one metric")
+
+    if year is not None and str(year).strip():
+        want = _year_num(year)
+        rows = [r for r in rows if _year_num(r["report_year"]) == want]
+        if not rows:
+            notes.append(f"No stored figure for that metric is from a {year} edition.")
+
+    # Per-report refinement: keep rows that agree with a request, else flag.
+    by_report: dict[str, list[dict]] = {}
+    for r in rows:
+        by_report.setdefault(r["report_slug"], []).append(r)
+    asks = [("band_basis", basis, _basis_key, "different_basis", "basis"),
+            ("denominator", denominator, _lc, "different_basis", "denominator"),
+            ("segment", segment, _lc, "different_segment", "segment"),
+            ("statistic", statistic, _lc, "different_statistic", "statistic")]
+    for slug, grp in by_report.items():
+        for field_, want, norm, match, label in asks:
+            if want is None or not str(want).strip():
+                continue
+            agree = [r for r in grp if norm(r[field_]) == norm(want)]
+            if agree:
+                grp[:] = agree
+            else:
+                for r in grp:
+                    _flag(r, match, f"{label}: report prints '{r[field_] or 'not stated'}', you asked for '{want}'")
+    rows = [r for grp in by_report.values() for r in grp]
+
+    # Band: containing band, else the bands either side, per report and basis.
+    unplaced = 0
+    pb = parse_band(band) if band not in (None, "") else None
+    if band not in (None, "") and pb is None:
+        notes.append(f"The requested band '{band}' could not be read, so bands were not matched.")
+    if pb is not None:
+        groups: dict[tuple, list[dict]] = {}
+        for r in rows:
+            groups.setdefault((r["report_slug"], _basis_key(r["band_basis"])), []).append(r)
+        kept: list[dict] = []
+        for g in groups.values():
+            placed = [(r, parse_band(r["band"])) for r in g]
+            ok = [(r, b) for r, b in placed if b is not None and b["kind"] == pb["kind"]]
+            unplaced += len(g) - len(ok)
+            inside = [r for r, b in ok if b["lo"] <= pb["lo"] and pb["hi"] <= b["hi"]
+                      or _lc(r["band"]) == _lc(band)]
+            if inside:
+                kept += inside
+                continue
+            overlap = [(r, b) for r, b in ok if b["lo"] <= pb["hi"] and pb["lo"] <= b["hi"]]
+            if overlap:
+                for r, _ in overlap:
+                    _flag(r, "adjacent_band", f"band: report prints '{r['band']}', you asked for '{band}'")
+                kept += [r for r, _ in overlap]
+                continue
+            below = [(r, b) for r, b in ok if b["hi"] <= pb["lo"]]
+            above = [(r, b) for r, b in ok if b["lo"] >= pb["hi"]]
+            pick = []
+            if below:
+                top = max(b["hi"] for _, b in below)
+                pick += [r for r, b in below if b["hi"] == top]
+            if above:
+                bot = min(b["lo"] for _, b in above)
+                pick += [r for r, b in above if b["lo"] == bot]
+            for r in pick:
+                _flag(r, "adjacent_band", f"band: report prints '{r['band']}', you asked for '{band}'")
+            kept += pick
+        rows = kept
+        if unplaced:
+            notes.append(f"{unplaced} figure(s) have a band that cannot be placed against a size "
+                         "(for example 'All') and were left out of the band match.")
+
+    # Editions.
+    if not all_editions and not (year is not None and str(year).strip()):
+        newest: dict[tuple, int] = {}
+        for r in rows:
+            f = _family(r)
+            newest[f] = max(newest.get(f, -1), _year_num(r["report_year"]))
+        older = sorted({(r["report"], r["report_year"]) for r in rows
+                        if _year_num(r["report_year"]) < newest[_family(r)]})
+        rows = [r for r in rows if _year_num(r["report_year"]) == newest[_family(r)]]
+        if older:
+            notes.append("Older editions exist and were left out: "
+                         + "; ".join(f"{n} ({y})" for n, y in older)
+                         + ". Ask for all editions to see change over time.")
+        rep = {r["report_slug"]: r for r in lib.list_benchmark_reports()}
+        for fam, y in newest.items():
+            later = [x for x in rep.values() if _family(x) == fam and _year_num(x["report_year"]) > y]
+            if later:
+                notes.append(f"The newest {later[0]['report'] or fam[1]} on file ({later[0]['report_year']}) "
+                             f"has no figure for this; the {y} edition is the newest that does.")
+
+    rows.sort(key=lambda r: (_MATCH_RANK[r["match"]],
+                             -_year_num(r["report_year"]) if not all_editions else _year_num(r["report_year"]),
+                             r["source"], r["report"], r["band_basis"],
+                             (parse_band(r["band"]) or {"lo": 0})["lo"], r["statistic"]))
+    total = len(rows)
+    truncated = total > limit
+    if truncated:
+        notes.append(f"{total} figures match; showing the first {limit}. Narrow the request (band, segment, statistic, year).")
+        rows = rows[:limit]
+    return {"rows": rows, "resolution": resolution, "notes": notes, "total_matching": total,
+            "returned": len(rows), "truncated": truncated, "unplaced_bands": unplaced}
+
+
+# --- coverage ------------------------------------------------------------------
+
+def coverage(lib, metric: str | None = None) -> dict:
+    """What can be asked for: reports (with year, link status), bands, bases,
+    segments, statistics and denominators present, optionally for one metric."""
+    landings = resolve_landings(lib)
+    where, args = "", ()
+    resolution: list[dict] = []
+    if metric:
+        idx = _load_metric_index(lib)
+        resolution = resolve_metric(lib, metric, idx)
+        names = {_lc(metric)}
+        for r in resolution:
+            names |= _names_for(idx, r["canonical"])
+        where = f"WHERE lower(trim(metric)) IN ({','.join('?' for _ in names)})"
+        args = tuple(names)
+    cur = lib.conn.execute(
+        f"""SELECT report_slug, source, report, report_year, band_basis, band, segment,
+                   denominator, statistic FROM benchmark_figures {where}""", args)
+    reports: dict[str, dict] = {}
+    sets = {k: set() for k in ("bands", "band_basis", "segments", "statistics", "denominators")}
+    for r in cur:
+        d = reports.setdefault(r["report_slug"], {
+            "report_slug": r["report_slug"], "source": r["source"], "report": r["report"],
+            "report_year": r["report_year"], "figures": 0,
+            "link": landings.get(r["report_slug"], {}).get("url", "")})
+        d["figures"] += 1
+        sets["bands"].add(r["band"])
+        sets["band_basis"].add(r["band_basis"])
+        sets["segments"].add(r["segment"])
+        sets["statistics"].add(r["statistic"])
+        sets["denominators"].add(r["denominator"])
+    return {"metric": metric, "resolution": resolution,
+            "reports": sorted(reports.values(), key=lambda d: (d["source"], d["report_year"], d["report"])),
+            **{k: sorted(v, key=lambda s: ((parse_band(s) or {"lo": 1e18})["lo"], s)) if k == "bands" else sorted(v)
+               for k, v in sets.items()}}
+
+
+# --- digests and metric cards -------------------------------------------------
+
+def _article_out(a: dict) -> dict:
+    return {"article_id": a["id"], "title": a.get("title") or "", "url": a.get("url") or "",
+            "source": a.get("source") or "", "published_at": a.get("published_at") or "",
+            "summary": a.get("summary") or "", "text": a.get("content") or ""}
+
+
+def get_digest(lib, ref) -> dict | None:
+    """The FULL stored text of a benchmark digest, by article id or report
+    slug. Bypasses the Buddy prompt cut-off. None when nothing matches or the
+    article is not a digest."""
+    from .db import DIGEST_TAG
+    s = str(ref).strip()
+    art = None
+    if s.isdigit():
+        art = lib.get_article(int(s))
+    if art is None and s:
+        row = lib.conn.execute("SELECT article_id FROM benchmark_reports WHERE report_slug = ?", (s,)).fetchone()
+        if row and row["article_id"]:
+            art = lib.get_article(row["article_id"])
+        if art is None:
+            hits = [r["id"] for r in lib.conn.execute("SELECT id, url FROM articles WHERE url LIKE ?", (f"%digest={s}%",))
+                    if _digest_slug_of(r["url"]) == s]
+            if len(hits) == 1:
+                art = lib.get_article(hits[0])
+    if not art or DIGEST_TAG not in (art.get("tags") or []):
+        return None
+    return _article_out(art)
+
+
+def _slugify(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", _lc(name)).strip("-")
+
+
+def metric_card(lib, canonical: str, card_url: str = "") -> dict | None:
+    """The combined metric card (workbook definition) for a canonical metric:
+    the Archive article at the registry's card URL, else the digest article
+    saas-metric-<name>."""
+    art = lib.get_article_by_url(card_url) if card_url else None
+    if art is None:
+        slug = "saas-metric-" + _slugify(canonical)
+        hits = [r["id"] for r in lib.conn.execute("SELECT id, url FROM articles WHERE url LIKE ?", (f"%digest={slug}%",))
+                if _digest_slug_of(r["url"]) == slug]
+        art = lib.get_article(hits[0]) if len(hits) == 1 else None
+    return _article_out(art) if art else None
+
+
+def metric_definition(lib, name: str) -> dict:
+    """The workbook card and alias list for a metric. {"found": False} when
+    the name is not in the registry. An alias used by several metrics returns
+    every card, flagged ambiguous. `card` is None when the registry knows the
+    metric but no card article is stored."""
+    idx = _load_metric_index(lib)
+    res = resolve_metric(lib, name, idx)
+    if not res:
+        return {"found": False, "name": name, "metrics": []}
+    out = []
+    for r in res:
+        c = r["canonical"]
+        out.append({"canonical_metric": c, "match": r["match"], "aliases": sorted(_names_for(idx, c) - {c.casefold()}),
+                    "card": metric_card(lib, c, idx["card"].get(c, ""))})
+    return {"found": True, "name": name, "ambiguous": len(res) > 1 and res[0]["match"] == "ambiguous_alias",
+            "metrics": out, "precedence": "The workbook card governs; other sources define it differently, newest first."}
+
+
+# --- cross-report summary ------------------------------------------------------
+
+def summarize(rows: list[dict]) -> dict:
+    """Median, min and max over rows, only when every row agrees on basis,
+    denominator, band, segment, statistic and unit and has a numeric value.
+    Otherwise refuses and says why. Any number returned is labelled
+    "derived, not in report"."""
+    rows = [r for r in rows]
+    if len(rows) < 2:
+        return {"refused": True, "reason": "fewer than two figures; nothing to summarize"}
+    if any(r.get("value_num") is None for r in rows):
+        return {"refused": True, "reason": "at least one figure has a value that is not a plain number"}
+    for f in ("band_basis", "denominator", "band", "segment", "statistic", "unit", "canonical_metric"):
+        if len({_lc(r.get(f)) for r in rows}) > 1:
+            return {"refused": True, "reason": f"the figures differ in {f.replace('_', ' ')}, so a combined number would mix things that are not the same"}
+    vals = [float(r["value_num"]) for r in rows]
+    return {"refused": False, "label": "derived, not in report", "count": len(vals),
+            "median": _stats.median(vals), "min": min(vals), "max": max(vals), "unit": rows[0].get("unit", "")}

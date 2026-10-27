@@ -1276,7 +1276,7 @@ later drift scan would eventually flag it.
 | `tool_feature_links` | One row per (tool, feature) — the vendor-specific designations (rules doc §6) live here, never on the feature itself, since the same feature is native/rules-based at one vendor and an add-on/AI-driven at another. `availability` is a real `CHECK` constraint (`native`\|`add_on`) — absence of a row is the third state ("not available"), never a stored value. `verified_as_of` is required per link (claims decay fast). `note` is the internal curation log, never shown publicly; `public_note` (2026-09) is the separate, visitor-facing vendor text, empty until Brian writes it, capped at `Library.FEATURE_LINK_PUBLIC_NOTE_MAX` (refused, never shortened) and left untouched by an upsert that doesn't pass it. Toggled from a checklist on each tool's own `/tools/software/{slug}/edit` page (`Library.upsert_tool_feature_link`/`delete_tool_feature_link`, via `POST /admin/tools/software/{tool_id}/feature-links/save`) — a direct admin edit, not routed through the review queue below, since the queue exists for scan/public proposals and admin fast-path logging, and a manual checklist toggle on the tool's own page already *is* the admin editing directly. **`Library.delete_tool`'s cascade fix (2026-08, see the `tool_audit_log` row above) deletes a deleted tool's own rows here** rather than leaving them orphaned. | `tool_id`, `feature_id` (composite unique) |
 | `feature_review_queue` | The review gate (rules doc §9) — no proposed change reaches `category_features`/`tool_feature_links` without landing here first and being approved by a human, regardless of who or what proposed it. `source` (`admin`\|`scan`\|`public`) distinguishes an admin's own fast-pathed edit, the (later, unscheduled) recurring AI scan, and the (later, unscheduled) public suggestion channel — `category_id`/`tool_id`/`submitter_name`/`submitter_email` are nullable now so those later phases don't need a migration to add them. `payload` is the proposed change as JSON (new feature, new link(s), or an existing-feature link) since the three sources produce structurally different proposals. Approving (`Library.approve_feature_review_queue_item`) applies `payload` through the exact same `add_category_feature`/`upsert_tool_feature_link` methods a manual edit would call — never a direct table write from the approval path itself; passing `override_payload` is "edit-then-approve" (status lands `edited` rather than `approved`) and is the same route/form as a verbatim approval, not a separate mechanism — the admin edit page's approve form doubles as the edit form, pre-filled from the stored payload. `/admin/tools/software/feature-review-queue` lists pending items grouped by source with Approve/Deny actions; seeded with 15 pilot proposals (`source='scan'`) via `scripts/seed_feature_taxonomy.py`. **Merge confirmation step (Phase 1c, 2026-08):** when a `new_feature`-proposal Approve would resolve to an existing feature by exact case-insensitive name match in the category (`Library.find_category_feature_by_name`, extracted from `approve_feature_review_queue_item`'s own merge logic for reuse here) — the exact mechanism confirmed working in production on the Abacum/Aleph merge, 8/20 — the route now interposes a confirmation page (`_feature_merge_confirm_page`) naming the vendors already linked to the existing feature (`Library.list_tools_linked_to_feature`), with Merge (resubmits the identical approve request plus `confirm_merge=1`) and Change name (back to the queue page to edit the proposal's name first) actions, rather than merging silently. **`Library.delete_tool`'s cascade fix (2026-08, see the `tool_audit_log` row above) auto-denies any `pending` row naming a deleted tool** rather than leaving it pointing at nothing. | `status` (`pending`\|`approved`\|`edited`\|`denied`), `source` (`admin`\|`scan`\|`public`) |
 | `benchmarks` | The Resources page at `/tools/resources` (renamed from `/tools/benchmarks`/"Benchmarking" in the admin URL convention PR — URL/copy only, table name unchanged), managed at `/admin/tools/resources`. `_DEFAULT_BENCHMARKS` in `webapp/app.py` syncs the same way as `tools`: run by hand it adds any entry missing by URL and syncs `name`/`description` on existing rows via `Library.update_benchmark_content`, leaving `coverage`/`pricing` untouched so admin edits survive a re-sync — but the `_seed_toolbox` startup hook's per-boot pass over `_DEFAULT_BENCHMARKS` only performs that sync, same insert-never fix and same reasoning as `tools` above (no soft-delete column here either). `section` (`'benchmarking'`\|`'books'`, default `'benchmarking'`) splits the page into two headings — see "Resources — Book recommendations" below for the full write-up; `_DEFAULT_BENCHMARKS`/`_seed_toolbox` only ever cover the `'benchmarking'` rows, since a sync-only mechanism can't originate new `'books'` rows. | `coverage` (`Private`\|`Public`\|`Both`), `pricing` (`free`\|`paid`\|`freemium`), `section` (`benchmarking`\|`books`) |
-| `benchmark_reports` | One row per loaded benchmark-figures report (issue #738, Phase A), written by `Library.replace_benchmark_report` in the same transaction as its figures. `row_count`/`sha256` come from the zip's `MANIFEST.tsv`; the `/admin/checks` row "Figures loaded match their manifests" compares `row_count` with the figures stored. `landing_url`/`article_id` are set only when exactly one `benchmark-digest` article has the report name as its `source`. Not the `benchmarks` table above, which is the Resources page. See "Benchmark figures" below. | `report_slug` unique (CSV filename stem) |
+| `benchmark_reports` | One row per loaded benchmark-figures report (issue #738, Phase A), written by `Library.replace_benchmark_report` in the same transaction as its figures. `row_count`/`sha256` come from the zip's `MANIFEST.tsv`; the `/admin/checks` row "Figures loaded match their manifests" compares `row_count` with the figures stored. `landing_url`/`article_id` are set only when exactly one `benchmark-digest` article has the report name as its `source`. `landing_url_manual` (Phase B) is the URL an admin types on `/admin/reader/figures`; a reload never touches it and it wins over `landing_url`. Not the `benchmarks` table above, which is the Resources page. See "Benchmark figures" below. | `report_slug` unique (CSV filename stem) |
 | `benchmark_figures` | Every extracted figure: `report_slug`, `row_no` and the 16 CSV columns stored verbatim as TEXT (`source`, `report`, `report_year`, `data_period`, `band_basis`, `band`, `segment`, `metric`, `denominator`, `statistic`, `value`, `unit`, `n`, `page`, `read_from`, `note`), plus `value_num` (REAL, only when `value` is one plain number; `figures.parse_value_num`). `benchmark_figures_fts` (FTS5 over metric, segment, band, note, report) is kept in sync by triggers. Statistic names are stored as printed (`p75` is not merged with `top_quartile`). | `UNIQUE(report_slug, row_no)` |
 | `metric_registry`, `metric_aliases` | Brian's canonical metrics (card URL, the "Contains:" line) and their lowercase aliases, seeded from a TSV on `/admin/reader/figures` by `Library.seed_metric_registry` (idempotent; an alias with `edited=1` is never changed; an alias listed under two metrics keeps the first). | `metric_aliases.alias` primary key |
 | `metric_name_map` | Raw metric names (lowercase) to a canonical metric. Created empty in Phase A; a later job fills it. | `raw_name_lower` primary key |
@@ -4238,6 +4238,7 @@ erDiagram
         int row_count "from MANIFEST.tsv"
         text sha256
         int article_id "nullable"
+        text landing_url_manual "admin-typed, wins, never clobbered by a reload"
     }
     benchmark_figures {
         int id PK
@@ -6884,6 +6885,63 @@ can look numbers up exactly. Phase A changes no Buddy answer: nothing in
 | Page and routes | `webapp/app.py`: `GET /admin/reader/figures`, `POST .../preview` (writes nothing; carries the zip to the load as a base64 hidden field), `POST .../load` (re-parses the zip, never trusts the preview), `POST .../registry`. Admin session only: the save token gets 401. Hub card in the Reader group's "Add content" quadrant (`_LIBRARY_TOOLS`). |
 | Audit | One `archive_audit_log` row per load (action `add`) and one JSON line per load in `figures-audit.jsonl` beside the database (next to `restore-audit.jsonl`), so the history survives a restore. The line has the user, time, zip sha256 and each report's result. |
 | Invariant | `webapp.checks.figures_manifest_problems()` over `Library.figures_manifest_problems()`: every `benchmark_reports` row has exactly `row_count` figures, and no figure has a slug without a report record. A restore that swaps in an older database fails here, naming each missing or short report. |
+
+**Phase B1/B2: the query layer and the MCP tools (#738, no Buddy change yet).**
+`linklib/figures.py` gains read-only functions over these tables (no model
+call, no HTML, no write): `find_figures`, `coverage`, `get_digest`,
+`metric_definition`, `detect_metrics`, `resolve_metric`, `summarize`,
+`resolve_landings`. `webapp/mcp_figures.py` exposes the first four as
+admin-role-only MCP tools (the full digest text is never handed to a
+non-admin). `linklib.compare.MCP_PARITY` is not extended: it is an exact
+column registry for the four profile tables, and these are not profile
+tables; `tests/test_mcp_figures.py` refuses a non-admin token on every tool.
+
+- **Metric resolution.** Names come from `metric_registry` (canonical name
+  and the `Contains:` line), `metric_aliases` and `metric_name_map`. An exact
+  canonical name beats any alias. `metric_aliases` keeps one owner per alias
+  (the seed's first-wins rule), so claimants are read from every registry
+  row's `Contains:` line as well; an alias claimed by two metrics (`net new
+  mrr`, `capital efficiency` in the real seed) resolves to ALL of them with
+  match `ambiguous_alias`, and every figure found that way is flagged
+  `different_definition`. A human-edited alias (`edited=1`) is its metric's
+  alone. The seed file is not edited.
+- **`match` and `gaps`.** Each row carries the worst gap as `match`
+  (`exact`, `adjacent_band`, `different_segment`, `different_statistic`,
+  `different_basis`, `different_definition`, `related_metric`) and every gap in
+  `gaps` as plain words. `different_segment` and `different_statistic`
+  extend the brief's list: without them a p25 row served for a median
+  question would have no honest name. Statistics are returned as printed;
+  `p75` is never merged with `top_quartile`.
+- **Refinement is per report.** For a requested basis, denominator, segment
+  or statistic, rows that agree are kept and the rest dropped; a report with
+  no agreeing row keeps its rows, flagged. A requested band keeps the
+  containing printed band, else the bands either side (per report and basis),
+  flagged `adjacent_band`. Bands are parsed (`parse_band`) only for ordering;
+  the printed text is untouched. A band that cannot be placed ("All") is
+  counted in `unplaced_bands` and a note, never silently dropped.
+- **Editions.** Default is the newest `report_year` per publisher and report
+  family (the report name with its year removed). Older editions left out, and
+  a newer edition on file that has no such figure, are named in `notes`.
+  `all_editions=True` returns every edition, oldest first; `year` pins one.
+- **Not found is not stretched.** Rows come from the exact names first. Only
+  when none exist does a full-text search over the metric column run, and only
+  when every significant word matches (AND); those rows are `related_metric`.
+  Nothing close returns no rows and says so. Output is capped at `limit`
+  (default 60) with `total_matching` and a note.
+- **`summarize`** returns median, min and max only when every row agrees on
+  basis, denominator, band, segment, statistic, unit and metric and has a
+  numeric value; otherwise it refuses with the reason. The result is labelled
+  `derived, not in report`.
+- **Landing URLs (B0).** `resolve_landings` orders: the admin-typed
+  `landing_url_manual`, `landing_url`, the linked digest article, then the one
+  digest article whose URL carries `?digest=<report_slug>`; the `digest`
+  query parameter is removed; two candidates is "none", never a guess. A
+  report with none is cited by name with `link_note` "no link on file". The
+  reports table on `/admin/reader/figures` shows each report's landing URL
+  (or "Not set") with an inline field; `scripts/report_figure_landings.py`
+  reports the resolved count read-only.
+- **Metric cards.** `metric_card` finds the workbook definition at the
+  registry's card URL, else the digest article `saas-metric-<name>`.
 
 **Rejected, never coerced.** Per file: a header other than the 16 columns in
 order, a row with a field count other than 16, a row count, byte count or
