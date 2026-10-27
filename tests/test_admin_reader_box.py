@@ -85,7 +85,7 @@ def _disclosure_body(html, label):
     raise AssertionError(f"unbalanced <details> around {label!r}")
 
 
-QUADRANTS = ["Add content", "Existing archive management", "Tag management"]
+QUADRANTS = ["Add content", "Manage archive", "Tag management"]
 
 
 # --- the page is gone ------------------------------------------------------
@@ -205,9 +205,11 @@ def test_each_quadrant_holds_its_specified_tools(env):
         # "Add content" holds no cards — only the capture accordions. Manage
         # feeds moved out to its own sibling card in PR 35; see
         # test_manage_feeds_is_a_sibling_card_not_inside_a_quadrant.
-        "Existing archive management": ["/admin/reader/backfill-content",
-                                        "/admin/reader/dedupe",
-                                        "/admin/reader/bulk-delete"],
+        "Manage archive": ["/admin/reader/backfill-content",
+                           "/admin/reader/dedupe",
+                           "/admin/reader/bulk-delete",
+                           "/admin/reader/digests",
+                           "/admin/reader/figures"],
         "Tag management": ["/admin/reader/tag-management", "/admin/reader/enrich"],
     }
     for label, hrefs in expected.items():

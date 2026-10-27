@@ -685,7 +685,7 @@ def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
 # landing under the wrong heading), and it survives adding or removing a
 # sibling tool without an edit.
 
-_QUADRANTS = ["Add content", "Existing archive management", "Tag management"]
+_QUADRANTS = ["Add content", "Manage archive", "Tag management"]
 
 
 def _disclosure_body(html, label):
@@ -755,7 +755,7 @@ def test_quadrants_hold_the_tools_they_are_named_for(app_env):
     """Placement, not count — a tool under the wrong heading is the bug."""
     with _client(app_env) as client:
         html = client.get("/admin").text
-    existing = _quadrant(html, "Existing archive management")
+    existing = _quadrant(html, "Manage archive")
     assert 'href="/admin/reader/backfill-content"' in existing
     assert 'href="/admin/reader/dedupe"' in existing
     assert 'href="/admin/reader/bulk-delete"' in existing
