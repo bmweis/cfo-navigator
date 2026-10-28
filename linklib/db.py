@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import sqlite3
 import sys
@@ -1651,6 +1652,9 @@ CREATE TABLE IF NOT EXISTS benchmark_reports (
     report_year TEXT NOT NULL DEFAULT '',
     landing_url TEXT,
     article_id  INTEGER,
+    -- Phase B: an admin-typed landing URL; a reload never touches it, and it
+    -- wins over landing_url (figures.resolve_landings).
+    landing_url_manual TEXT NOT NULL DEFAULT '',
     row_count   INTEGER NOT NULL DEFAULT 0,
     sha256      TEXT NOT NULL DEFAULT '',
     loaded_at   TEXT NOT NULL,
@@ -1982,6 +1986,7 @@ class Library:
         # Migrate: add columns that were added after initial schema
         for _col_sql in [
             "ALTER TABLE model_catalog ADD COLUMN allowed_roles TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE benchmark_reports ADD COLUMN landing_url_manual TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tools ADD COLUMN vendor_email TEXT NOT NULL DEFAULT ''",
@@ -2765,6 +2770,11 @@ class Library:
             # for any turn where the call never completed; counts only
             # start after this deploy. No UI, measurement only.
             "ALTER TABLE ask_questions ADD COLUMN stop_reason TEXT NOT NULL DEFAULT ''",
+            # Benchmark pre-step (#738 Phase B4): the per-turn lookup log as
+            # JSON ('' when the pre-step did not run) and the split call's
+            # cost (already inside cost_usd; broken out like rewrite_cost_usd).
+            "ALTER TABLE ask_questions ADD COLUMN prestep_json TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE ask_questions ADD COLUMN prestep_cost_usd REAL NOT NULL DEFAULT 0",
             # FP&A Buddy Keep private (2026-10): 1 = the asker keeps this
             # conversation out of the member-visible past-questions list.
             # Set on every turn of a conversation together; admins still see it.
@@ -8124,6 +8134,18 @@ class Library:
             raise
         return {"replaced": old, "loaded": len(rows)}
 
+    def set_report_landing_manual(self, report_slug: str, url: str) -> bool:
+        """Set (or clear, with "") the admin-typed landing URL of a loaded
+        report. http(s) only. Returns False for an unknown report; raises
+        ValueError for a URL that is not http(s)."""
+        url = (url or "").strip()
+        if url and not re.match(r"^https?://[^\s]+$", url, re.I):
+            raise ValueError("The landing URL must start with http:// or https:// and have no spaces.")
+        cur = self.conn.execute("UPDATE benchmark_reports SET landing_url_manual = ? WHERE report_slug = ?",
+                                (url, report_slug))
+        self.conn.commit()
+        return cur.rowcount == 1
+
     def list_benchmark_reports(self) -> list[dict]:
         rows = self.conn.execute(
             """SELECT r.*, (SELECT COUNT(*) FROM benchmark_figures f
@@ -9496,7 +9518,9 @@ class Library:
                             is_private: bool = False,
                             web_scope: str = "",
                             failed: bool = False,
-                            error: str = "") -> int:
+                            error: str = "",
+                            prestep: Optional[dict] = None,
+                            prestep_cost_usd: float = 0.0) -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
@@ -9524,8 +9548,9 @@ class Library:
                 rewrite_input_tokens, rewrite_output_tokens, rewrite_cost_usd,
                 embed_input_tokens, embed_cost_usd,
                 exa_result_count, exa_cost_usd,
-                citations_json, stop_reason, is_private, web_scope, failed, error, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                citations_json, stop_reason, is_private, web_scope, failed, error,
+                prestep_json, prestep_cost_usd, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
@@ -9534,7 +9559,8 @@ class Library:
              exa_result_count, exa_cost_usd,
              json.dumps(citations or []), stop_reason or "", int(bool(is_private)),
              web_scope if web_scope in ("open", "trusted") else "",
-             int(bool(failed)), error if failed else "", now),
+             int(bool(failed)), error if failed else "",
+             json.dumps(prestep) if prestep else "", float(prestep_cost_usd or 0), now),
         )
         row_id = cur.lastrowid
         if not conversation_id:
@@ -9696,6 +9722,34 @@ class Library:
         self.set_setting("model_roles_seeded", "1")
         return {"seeded": True, "matchmaker": chat}
 
+    def seed_prestep_role(self) -> dict:
+        """One-time (own flag) append of the Question splitter role (#738
+        Phase B3) to the stored allowed_roles of models whose code default
+        includes it. Existing rows were seeded before the role existed, so
+        without this they would all read "not allowed" for it. Only adds; a
+        role an admin switched off for a model is never touched because the
+        append happens once, and nothing is ever removed."""
+        import json
+        from .models import default_allowed_roles, hard_block_reason
+        if self.get_setting("prestep_role_seeded") == "1":
+            return {"seeded": False}
+        added = 0
+        for r in self.list_model_catalog():
+            mid = r["model_id"]
+            try:
+                current = list(json.loads(r["allowed_roles"])) if r["allowed_roles"] else None
+            except ValueError:
+                current = None
+            if current is None or "prestep" in current:
+                continue
+            if "prestep" in default_allowed_roles(mid) and not hard_block_reason(mid, "prestep"):
+                self.conn.execute("UPDATE model_catalog SET allowed_roles=? WHERE model_id=?",
+                                  (json.dumps(current + ["prestep"]), mid))
+                added += 1
+        self.conn.commit()
+        self.set_setting("prestep_role_seeded", "1")
+        return {"seeded": True, "models": added}
+
     def model_allowed_roles(self, model_id: str) -> list[str]:
         import json
         from .models import default_allowed_roles
@@ -9761,9 +9815,11 @@ class Library:
         r = self.conn.execute("SELECT model_id FROM model_roles WHERE role=?", (role,)).fetchone()
         if r:
             return r["model_id"]
-        from .models import DEFAULT_CHAT_MODEL
+        from .models import DEFAULT_CHAT_MODEL, PRESTEP_DEFAULT_MODEL
         if role == "matchmaker":
             return DEFAULT_CHAT_MODEL
+        if role == "prestep":
+            return PRESTEP_DEFAULT_MODEL
         from .agent import EFFORT_SETTINGS
         return EFFORT_SETTINGS[role.removeprefix("buddy_")]["model"]
 

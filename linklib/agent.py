@@ -151,7 +151,8 @@ VOICE_FPA_BUDDY_DEFAULT = """You are FP&A Buddy: a trusted senior FP&A / strateg
 - No LinkedIn-shape devices—no hook lines, no emoji, no single closing aphorism. This is a direct answer, not a post."""
 
 
-def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library) -> str:
+def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library,
+                  benchmark_rules: bool = False) -> str:
     """Build the advisor system prompt, describing only the active source types.
 
     Voice: appends the DB-backed voice_core + voice_fpa_buddy settings.
@@ -212,7 +213,11 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library
         "best-effort answer.\n\n"
         "Voice — write every answer this way:\n"
         f"{voice}"
+        + (_PRESTEP_RULES if benchmark_rules else "")
     )
+
+
+from .benchmark_prestep import PRESTEP_RULES as _PRESTEP_RULES  # noqa: E402
 
 
 def _safe_fts_query(question: str) -> str:
@@ -390,6 +395,16 @@ class Answer:
     # view only. Cost already spent (rewrite/embedding/Exa) stays on the Answer.
     failed: bool = False
     error: str = ""
+    # Benchmark pre-step (#738 Phase B3): the per-turn log (detected metrics,
+    # split or fallback, sub-queries, rows, match mix, extra cost) as a dict,
+    # {} when the pre-step did not run. prestep_cost_usd (the split call) is
+    # already included in cost_usd; prestep_notice is a plain sentence shown to
+    # the user when a split was cut back to fit their remaining budget.
+    prestep: dict = field(default_factory=dict)
+    prestep_cost_usd: float = 0.0
+    prestep_input_tokens: int = 0
+    prestep_output_tokens: int = 0
+    prestep_notice: str = ""
 
 
 # Reuse one client across requests so its httpx connection pool stays warm —
@@ -439,7 +454,10 @@ def _rrf_merge(ranked_lists: list[list[dict]], limit: int, k: int = RRF_K) -> li
     return [items[i] for i in ordered[:limit]]
 
 
-def retrieve(lib: Library, question: str, max_sources: int = 8
+_UNSET = object()
+
+
+def retrieve(lib: Library, question: str, max_sources: int = 8, *, embedded=_UNSET
             ) -> tuple[list[dict], int, float]:
     """Hybrid library retrieval: FTS5 keyword search plus vector semantic
     search (sqlite-vec), merged by reciprocal rank fusion. Each path fetches
@@ -456,8 +474,11 @@ def retrieve(lib: Library, question: str, max_sources: int = 8
     if not lib.vector_search_available():
         return fts_hits[:max_sources], 0, 0.0
 
-    from .embeddings import embed_text
-    embedded = embed_text(question)
+    if embedded is _UNSET:
+        # `embedded` lets a caller that retrieves for several sub-queries embed
+        # them in parallel first (the pre-step); None means that embedding failed.
+        from .embeddings import embed_text
+        embedded = embed_text(question)
     if embedded is None or not embedded.vectors:
         return fts_hits[:max_sources], 0, 0.0
 
@@ -842,6 +863,7 @@ def answer_question(
     use_web: bool = False,
     opml_path: str | None = None,
     history: list[dict] | None = None,
+    budget_usd: float | None = None,
 ) -> Answer:
     """Answer a question from the configured sources.
 
@@ -874,6 +896,9 @@ def answer_question(
             history-aware rewrite of the question (falling back to the raw
             question if the rewrite fails); the answering prompt always
             carries the raw question verbatim.
+        budget_usd: what the user has left of their monthly budget, or None
+            for no limit. Only the benchmark pre-step reads it, to decide how
+            many parts of a split question it can afford (never to block).
     """
     settings = EFFORT_SETTINGS.get(effort, EFFORT_SETTINGS["standard"])
     model = MODEL_ALIASES.get(model, model) or settings.get("model") or DEFAULT_MODEL
@@ -902,9 +927,38 @@ def answer_question(
     web_armed = bool(web_scope)
     web_provider = _web_provider(lib) if web_armed else None
 
+    # Benchmark pre-step (#738 Phase B3). Figures live in the library, so no
+    # library means no lookup. A question that names no registered metric
+    # leaves `prestep` inactive and everything below behaves as it always did.
+    from . import benchmark_prestep as _bp
+    prestep = _bp.Prestep()
     if use_library:
-        lib_hits, embed_in, embed_cost = retrieve(
-            lib, retrieval_question, max_sources=settings["max_library"])
+        try:
+            prestep = _bp.plan_turn(
+                lib, retrieval_question, tier=effort if effort in EFFORT_SETTINGS else "standard",
+                settings=settings, model=model, remaining_usd=budget_usd,
+                split_model=lib.get_role_model("prestep"))
+        except Exception:
+            _log.exception("benchmark pre-step failed; answering without it")
+            prestep = _bp.Prestep(split_fallback="prestep_error")
+    split_used = bool(prestep.active and prestep.split_ran and prestep.subs)
+    sub_hits: list[list[dict]] = []
+
+    if use_library:
+        if split_used:
+            sub_hits, embed_in, embed_cost = _retrieve_per_sub(
+                lib, prestep.subs, settings["max_library"])
+            seen_ids: set = set()
+            for hits in sub_hits:
+                for h in hits:
+                    if h.get("id") not in seen_ids:
+                        seen_ids.add(h.get("id"))
+                        lib_hits.append(h)
+        else:
+            lib_hits, embed_in, embed_cost = retrieve(
+                lib, retrieval_question, max_sources=settings["max_library"])
+            if prestep.active and prestep.subs:
+                prestep.subs[0].library_hits = len(lib_hits)
     if use_feed and opml_path:
         feed_items = retrieve_feed(retrieval_question, opml_path, max_items=settings["max_feed"])
     if web_armed and opml_path and web_provider == "exa":
@@ -913,49 +967,74 @@ def answer_question(
             restrict=not use_web)
         _tag_trusted(exa_hits, opml_path)
 
+    prestep_cost = prestep.cost_usd
+    prestep_log = prestep.log() if (prestep.active or prestep.split_fallback) else {}
+    # Everything spent before the answer call; a failure still records it.
+    common = dict(
+        sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
+        cost_usd=rw_cost + embed_cost + exa_cost + prestep_cost, rewrite_input_tokens=rw_in,
+        rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
+        embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
+        exa_result_count=exa_results, exa_cost_usd=exa_cost, web_scope=web_scope,
+        prestep=prestep_log, prestep_cost_usd=prestep_cost,
+        prestep_input_tokens=prestep.input_tokens, prestep_output_tokens=prestep.output_tokens,
+        prestep_notice=prestep.notice)
+
     import importlib.util
     if importlib.util.find_spec("anthropic") is None:
-        return Answer(text="", failed=True, error="Install `anthropic` to enable answers.",
-                      sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
-                      cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
-                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
-                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
-                      exa_result_count=exa_results, exa_cost_usd=exa_cost,
-                      web_scope=web_scope)
+        return Answer(text="", failed=True, error="Install `anthropic` to enable answers.", **common)
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        return Answer(text="", failed=True, error="ANTHROPIC_API_KEY is not set.",
-                      sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
-                      cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
-                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
-                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
-                      exa_result_count=exa_results, exa_cost_usd=exa_cost,
-                      web_scope=web_scope)
+        return Answer(text="", failed=True, error="ANTHROPIC_API_KEY is not set.", **common)
 
-    # Retrieved sources ride as Citations-API document blocks (library, then
-    # feed, then web/Exa — same order as the returned source lists). sent_docs
-    # is the document_index -> source manifest used to resolve response
-    # citations.
-    doc_blocks, sent_docs = _build_source_documents(
-        lib_hits, feed_items, exa_hits,
-        source_chars=settings.get("source_chars", 1800),
-        global_chars=settings.get("global_chars", 16000),
-    )
+    # Retrieved sources ride as Citations-API document blocks (figures and
+    # workbook cards first when the pre-step ran, then library, feed, web —
+    # same order as the returned source lists). sent_docs is the
+    # document_index -> source manifest used to resolve response citations.
+    pre_docs = _bp.dedupe_docs([d for sub in prestep.subs for d in sub.docs]) if prestep.active else []
+    pre_blocks = [make_document_block(d["title"], d["body"]) for d in pre_docs]
+    pre_sent = [d["sent"] for d in pre_docs]
+    source_chars = settings.get("source_chars", 1800)
+    global_chars = settings.get("global_chars", 16000)
+    if split_used:
+        # Each sub-query keeps its own character budget (nothing is divided
+        # across them); a hit an earlier sub-query already sent is skipped.
+        doc_blocks, sent_docs = list(pre_blocks), list(pre_sent)
+        card_ids = {d["sent"].get("article_id") for d in pre_docs if d["title"].endswith(_bp.CARD_SUFFIX)}
+        taken: set = set(card_ids)
+        for sub, hits in zip(prestep.subs, sub_hits):
+            fresh = [h for h in hits if h.get("id") not in taken]
+            if sub.intent == "definition":
+                fresh.sort(key=lambda h: h.get("published_at") or "", reverse=True)   # newest definition first
+            taken.update(h.get("id") for h in fresh)
+            sub.library_hits = len(fresh)
+            b, sd = _build_source_documents(fresh, [], None, source_chars=source_chars, global_chars=global_chars)
+            doc_blocks += b
+            sent_docs += sd
+        b, sd = _build_source_documents([], feed_items, exa_hits, source_chars=source_chars, global_chars=global_chars)
+        doc_blocks += b
+        sent_docs += sd
+        prestep_log = prestep.log()
+        common["prestep"] = prestep_log
+    else:
+        doc_blocks, sent_docs = _build_source_documents(
+            lib_hits, feed_items, exa_hits, source_chars=source_chars, global_chars=global_chars)
+        doc_blocks = pre_blocks + doc_blocks
+        sent_docs = pre_sent + sent_docs
 
     try:
-        system = _build_system(use_library, use_feed, use_web, lib)
+        system = _build_system(use_library, use_feed, use_web, lib,
+                               benchmark_rules=bool(prestep.active and prestep.system_rules))
     except VoicePromptMissing as e:
-        return Answer(text="", failed=True, error=f"Voice prompt not configured: {e}",
-                      sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
-                      cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
-                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
-                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
-                      exa_result_count=exa_results, exa_cost_usd=exa_cost,
-                      web_scope=web_scope)
+        return Answer(text="", failed=True, error=f"Voice prompt not configured: {e}", **common)
 
     # The question rides verbatim as the final text block (never the rewrite —
     # the model already has the raw history for conversational context).
     # History turns stay flat strings; only the current turn uses blocks.
-    user_content = doc_blocks + [{"type": "text", "text": f"QUESTION: {question}"}]
+    # The lookup notes and split plan (when there are any) sit just before it.
+    user_content = doc_blocks
+    if prestep.active and prestep.plan_text:
+        user_content = user_content + [{"type": "text", "text": prestep.plan_text}]
+    user_content = user_content + [{"type": "text", "text": f"QUESTION: {question}"}]
     messages = trimmed_history + [{"role": "user", "content": user_content}]
     kwargs: dict = {
         "model": model,
@@ -1004,15 +1083,13 @@ def answer_question(
         cache_r = getattr(usage, "cache_read_input_tokens", 0) or 0
         cost = compute_cost(model, in_tok, out_tok, cache_w, cache_r)
 
-        return Answer(text=text, sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits + native_web,
-                     citations=citations,
-                     model=model, input_tokens=in_tok, output_tokens=out_tok,
+        done = dict(common)
+        done["web_sources"] = exa_hits + native_web
+        done["cost_usd"] = cost + common["cost_usd"]
+        return Answer(text=text, citations=citations,
+                     input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r,
-                     cost_usd=cost + rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
-                     rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
-                     embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
-                     exa_result_count=exa_results, exa_cost_usd=exa_cost,
-                     stop_reason=stop_reason_of(resp), web_scope=web_scope)
+                     stop_reason=stop_reason_of(resp), **done)
     except Exception as e:
         # The rewrite/embedding/Exa calls already spent real money even
         # though the answer call failed — keep their cost on the Answer so
@@ -1020,10 +1097,34 @@ def answer_question(
         # Raw detail goes to the log (with model and effort) and to the
         # admin-only `error` field, never to the user or the answer text.
         _log.exception("FP&A Buddy answer call failed (model=%s effort=%s)", model, effort)
-        return Answer(text="", failed=True, error=f"Answer call failed: {e}",
-                      sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
-                      cost_usd=rw_cost + embed_cost + exa_cost, rewrite_input_tokens=rw_in,
-                      rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
-                      embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
-                      exa_result_count=exa_results, exa_cost_usd=exa_cost,
-                      web_scope=web_scope)
+        return Answer(text="", failed=True, error=f"Answer call failed: {e}", **common)
+
+
+def _retrieve_per_sub(lib: Library, subs, max_sources: int) -> tuple[list[list[dict]], int, float]:
+    """Library retrieval for each sub-query, each with the tier's FULL cap
+    (nothing is divided across them). The query embeddings, the only network
+    part, run in parallel on a small bounded pool; the SQLite searches then run
+    in this thread, because a connection can't cross threads. Returns (hits per
+    sub-query, embedding tokens, embedding cost)."""
+    from concurrent.futures import ThreadPoolExecutor
+    texts = [s.text for s in subs]
+    embedded: list = [None] * len(texts)
+    if lib.vector_search_available():
+        from .embeddings import embed_text
+
+        def _embed(t: str):
+            try:
+                return embed_text(t)
+            except Exception:
+                return None
+        with ThreadPoolExecutor(max_workers=min(len(texts), 4)) as ex:
+            embedded = list(ex.map(_embed, texts))
+    out: list[list[dict]] = []
+    tin = 0
+    tcost = 0.0
+    for text, emb in zip(texts, embedded):
+        hits, i, c = retrieve(lib, text, max_sources=max_sources, embedded=emb)
+        out.append(hits)
+        tin += i
+        tcost += c
+    return out, tin, tcost

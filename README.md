@@ -164,7 +164,8 @@ Two separate MCP surfaces, for two different jobs:
   (`search_archive`, `get_article`, `browse_feed`, `search_feed`), and two
   proxy tools onto FP&A Buddy and the Toolbox matchmakers
   (`ask_fpa_buddy`, `ask_matchmaker`) that respect the same per-user dollar
-  caps the web UI does. Three of the introspection tools are admin-only;
+  caps the web UI does, and four admin-only benchmark-figure tools
+  (`find_figures`, `coverage`, `get_digest`, `metric_definition`). Three of the introspection tools are admin-only;
   the rest follow whatever access level the equivalent web page has.
 
 ## Other CLI tools

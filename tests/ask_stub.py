@@ -5,5 +5,5 @@ from linklib.agent import Answer, web_scope_for
 
 
 def ok_answer_question(lib, question, model="", effort="standard", use_library=True,
-                       use_feed=True, use_web=False, opml_path=None, history=None):
+                       use_feed=True, use_web=False, opml_path=None, history=None, budget_usd=None):
     return Answer(text="stub answer", model="stub-model", web_scope=web_scope_for(use_feed, use_web))

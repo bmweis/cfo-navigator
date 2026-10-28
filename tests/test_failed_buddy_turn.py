@@ -159,7 +159,7 @@ def test_followup_after_a_failure_still_works_and_history_has_no_failed_turn(mon
     script = iter(["ok", "fail", "ok"])
 
     def fake(lib, question, model="", effort="standard", use_library=True, use_feed=True,
-             use_web=False, opml_path=None, history=None):
+             use_web=False, opml_path=None, history=None, budget_usd=None):
         seen.append(list(history or []))
         if next(script) == "fail":
             return Answer(text="", failed=True, error=RAW, model="m", cost_usd=0.02)
