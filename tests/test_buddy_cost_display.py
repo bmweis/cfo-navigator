@@ -162,8 +162,8 @@ def test_page_script_shows_the_line_under_the_answer(site):
     client, *_ = site
     html = client("author").get("/tools/fpa-buddy").text
     assert "function costLineHtml(d)" in html and "d.cost_line" in html
-    assert "mdToHtml(d.answer) + cutoffHtml(d) + costLineHtml(d) + srcListHtml(d)" in html
-    assert "mdToHtml(t.answer) + cutoffHtml(t) + costLineHtml(t) + srcListHtml(t)" in html
+    assert "mdToHtml(d.answer) + cutoffHtml(d) + goDeeperHtml(d) + costLineHtml(d) + srcListHtml(d)" in html
+    assert "mdToHtml(t.answer) + cutoffHtml(t) + goDeeperHtml(t) + costLineHtml(t) + srcListHtml(t)" in html
 
 
 class _Client:

@@ -56,6 +56,49 @@ def _inline(s: str, cites: list[dict]) -> str:
     return re.sub(r"\[(\d{1,2})\](?!\()", _cite, s)
 
 
+_TABLE_ROW = re.compile(r"^\|.*\|$")
+_TABLE_SEP_CELL = re.compile(r"^:?-{1,}:?$")
+
+
+def _table_cells(t: str) -> list[str]:
+    """Cells of one `| a | b |` row. A backslash-pipe is a literal pipe in a cell."""
+    body = t[1:-1].replace("\\|", "\x00")
+    return [c.strip().replace("\x00", "|") for c in body.split("|")]
+
+
+def _try_table(lines: list[str], i: int, cites: list[dict]) -> tuple[str, int] | None:
+    """A markdown table starting at lines[i], or None. A table is a header row,
+    a separator row (`|---|---|`) with the same number of cells, then body rows
+    with the same number of cells. Anything else (no separator, ragged rows)
+    returns None, so the caller renders the lines as ordinary text and nothing
+    is dropped or thrown."""
+    head = lines[i].strip()
+    if i + 1 >= len(lines) or not _TABLE_ROW.match(head):
+        return None
+    sep = lines[i + 1].strip()
+    if not _TABLE_ROW.match(sep):
+        return None
+    heads, seps = _table_cells(head), _table_cells(sep)
+    n = len(heads)
+    if n < 2 or len(seps) != n or not all(_TABLE_SEP_CELL.match(c) for c in seps):
+        return None
+    body: list[list[str]] = []
+    j = i + 2
+    while j < len(lines) and _TABLE_ROW.match(lines[j].strip()):
+        row = _table_cells(lines[j].strip())
+        if len(row) != n:
+            return None
+        body.append(row)
+        j += 1
+    out = ['<div class="table-frame ask-table" style="overflow-x:auto;overflow-y:hidden;"><table><thead><tr>']
+    out += [f"<th>{_inline(c, cites)}</th>" for c in heads]
+    out.append("</tr></thead><tbody>")
+    for row in body:
+        out.append("<tr>" + "".join(f"<td>{_inline(c, cites)}</td>" for c in row) + "</tr>")
+    out.append("</tbody></table></div>")
+    return "".join(out), j
+
+
 def render_answer_markdown(text: str, cites: list[dict] | None = None) -> str:
     cites = cites or []
     out: list[str] = []
@@ -74,8 +117,17 @@ def render_answer_markdown(text: str, cites: list[dict] | None = None) -> str:
             out.append("<p>" + "<br>".join(para) + "</p>")
             para = []
 
-    for line in (text or "").split("\n"):
-        t = line.strip()
+    lines = (text or "").split("\n")
+    i = 0
+    while i < len(lines):
+        t = lines[i].strip()
+        tbl = _try_table(lines, i, cites) if t.startswith("|") else None
+        if tbl:
+            flush_para(); close_list()
+            out.append(tbl[0])
+            i = tbl[1]
+            continue
+        i += 1
         h, ol, ul = _HEADING.match(t), _OL.match(t), _UL.match(t)
         if _HR.match(t):
             flush_para(); close_list()
@@ -101,3 +153,47 @@ def render_answer_markdown(text: str, cites: list[dict] | None = None) -> str:
             para.append(_inline(t, cites))
     flush_para(); close_list()
     return "".join(out)
+
+
+# --- "Go deeper" line ---------------------------------------------------------
+# Synthesize, then point to the source: an answer that cites stored benchmark
+# figures ends with one line naming each report it used, linked to the report's
+# landing page (the same URL its citation chip carries). Built from the turn's
+# own citations, never written by the model, so a link can't be invented. The
+# live page has a JS twin (goDeeperHtml); the server surfaces call this.
+FIGURES_TITLE_PREFIX = "Figures: "
+
+
+def go_deeper_items(cites: list[dict] | None) -> list[dict]:
+    """[{name, url}] for each distinct benchmark report the answer cited, in
+    citation order. url is "" for a report with no landing URL (named, not
+    linked). A non-http(s) url is treated as no link."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for c in cites or []:
+        if not isinstance(c, dict):
+            continue
+        title = str(c.get("title") or "")
+        if not title.startswith(FIGURES_TITLE_PREFIX):
+            continue
+        name = title[len(FIGURES_TITLE_PREFIX):].strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        url = str(c.get("url") or "")
+        out.append({"name": name, "url": url if re.match(r"https?://", url, re.I) else ""})
+    return out
+
+
+def go_deeper_html(cites: list[dict] | None) -> str:
+    items = go_deeper_items(cites)
+    if not items:
+        return ""
+    parts = []
+    for it in items:
+        if it["url"]:
+            parts.append(f'<a href="{_esc(it["url"])}" target="_blank" rel="noopener">{_esc(it["name"])}</a>')
+        else:
+            parts.append(_esc(it["name"]))
+    return ('<p class="ask-godeeper" style="margin:8px 0 0;font-size:13px;color:var(--ink-soft);">'
+            "Go deeper: " + ", ".join(parts) + "</p>")
