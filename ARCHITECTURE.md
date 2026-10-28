@@ -6995,6 +6995,7 @@ loop, no agents.
    cite every figure, say the `match` gap in plain words, newest edition unless
    change over time, say plainly when nothing is close, never average across
    bases, workbook definition first, answer the rest normally.
+5a. **Answer format and number rules (2026-10, turn-20 follow-up)**: `PRESTEP_RULES` also tells the answer call to put the figures in one compact table first (metric, band as printed, statistic, value, report and year, match note), keep the prose short and end on a full sentence; to state periods as printed and compute a change only from numbers shown; to give no cause a cited source does not state; to label every derived number "derived, not in report" with its inputs (and use a stored figure instead when one exists); to prefer the newest edition and show every edition oldest to newest for change-over-time questions; and to give the year of every source and flag one older than three years. These are prompt instructions, present only on a figures turn. The Standard tier's `max_tokens` is 2,500 (was 1,500; Quick 700, Deep 4,000).
 6. **Log (B4)**: `ask_questions.prestep_json` (detected metrics, signals, split or
    fallback, each sub-query's figure rows, cards, articles and rows left out,
    match mix, estimate, budget left) and `prestep_cost_usd` (the split call; also

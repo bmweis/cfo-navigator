@@ -75,7 +75,7 @@ def test_deep_ceiling_is_4000_and_the_other_tiers_are_unchanged():
     s = agent.EFFORT_SETTINGS
     assert s["deep"]["max_tokens"] == 4000
     assert s["quick"]["max_tokens"] == 700
-    assert s["standard"]["max_tokens"] == 1500
+    assert s["standard"]["max_tokens"] == 2500
 
 
 def test_deep_model_and_tier_shape_are_untouched():
@@ -224,4 +224,4 @@ def test_tier_tooltips_read_the_ceiling_from_effort_settings(site):
     html = client().get("/tools/fpa-buddy").text
     for tier, s in agent.EFFORT_SETTINGS.items():
         assert f"~{s['max_tokens']:,} tokens out" in html, tier
-    assert "~2,500 tokens out" not in html
+    assert "~1,500 tokens out" not in html   # the old Standard ceiling
