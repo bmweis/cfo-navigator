@@ -61,7 +61,7 @@ EFFORT_SETTINGS: dict[str, dict] = {
     # global_chars: hard cap on TOTAL grounding text per answer, so a query that
     #   retrieves many long articles can't balloon the prompt (cost guard).
     "quick":    {"model": "claude-haiku-4-5-20251001", "max_library": 4,  "max_feed": 3,  "max_web": 2, "max_tokens": 700,  "source_chars": 900,  "global_chars": 6000},
-    "standard": {"model": "claude-sonnet-4-6",         "max_library": 8,  "max_feed": 5,  "max_web": 4, "max_tokens": 1500, "source_chars": 1800, "global_chars": 16000},
+    "standard": {"model": "claude-sonnet-4-6",         "max_library": 8,  "max_feed": 5,  "max_web": 4, "max_tokens": 2500, "source_chars": 1800, "global_chars": 16000},
     "deep":     {"model": "claude-opus-4-8",           "max_library": 16, "max_feed": 8,  "max_web": 6, "max_tokens": 4000, "source_chars": 3500, "global_chars": 40000},
 }
 
@@ -101,6 +101,33 @@ def tier_cost_estimate(model: str, tier: str, tokens: tuple[int, int] | None = N
     in_tok, out_tok = tokens or TIER_TOKEN_PROFILE[tier]
     r = rates_for(model)
     return round((in_tok * r["input"] + out_tok * r["output"]) / 1_000_000, 4)
+
+
+# Query embedding for one simple question: the question text, a few dozen tokens.
+SIMPLE_QUESTION_EMBED_TOKENS = 60
+
+
+def typical_simple_turn_cost(model: str, tier: str, tokens: tuple[int, int] | None = None,
+                             exa_unit: float = 0.0) -> float | None:
+    """Typical cost of one simple question at a depth, in the same metered terms
+    the monthly cap uses: the answer call (model_pricing rates times typical
+    tokens, history else TIER_TOKEN_PROFILE), the query embedding, and one search
+    when the web-capable sources run. Excludes the benchmark pre-step, the
+    follow-up rewrite and thinking tokens. Unrounded."""
+    base = tier_cost_estimate(model, tier, tokens)
+    if base is None:
+        return None
+    from .pricing import compute_embedding_cost
+    return base + compute_embedding_cost("text-embedding-3-small", SIMPLE_QUESTION_EMBED_TOKENS) + exa_unit
+
+
+def tier_label_cost(model: str, tier: str, tokens: tuple[int, int] | None = None,
+                    exa_unit: float = 0.0) -> float | None:
+    """The dollar figure shown in the Depth dropdown: typical_simple_turn_cost
+    rounded UP to the next cent, so the label is never below the typical turn."""
+    from .pricing import round_up_cent
+    c = typical_simple_turn_cost(model, tier, tokens, exa_unit)
+    return None if c is None else round_up_cent(c)
 
 
 _STOP = {

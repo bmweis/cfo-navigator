@@ -95,6 +95,7 @@ from linklib import backup
 from linklib import restore_status
 from linklib import backup_history
 from webapp.markdown_render import render_narrative_markdown
+from linklib.pricing import turn_cost_line as _turn_cost_line
 from webapp.ask_orchestrator import (
     ForbiddenConversationError as _AskForbiddenConversationError,
     UnknownConversationError as _AskUnknownConversationError,
@@ -24416,7 +24417,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         return _login_redirect(request)
     authed = _is_authed(request)   # admin flag (e.g. for any admin-only affordances)
 
-    from linklib.agent import EFFORT_SETTINGS, tier_cost_estimate
+    from linklib.agent import EFFORT_SETTINGS, tier_label_cost
 
     # This month's usage-to-date vs. the user's effective dollar cap (their
     # override, else the global default). None for token-only access or the
@@ -24438,11 +24439,13 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         helpful_only = helpful == "1"
         pq_rows = usage_lib.list_public_ask_questions(query=pq, limit=200, helpful_only=helpful_only,
                                                       viewer_id=usage_user_id, see_private=authed)
-        # One Exa call per turn when the web source is on and Exa (not the native
-        # tool) is the provider; nothing else a turn does calls Exa. Admin-only.
+        # One Exa call per turn when a web-capable source is on and Exa (not the
+        # native tool) is the provider; nothing else a turn does calls Exa. The
+        # Depth label counts it (Current feed is on by default), so the label is
+        # never below the typical simple turn.
         from linklib.agent import _web_provider
         from linklib.pricing import compute_exa_cost
-        exa_unit = compute_exa_cost("search") if (authed and _web_provider(usage_lib) == "exa") else 0.0
+        exa_unit = compute_exa_cost("search") if _web_provider(usage_lib) == "exa" else 0.0
     finally:
         usage_lib.close()
 
@@ -24469,9 +24472,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         segs.append(f'<span class="ask-pq-seg ask-pq-date">{date}</span>')
         meta_html = f'<span class="ask-pq-ml">{"".join(segs)}</span>'
         q_txt = _esc(r.get("question") or "")
+        _own_row = usage_user_id is not None and r.get("user_id") == usage_user_id
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]",
-                                                r.get("stop_reason") or "")
+                                                r.get("stop_reason") or "",
+                                                cost_line=_turn_cost_line(r.get("cost_usd")) if (_own_row and not r.get("failed")) else "")
         if r.get("failed"):
             # Only an admin ever gets a failed row. No answer exists; show the
             # raw error text instead (admin only).
@@ -24580,6 +24585,28 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 
     source_tags = "".join(source_tag(k, l, a) for k, l, a in source_defs)
 
+    # Depth label cost, shown to every signed-in user: one typical simple
+    # question per depth, rounded UP to the next cent (linklib.agent.tier_label_cost:
+    # model_pricing rates times typical tokens, plus the query embedding and one
+    # search). Benchmark and split costs are deliberately not in the label; the
+    # footnote below the Depth box says they cost more, in words.
+    _lib_cost = _lib()
+    try:
+        tier_cost = {
+            tier: tier_label_cost(_lib_cost.get_role_model(f"buddy_{tier}"), tier,
+                                  _lib_cost.typical_tier_tokens(tier), exa_unit)
+            for tier in EFFORT_SETTINGS
+        }
+    finally:
+        _lib_cost.close()
+    _tier_cost_text = {t: (f"about ${c:.2f}" if c is not None else "") for t, c in tier_cost.items()}
+    import json as _json
+    cost_js = _json.dumps(_tier_cost_text)
+    # Always visible, directly under the Depth box (a tooltip never shows on touch).
+    # No dollar amounts: the label above carries the simple-question figure.
+    cost_note = ('<p class="ask-dd-foot" id="ask-dd-foot">Benchmark questions cost two to three times as much, '
+                 'more across several topics.</p>')
+
     # Depth reuses the Sources tag component verbatim so the two columns carry
     # the same visual weight — the only difference is behavior: Sources is a
     # multi-select toggle, Depth is single-select (radio), enforced in
@@ -24590,30 +24617,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         return (f'<button type="button" class="{cls}" data-tier="{val}" role="radio" '
                 f'aria-checked="{"true" if selected else "false"}" title="{hint}" '
                 f'onclick="selectTier(this)">'
-                f'{_CHECK_SVG}<span class="ask-tag-name">{label}</span><span class="ask-tag-cost"></span></button>')
+                f'{_CHECK_SVG}<span class="ask-tag-name">{label}</span><span class="ask-tag-cost">{_esc(_tier_cost_text.get(val, ""))}</span></button>')
 
     tier_tags = "".join(tier_tag(v, l, d, v == default_effort) for v, l, d in effort_details)
-
-    # Cost estimates are for Brian's eyes only — never exposed to anonymous
-    # users. When not authed, the cost table is empty and the estimate line is
-    # omitted from the page entirely. Keyed by tier only (not model) since the
-    # model is no longer a user-visible axis.
-    import json as _json
-    _lib_cost = _lib()
-    try:
-        tier_cost = {
-            tier: tier_cost_estimate(_lib_cost.get_role_model(f"buddy_{tier}"), tier,
-                                     _lib_cost.typical_tier_tokens(tier))
-            for tier in EFFORT_SETTINGS
-        }
-    finally:
-        _lib_cost.close()
-    cost_js = _json.dumps(tier_cost) if authed else "{}"
-    exa_js = _json.dumps(exa_unit) if authed else "0"
-    # Admin-only, one muted line at the bottom of the Depth dropdown, next to the
-    # dollar amounts it explains (same look as the Sources note).
-    cost_note = ('<p class="ask-dd-note ask-cost-note" style="color:var(--muted);">Dollar amounts are estimates. They cover the model only, not web search (about $0.007 a question) or thinking tokens.</p>'
-                 if authed else "")
 
     usage_html = ""
     if usage_today is not None:
@@ -24689,8 +24695,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
                 <div class="ask-tags" role="radiogroup" aria-label="Depth">
                   {tier_tags}
                 </div>
-                {cost_note}
               </div>
+              {cost_note}
             </div>
             <div class="ask-dd-col">
               <label class="ask-dd-lbl"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
@@ -24827,6 +24833,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu .ask-dd-h{{display:none;}}
 .fu .ask-dd-k{{display:inline;}}
 .ask-tag-cost{{margin-left:auto;font-weight:500;color:var(--muted);}}
+.ask-dd-foot{{margin:6px 2px 0;font-size:12px;line-height:1.45;color:var(--muted);}}
+.fu .ask-dd-foot{{display:none;}}
+.ask-cost-line{{margin:8px 0 0;font-size:13px;color:var(--muted);}}
 .ask-q-wrap{{position:relative;flex:1;display:flex;}}
 .ask-q-wrap textarea{{flex:1;width:100%;box-sizing:border-box;padding:11px 56px 11px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:var(--bg);resize:none;}}
 .ask-send{{position:absolute;right:4px;bottom:4px;}}
@@ -25042,8 +25051,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 </style>
 
 <script>
-var COST = {cost_js};      // per-depth model estimate, admin only (empty otherwise)
-var EXA_UNIT = {exa_js};   // one Exa search per turn when Web is on and Exa is the provider
+var COST = {cost_js};      // per-depth label, e.g. "about $0.04": one typical simple question, rounded up
 var selectedTier = "{default_effort}";
 
 // Single-select: clearing every tier before setting this one is what makes
@@ -25074,28 +25082,16 @@ function toggleSource(el) {{
   fuSummary();
 }}
 
-// Estimate for a depth with the current sources: the model figure from the
-// server's table, plus one Exa search when Web is on. Null when the reader
-// is not an admin (the table is empty then).
-function tierCost(tier) {{
-  var c = COST[tier];
-  if (c == null) return null;
-  // One Exa search per turn when either web-capable source is on (Current feed
-  // searches the trusted sites, Open web searches everything; both is still one).
-  var webOn = !!document.querySelector('.fpa-intro-area-controls .ask-tag[data-source="feed"].active, .fpa-intro-area-controls .ask-tag[data-source="open_web"].active');
-  return c + (webOn ? EXA_UNIT : 0);
-}}
+// The per-depth cost text is fixed per depth (a typical simple question, rounded
+// up to the next cent, computed on the server); it does not change with sources.
 function costText(tier) {{
-  var c = tierCost(tier);
-  return c == null ? '' : '($' + c.toFixed(3) + ')';
+  return COST[tier] || '';
 }}
-function updateEstimate() {{
-  document.querySelectorAll('.ask-tag[data-tier]').forEach(function(t) {{
-    var n = t.querySelector('.ask-tag-cost');
-    if (n) n.textContent = costText(t.getAttribute('data-tier'));
-  }});
-  ddLabels();
+function depthLabel(name, tier) {{
+  var c = costText(tier);
+  return c ? name + ', ' + c : name;
 }}
+function updateEstimate() {{ ddLabels(); }}
 
 // The top controls are the single source of truth for depth and sources.
 function activeSources() {{
@@ -25117,10 +25113,9 @@ function chipText(sel) {{
 function fuSummary() {{
   var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active').join(', ') || 'No sources';
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
-  var cost = costText(selectedTier);
   var sum = document.querySelector('.fu-sum');
   if (sum) sum.innerHTML = '<span class="fu-sum-t"></span><span aria-hidden="true">\u25be</span>';
-  if (sum) sum.firstChild.textContent = [(tier + ' ' + cost).trim(), srcs].filter(Boolean).join(' \u00b7 ');
+  if (sum) sum.firstChild.textContent = [depthLabel(tier, selectedTier), srcs].filter(Boolean).join(' \u00b7 ');
   ddLabels();
 }}
 
@@ -25129,7 +25124,7 @@ function ddLabels() {{
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
   var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active');
   var sv = srcs.length === 0 ? 'None' : srcs.length + ' of ' + document.querySelectorAll('.fpa-intro-area-controls .ask-tag[data-source]').length;
-  document.querySelectorAll('.ask-dd-btn[data-dd="depth"] .ask-dd-v').forEach(function(n) {{ n.textContent = (tier + ' ' + costText(selectedTier)).trim(); }});
+  document.querySelectorAll('.ask-dd-btn[data-dd="depth"] .ask-dd-v').forEach(function(n) {{ n.textContent = depthLabel(tier, selectedTier); }});
   document.querySelectorAll('.ask-dd-btn[data-dd="sources"] .ask-dd-v').forEach(function(n) {{ n.textContent = sv; }});
 }}
 function closeDds() {{
@@ -25275,6 +25270,14 @@ function cutoffHtml(d) {{
   if (!d || !d.notice) return '';
   return '<p class="ask-cutoff" style="margin:8px 0 0;font-size:13px;color:var(--muted);">' +
          escapeHtml(d.notice) + '</p>';
+}}
+
+// What this question cost, one plain line under the answer. The server sends
+// the finished sentence (d.cost_line) built from the same metered total that
+// counts toward the monthly cap; "" (a failed or unrecorded turn) shows nothing.
+function costLineHtml(d) {{
+  if (!d || !d.cost_line) return '';
+  return '<p class="ask-cost-line">' + escapeHtml(d.cost_line) + '</p>';
 }}
 
 function srcListHtml(d) {{
@@ -25601,7 +25604,7 @@ async function resumeConvoById(cid) {{
       var turn = document.createElement('div');
       turn.style.marginTop = '18px';
       turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(t.question) + '</div>' +
-                       '<div class="ask-answer">' + mdToHtml(t.answer) + cutoffHtml(t) + srcListHtml(t) + '</div>';
+                       '<div class="ask-answer">' + mdToHtml(t.answer) + cutoffHtml(t) + costLineHtml(t) + srcListHtml(t) + '</div>';
       var answerEl = turn.querySelector('.ask-answer');
       if (t.turn_id) {{
         answerEl.insertAdjacentHTML('beforeend', fbRowHtml(t.turn_id));
@@ -25745,7 +25748,7 @@ async function doAsk(followUp, skipSimilar) {{
     }}
 
     CITES = d.citations || [];
-    answerEl.innerHTML = mdToHtml(d.answer) + cutoffHtml(d) + srcListHtml(d);
+    answerEl.innerHTML = mdToHtml(d.answer) + cutoffHtml(d) + costLineHtml(d) + srcListHtml(d);
     if (d.turn_id) answerEl.insertAdjacentHTML('beforeend', fbRowHtml(d.turn_id));
     updateUsage(d.usage);
 
@@ -26087,6 +26090,8 @@ def ask_conversation_transcript(conversation_id: str, request: Request):
                 "effort": t.get("effort") or "",
                 "feedback": feedback,
                 "notice": _answer_cutoff_notice(t.get("stop_reason")),
+                # The transcript is the asker's own (403 otherwise), so the cost is theirs to see.
+                "cost_line": _turn_cost_line(t.get("cost_usd")),
             }
 
         followups_left = max(0, 1 + MAX_FOLLOWUPS - len(turns))
@@ -28357,7 +28362,7 @@ def fpa_buddy_how_it_works(request: Request):
 <section>
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">What it costs</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">There's a monthly dollar cap per person (currently ${default_cap:.2f} by default), and you can see your own spend against it from the tool itself.</p>
-<p style="margin:0;font-size:16px;color:var(--ink-soft);line-height:1.65;">It's priced from real usage rather than a query count, so a short question costs what a short question costs. When you hit the cap, Buddy says so instead of answering, and it resets at the start of the month.</p>
+<p style="margin:0;font-size:16px;color:var(--ink-soft);line-height:1.65;">It's priced from real usage rather than a query count, so a short question costs what a short question costs. The Depth menu shows a typical cost for a simple question at each level, and every answer shows what that question actually cost. When you hit the cap, Buddy says so instead of answering, and it resets at the start of the month.</p>
 </section>
 
 <section>
@@ -33196,7 +33201,7 @@ def _ask_settings_badge(row: dict) -> str:
 
 
 def _render_cited_answer(answer: str, citations_json: str,
-                         stop_reason: str = "") -> tuple[str, str]:
+                         stop_reason: str = "", cost_line: str = "") -> tuple[str, str]:
     """Citation rendering for the server-rendered ask surfaces — /ask/history,
     /questions, and /admin/fpa-buddy/feedback all call this one helper (never a
     per-surface reimplementation). Returns (answer_html, sources_html):
@@ -33237,6 +33242,9 @@ def _render_cited_answer(answer: str, citations_json: str,
     if cutoff:
         answer_html += (f'<p class="ask-cutoff" style="margin:8px 0 0;font-size:13px;'
                         f'color:var(--muted);">{_esc(cutoff)}</p>')
+    if cost_line:
+        # Only ever passed for the asker's own turn, never for another user's.
+        answer_html += f'<p class="ask-cost-line" style="margin:8px 0 0;font-size:13px;color:var(--muted);">{_esc(cost_line)}</p>'
 
     if not cites:
         return answer_html, ""
