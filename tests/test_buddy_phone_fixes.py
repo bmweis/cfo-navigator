@@ -43,7 +43,7 @@ def _launch():
         return pw, pw.chromium.launch()
     except Exception:
         pass
-    for path in glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome"):
+    for path in (glob.glob("/opt/pw-browsers/chromium-*/chrome-linux/chrome") + glob.glob("/opt/pw-browsers/chromium-*/chrome-linux64/chrome")):
         try:
             return pw, pw.chromium.launch(executable_path=path)
         except Exception:
