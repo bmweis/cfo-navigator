@@ -147,8 +147,8 @@ def test_page_script_renders_the_notice_under_the_answer(site):
     html = client().get("/tools/fpa-buddy").text
     assert "function cutoffHtml(d)" in html
     # Live path and resume path both put it between the answer and its sources.
-    assert "mdToHtml(d.answer) + cutoffHtml(d) + srcListHtml(d)" in html
-    assert "mdToHtml(t.answer) + cutoffHtml(t) + srcListHtml(t)" in html
+    assert "mdToHtml(d.answer) + cutoffHtml(d) + costLineHtml(d) + srcListHtml(d)" in html
+    assert "mdToHtml(t.answer) + cutoffHtml(t) + costLineHtml(t) + srcListHtml(t)" in html
 
 
 # -- resume transcript ------------------------------------------------------------
