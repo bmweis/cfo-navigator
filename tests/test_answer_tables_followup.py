@@ -289,7 +289,6 @@ def test_no_rule_is_sent_to_a_turn_without_figures():
 
 def test_the_prompt_for_a_figures_turn_reaches_the_model(tmp_path, monkeypatch):
     """A stubbed answer call: the system prompt it receives carries every rule."""
-    from types import SimpleNamespace
     import test_benchmark_prestep as tbp
     from linklib.db import Library
     import figures_fixtures as fx
@@ -321,6 +320,10 @@ def test_standard_ceiling_does_not_move():
 
 # --- Part A/B in a real browser -------------------------------------------------
 
+@pytest.fixture
+def page_html(request):
+    return request.getfixturevalue("buddy_html")
+
 def _page(html, width, height, mobile):
     launched = _launch()
     if launched is None:
@@ -345,8 +348,8 @@ def _payload():
 
 
 @pytest.mark.parametrize("width,height,mobile", [(1280, 900, False), (390, 844, True)])
-def test_tables_render_in_the_live_page_and_never_scroll_the_page(buddy_html, width, height, mobile):
-    html, _ = buddy_html
+def test_tables_render_in_the_live_page_and_never_scroll_the_page(page_html, width, height, mobile):
+    html, _ = page_html
     pw, browser, pg = _page(html, width, height, mobile)
     try:
         errors = []
@@ -375,8 +378,8 @@ def test_tables_render_in_the_live_page_and_never_scroll_the_page(buddy_html, wi
 
 
 @pytest.mark.parametrize("width,height,mobile", [(1280, 900, False), (390, 844, True)])
-def test_footnote_spans_the_depth_and_sources_row(buddy_html, width, height, mobile):
-    html, _ = buddy_html
+def test_footnote_spans_the_depth_and_sources_row(page_html, width, height, mobile):
+    html, _ = page_html
     pw, browser, pg = _page(html, width, height, mobile)
     try:
         pg.goto(ORIGIN + "/tools/fpa-buddy")
@@ -401,8 +404,8 @@ def test_footnote_spans_the_depth_and_sources_row(buddy_html, width, height, mob
         pw.stop()
 
 
-def test_sources_dropdown_still_opens_under_its_button(buddy_html):
-    html, _ = buddy_html
+def test_sources_dropdown_still_opens_under_its_button(page_html):
+    html, _ = page_html
     pw, browser, pg = _page(html, 1280, 900, False)
     try:
         pg.goto(ORIGIN + "/tools/fpa-buddy")
