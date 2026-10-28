@@ -76,7 +76,7 @@ def test_browser_failed_ask_shows_a_plain_line_and_logs_the_raw_error(buddy_html
         pg.click("#ask-btn")
         pg.wait_for_selector("#ask-thread .ask-answer span")
         text = pg.inner_text("#ask-thread .ask-answer").strip()
-        assert text == "Something went wrong. Try again."
+        assert text.startswith("Something went wrong. Try again.")   # then the recovery note (turn 20 follow-up)
         assert "Failed to fetch" not in pg.inner_text("body") and "TypeError" not in pg.inner_text("body")
         assert any("FP&A Buddy ask failed" in m for m in logged)
     finally:
