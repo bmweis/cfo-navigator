@@ -970,18 +970,48 @@ def _sig_tokens(text: str) -> list[str]:
     return [_stem(t) for t in re.findall(r"[a-z0-9]+", _lc(text)) if len(t) > 2 and t not in _NAME_STOP]
 
 
+# Words that name a company's size or a denominator, not a metric. A stored name made only of
+# these ("Annual Revenue ($M)", "Revenue in Year 1", "Annual R&D Spend") is a size field or
+# a context phrase; a question that happens to contain the words is not asking for it.
+_GENERIC_NAME_WORDS = {"annual", "revenue", "arr", "year", "spend", "spending", "total", "company",
+                       "size", "stage", "growth", "cost", "costs", "amount"}
+_PAREN = re.compile(r"\([^)]*\)")
+
+
+def _min_span(seq: list[str], need: list[str]) -> int:
+    """Smallest window (in significant words) of `seq` that holds every word of `need`; 10**6 if none."""
+    pos = {t: [i for i, x in enumerate(seq) if x == t] for t in need}
+    if any(not v for v in pos.values()):
+        return 10**6
+    best = 10**6
+    for start in sorted({i for v in pos.values() for i in v}):
+        ends = []
+        for t in need:
+            nxt = [i for i in pos[t] if i >= start]
+            if not nxt:
+                break
+            ends.append(min(nxt))
+        else:
+            best = min(best, max(ends) - start)
+    return best
+
+
 def detect_stored_metric_names(lib, text: str) -> list[str]:
     """Raw metric names in `benchmark_figures` that the question names, for
     metrics not in the registry. Deterministic, no model call.
 
     Candidates come from full-text search over the metric column using the
-    question's words. A stored name counts only when it has at least two
-    significant words (an `as`, `of`, `the` do not count) and EVERY one of them
-    appears in the question: a minimum score of 1.0 on at least 2 words, so
-    ordinary questions that share one word with a metric name do not trigger.
+    question's words. A stored name counts only when:
+    - its base name (a trailing "(full and part-time)" qualifier is ignored) has at least
+      two significant words, and EVERY one of them appears in the question;
+    - those words sit close together (within the name's length plus 3 significant words),
+      so "annual" in one clause and "spend" in another do not make "Annual R&D Spend";
+    - at least one of them is not a generic size or denominator word (annual, revenue, arr,
+      year, spend, total, ...).
     The caller decides whether the question also carries benchmark context.
     Longest names first, at most FTS_NAME_MAX."""
-    toks = list(dict.fromkeys(_sig_tokens(text)))
+    seq = _sig_tokens(text)
+    toks = list(dict.fromkeys(seq))
     if len(toks) < 2:
         return []
     q = "metric : (" + " OR ".join(f'"{t}"' for t in toks) + ")"
@@ -995,9 +1025,14 @@ def detect_stored_metric_names(lib, text: str) -> list[str]:
     have = set(toks)
     hits = []
     for n in names:
-        nt = list(dict.fromkeys(_sig_tokens(n)))
-        if len(nt) >= 2 and all(t in have for t in nt):
-            hits.append((len(nt), n))
+        nt = list(dict.fromkeys(_sig_tokens(_PAREN.sub(" ", n))))
+        if len(nt) < 2 or not all(t in have for t in nt):
+            continue
+        if all(t in _GENERIC_NAME_WORDS or _stem(t) in _GENERIC_NAME_WORDS for t in nt):
+            continue
+        if _min_span(seq, nt) > len(nt) + 3:
+            continue
+        hits.append((len(nt), n))
     hits.sort(key=lambda h: (-h[0], h[1].casefold()))
     out: list[str] = []
     seen: set[str] = set()

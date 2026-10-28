@@ -51,13 +51,22 @@ SPLIT_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 FIGURES_CHARS = {"quick": 4000, "standard": 9000, "deep": 20000}
 CARD_CHARS = {"quick": 3000, "standard": 6000, "deep": 12000}
 FIGURE_FETCH_LIMIT = 150
+CLOSE_MATCHES = ("exact", "adjacent_band")
+RELATED_CAP = 8
 CARD_SUFFIX = " (workbook definition)"
 # Rough size of the splitter call, for the pre-flight estimate only.
 SPLIT_EST_TOKENS = (1100, 400)
 
 _BAND_RE = re.compile(
-    r"(?:<|>|under |over |above |below )?\$\s?\d[\d,.]*\s?[kmb]\b\+?(?:\s*(?:-|to|–)\s*\$?\s?\d[\d,.]*\s?[kmb]?\b)?",
+    # A range first (the unit may sit on the second number only: "$20-$30M"), then a single size.
+    r"(?:<|>|under |over |above |below )?\$\s?\d[\d,.]*\s?[kmb]?\s*(?:-|to|–)\s*\$?\s?\d[\d,.]*\s?[kmb]\b\+?"
+    r"|(?:<|>|under |over |above |below )?\$\s?\d[\d,.]*\s?[kmb]\b\+?",
     re.I)
+# Words that describe the asker's own company or a ratio's denominator, not the metric asked
+# about: "$20-$30M in annual revenue", "as a percent of revenue".
+_SIZE_CTX = re.compile(r"\s*(?:in|of|with|at)?\s*(?:(?:annual|recurring|total)\s+)*(?:revenue|arr)\b", re.I)
+_DENOM_CTX = re.compile(
+    r"\b(?:as\s+an?\s+)?(?:percent(?:age)?|%|share|ratio)\s+of\s+(?:(?:total|net|annual)\s+)*(?:revenue|arr)\b", re.I)
 _BENCH_CUE = re.compile(
     r"\b(benchmark\w*|median|percentile|quartile|peers?|typical|average|compare[ds]?|comparison|"
     r"industry|norms?)\b", re.I)
@@ -129,7 +138,7 @@ class Prestep:
             "split_fallback": self.split_fallback, "split_model": self.split_model,
             "requested_subs": self.requested_subs, "notice": self.notice,
             "rest_of_question": self.rest_of_question, "match_mix": mix,
-            "subs": [{"intent": s.intent, "metrics": s.metrics, "band": s.band, "segment": s.segment,
+            "subs": [{"intent": s.intent, "text": s.text[:200], "metrics": s.metrics, "band": s.band, "segment": s.segment,
                       "year": s.year, "figure_rows": s.rows, "cards": s.cards,
                       "library_hits": s.library_hits, "figure_rows_left_out": s.truncated_rows,
                       "match_mix": s.match_mix} for s in self.subs],
@@ -140,9 +149,47 @@ class Prestep:
 
 # --- step 1: rules ---------------------------------------------------------------
 
+def _context_spans(question: str) -> list[tuple[int, int]]:
+    """Character spans that describe the asker's size or a ratio's denominator
+    (a band plus "in annual revenue", "as a percent of revenue"). A metric word
+    that only occurs inside one of them is not a metric the user asked about."""
+    return _size_spans(question) + [m.span() for m in _DENOM_CTX.finditer(question)]
+
+
+def _size_spans(question: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    for m in _BAND_RE.finditer(question):
+        e = m.end()
+        c = _SIZE_CTX.match(question, e)
+        spans.append((m.start(), c.end() if c else e))
+    return spans
+
+
+def _only_in_context(question: str, term: str, spans: list[tuple[int, int]]) -> bool:
+    """True when `term` (a short generic one, two words or fewer) occurs only inside a context span."""
+    if len(term.split()) > 2:
+        return False
+    hits = [m.span() for m in re.finditer(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", question, re.I)]
+    return bool(hits) and all(any(s <= a and b <= e for s, e in spans) for a, b in hits)
+
+
+def _mask_spans(question: str, spans: list[tuple[int, int]]) -> str:
+    out = list(question)
+    for a, b in spans:
+        for i in range(a, min(b, len(out))):
+            out[i] = " "
+    return "".join(out)
+
+
 def detect(lib, question: str) -> dict:
     """Rules-only signals for a question; no model call."""
     found = fg.detect_metrics(lib, question)
+    ctx = _context_spans(question or "")
+    if ctx:
+        found = [d for d in found if not _only_in_context(question, d["term"], ctx)]
+    # Only the size phrase is masked for the stored-name search: a stored name may itself
+    # contain a denominator ("Expense as a percent of revenue").
+    masked = _mask_spans(question or "", _size_spans(question or ""))
     canon = []
     for d in found:
         if d["canonical"] not in canon:
@@ -165,7 +212,7 @@ def detect(lib, question: str) -> dict:
         idx = fg._load_metric_index(lib)
         for c in canon:
             covered |= fg._names_for(idx, c)
-        extra = [n for n in fg.detect_stored_metric_names(lib, question)
+        extra = [n for n in fg.detect_stored_metric_names(lib, masked)
                  if _lc_text(n) not in covered and n not in terms]
         room = MAX_SUBQUERIES - len(terms)
         extra = extra[:max(room, 0)]
@@ -421,7 +468,26 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False) 
             if key not in seen_keys:
                 seen_keys.add(key)
                 rows.append(r)
-    rows.sort(key=lambda r: (fg._MATCH_RANK[r["match"]],))
+    # Closest match first, then newest edition first across ALL the sub-query's metrics
+    # (oldest first when the question is about change over time). Sorting only on match
+    # left a newer row of a later metric behind older rows of an earlier one, so a long
+    # run of old rows could use up the character budget before it.
+    sign = 1 if (over_time or sub.year == "all") else -1
+    rows.sort(key=lambda r: (fg._MATCH_RANK[r["match"]], sign * fg._year_num(r["report_year"])))
+    # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
+    # segment, statistic, basis or a related metric) are sent only when nothing closer
+    # exists, at most RELATED_CAP, and the notes say so.
+    close = [r for r in rows if r["match"] in CLOSE_MATCHES]
+    if close and len(close) < len(rows):
+        sub.notes.append(f"{len(rows) - len(close)} less-close stored figures (another segment, statistic, "
+                         "basis or a related metric) were not sent because closer matches exist.")
+        rows = close
+    elif rows and not close:
+        sub.notes.append("There is no exact or adjacent-band match for this. The figures below are the closest stored "
+                         "ones, each labelled with how it differs. Say plainly that there is no exact match.")
+        if len(rows) > RELATED_CAP:
+            sub.notes.append(f"{len(rows) - RELATED_CAP} further less-close figures were not sent.")
+            rows = rows[:RELATED_CAP]
     sub.rows = len(rows)
     for r in rows:
         sub.match_mix[r["match"]] = sub.match_mix.get(r["match"], 0) + 1
@@ -533,6 +599,13 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
                 ps.requested_subs = len(res.subs)
                 ps.rest_of_question = res.rest
                 subs = res.subs
+                # The split call's parts are what get retrieved; the broader half of the
+                # question is retrieved only if the splitter made it a part. When it left it
+                # in rest_of_question alone, no article was ever searched for it (the
+                # org-structure digests dropped out of a turn this way). Make it a part.
+                if res.rest and not any(x.intent == "other" for x in subs) and len(subs) < MAX_SUBQUERIES:
+                    subs = subs + [Sub(intent="other", text=res.rest)]
+                    ps.requested_subs = len(subs)
                 if remaining_usd is not None:
                     allowed = len(subs)
                     while allowed > 1 and (estimate_extra_usd(model, tier, settings, allowed, False) > remaining_usd - res.cost_usd):

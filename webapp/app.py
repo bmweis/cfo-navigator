@@ -33396,8 +33396,12 @@ def _prestep_report_html(r: dict) -> str:
     subs = "".join(
         f'<li>[{_esc(s.get("intent", ""))}] {_esc(", ".join(s.get("metrics") or []) or "no metric")}'
         f'{" · band " + _esc(s["band"]) if s.get("band") else ""}'
+        f'{" · segment " + _esc(s["segment"]) if s.get("segment") else ""}'
         f'{" · year " + _esc(s["year"]) if s.get("year") else ""}'
-        f': {s.get("figure_rows", 0)} figure rows, {s.get("cards", 0)} cards, {s.get("library_hits", 0)} articles'
+        f'{" · searched: " + _esc(s["text"]) if s.get("text") else ""}'
+        f': {s.get("figure_rows", 0)} figure rows'
+        f'{" (" + _esc(", ".join(f"{k} {v}" for k, v in sorted((s.get("match_mix") or {}).items()))) + ")" if s.get("match_mix") else ""}'
+        f', {s.get("cards", 0)} cards, {s.get("library_hits", 0)} articles'
         f'{", " + str(s["figure_rows_left_out"]) + " left out for length" if s.get("figure_rows_left_out") else ""}</li>'
         for s in d.get("subs") or [])
     extras = ""
