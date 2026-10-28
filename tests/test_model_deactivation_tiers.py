@@ -156,4 +156,15 @@ def test_buddy_page_estimate_follows_the_role_model(client):
     c, db = client
     c.post("/admin/system/ai/model/save", json={"role": "buddy_standard", "model": "claude-sonnet-5", "confirm": True})
     html = c.get("/tools/fpa-buddy").text
-    import re; assert re.search(r"var COST = \{[^}]*\"standard\": 0\.0187", html)
+    import re
+    from linklib.agent import _web_provider, tier_label_cost
+    from linklib.db import Library
+    from linklib.pricing import compute_exa_cost
+    lib = Library(db)
+    try:
+        exa = compute_exa_cost("search") if _web_provider(lib) == "exa" else 0.0
+    finally:
+        lib.close()
+    want = tier_label_cost("claude-sonnet-5", "standard", None, exa)        # Sonnet 5 rates, rounded up to the cent
+    assert re.search(r"var COST = \{[^}]*\"standard\": \"about \$%.2f\"" % want, html)
+    assert want != tier_label_cost("claude-sonnet-4-6", "standard", None, exa)   # and it moved off the old role model
