@@ -25329,7 +25329,7 @@ function goDeeperHtml(d) {{
     if (!name || seen[name]) return;
     seen[name] = 1;
     var url = String(c.url || '');
-    parts.push(/^https?:\/\//i.test(url)
+    parts.push(/^https?:\\/\\//i.test(url)
       ? '<a href="' + encodeURI(url) + '" target="_blank" rel="noopener">' + escapeHtml(name) + '</a>'
       : escapeHtml(name));
   }});
