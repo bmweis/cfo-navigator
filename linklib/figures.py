@@ -320,6 +320,49 @@ def split_aliases(contains_line: str) -> list[str]:
     return out
 
 
+SHORT_LINK_HOSTS = {"bit.ly", "t.co", "tinyurl.com", "lnkd.in", "ow.ly", "buff.ly", "goo.gl", "is.gd", "rebrand.ly"}
+
+
+def is_short_link(url: str) -> bool:
+    """True for a well-known link shortener host (flagged in the landing import preview)."""
+    from urllib.parse import urlparse
+    host = (urlparse(url or "").hostname or "").lower()
+    return host in SHORT_LINK_HOSTS
+
+
+def parse_landing_tsv(text: str) -> tuple[list[tuple[int, str, str]], list[str]]:
+    """((line, report_slug, landing_url) rows, errors). Two tab-separated
+    columns; an optional header line starting with report_slug is skipped.
+    A non-http(s) URL, a wrong field count or a repeated slug is an error, and
+    any error means nothing should be written."""
+    import re
+    rows: list[tuple[int, str, str]] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    for i, ln in enumerate((text or "").splitlines(), start=1):
+        if not ln.strip():
+            continue
+        cells = ln.split("\t")
+        if i == 1 and cells[0].strip().lower() == "report_slug":
+            continue
+        if len(cells) != 2:
+            errors.append(f"Line {i} has {len(cells)} fields, not 2.")
+            continue
+        slug, url = (c.strip() for c in cells)
+        if not slug:
+            errors.append(f"Line {i} has no report_slug.")
+        elif not re.match(r"^https?://[^\s]+$", url, re.I):
+            errors.append(f"Line {i} ({slug}): the URL must start with http:// or https:// and have no spaces.")
+        elif slug.lower() in seen:
+            errors.append(f"Line {i} repeats {slug!r}.")
+        else:
+            seen.add(slug.lower())
+            rows.append((i, slug, url))
+    if not rows and not errors:
+        errors.append("The file has no rows.")
+    return rows, errors
+
+
 def parse_registry_tsv(text: str) -> tuple[list[RegistryRow], list[str]]:
     """(rows, errors). Three tab-separated columns per line: canonical_metric,
     card_url, the Contains line. An optional header line starting with

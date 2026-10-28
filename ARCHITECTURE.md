@@ -7003,6 +7003,8 @@ loop, no agents.
    `/admin/fpa-buddy/report` shows a "Benchmark lookup" summary per turn with the
    detail one tap away; a fallback always reads in words.
 
+**Landing-URL import (2026-10, turn-20 follow-up).** `/admin/reader/figures` has a "Landing URLs" form: a TSV of `report_slug`, `landing_url` goes to `POST /admin/reader/figures/landing-preview` (writes nothing; per row the current value, new value and status `Set`, `Unchanged`, `Will replace` or `Unknown report`; a bit.ly style short link is flagged amber, not blocked) and then `POST /admin/reader/figures/landing-load`, which re-parses the posted text, re-plans against the database and writes `benchmark_reports.landing_url_manual` in one transaction (`Library.plan_landing_import`, `apply_landing_import`, with a read-back). A non-empty existing value may have been typed by hand, so a `Will replace` row is kept unless "Replace existing values" is ticked. One `archive_audit_log` row and one `figures-audit.jsonl` line; the result states how many reports now resolve and names those still cited "no link on file". Admin session only.
+
 **Rejected, never coerced.** Per file: a header other than the 16 columns in
 order, a row with a field count other than 16, a row count, byte count or
 sha256 different from the manifest, a slug that is not the filename stem or is
