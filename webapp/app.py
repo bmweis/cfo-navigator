@@ -49,6 +49,7 @@ import html
 import inspect
 import contextvars
 import json
+import logging
 import math
 import os
 import re
@@ -25210,6 +25211,8 @@ function mdInline(s) {{
   s = s.replace(/\\[(\\d{{1,2}})\\](?!\\()/g, function(m, num) {{
     var i = parseInt(num, 10);
     if (CITES && i >= 1 && i <= CITES.length) {{
+      // A source with no link (a benchmark report with no landing page) is a plain marker.
+      if (!CITES[i-1].url) return '<sup class="cite">[' + i + ']</sup>';
       return '<sup class="cite"><a href="' + encodeURI(CITES[i-1].url) + '" target="_blank" rel="noopener" title="' + escapeHtml(CITES[i-1].title) + '">[' + i + ']</a></sup>';
     }}
     return m;
@@ -25717,6 +25720,7 @@ async function doAsk(followUp, skipSimilar) {{
     if (!recorded) {{ if (n) n.remove(); return; }}
     loadRecent();
   }}
+  var stage = 'fetch', t0 = Date.now();
   try {{
     var resp = await fetch('/ask', {{
       method: 'POST',
@@ -25725,7 +25729,9 @@ async function doAsk(followUp, skipSimilar) {{
         private: (!followUp && !convoId) ? !!(document.getElementById('ask-private') || {{}}).checked : undefined }})
     }});
     // An edge error page (Cloudflare, Railway) is HTML, so the body may not parse.
+    stage = 'parse';
     var d = await resp.json().catch(function() {{ return {{}}; }});
+    stage = 'render';
     if (stale()) {{ if (d.usage) updateUsage(d.usage); dropLate(resp.ok && !d.capped); return; }}
     if (!resp.ok) {{
       // A 5xx with no JSON detail is the same failure to the reader.
@@ -25760,7 +25766,15 @@ async function doAsk(followUp, skipSimilar) {{
   }} catch(e) {{
     if (stale()) {{ dropLate(false); return; }}
     console.error('FP&A Buddy ask failed', e);
-    answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong. Try again.</span>';
+    // Evidence for the server log: which step threw, what, and after how long.
+    try {{ navigator.sendBeacon('/ask/client-error', new Blob([JSON.stringify({{
+      stage: stage, name: (e && e.name) || '', message: String((e && e.message) || e).slice(0, 200),
+      elapsed_ms: Date.now() - t0, online: navigator.onLine, visibility: document.visibilityState,
+      effort: effort }})], {{type: 'application/json'}})); }} catch(_) {{}}
+    // The server may have finished and stored the answer even though this page lost it.
+    answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong. Try again.</span>' +
+      (stage === 'fetch' || stage === 'render'
+        ? ' <span style="color:var(--muted);font-size:13px;">Your answer may have been saved. Check Recent conversations before asking again.</span>' : '');
     qEl.value = q; qEl.dispatchEvent(new Event('input'));
     done(asked ? 'ready' : 'none');
   }}
@@ -25951,6 +25965,27 @@ def _ask_blocking(request: Request, question: str, *, model: str, effort: str,
                                 status_code=502)
     finally:
         lib.close()
+
+
+@app.post("/ask/client-error")
+async def ask_client_error(request: Request):
+    """Log (server side only) a failure the Buddy page showed to the reader:
+    which step threw, the exception name, and elapsed time. Signed-in users only;
+    nothing is stored and the body is length-capped. Issue: turn 20 (2026-10)."""
+    _require_member(request)
+    try:
+        d = json.loads((await request.body())[:2000] or b"{}")
+    except ValueError:
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    def _s(k, n=200):
+        return str(d.get(k, ""))[:n].replace("\n", " ")
+    logging.getLogger("webapp.ask").warning(
+        "Buddy page failure shown to a user: stage=%s error=%s message=%s elapsed_ms=%s online=%s visibility=%s effort=%s",
+        _s("stage", 20), _s("name", 60), _s("message"), _s("elapsed_ms", 12),
+        _s("online", 8), _s("visibility", 12), _s("effort", 12))
+    return Response(status_code=204)
 
 
 @app.post("/ask/feedback")
@@ -33347,12 +33382,15 @@ def admin_ask_report(request: Request, user: str = ""):
         failed = (f'<div style="font-size:12px;margin-top:3px;"><span style="color:var(--alert);font-weight:600;">&#9888; Failed</span> '
                   f'<span style="color:var(--muted);">{_esc(r.get("error") or "No answer was produced.")}</span></div>') if r.get("failed") else ""
         lookup = _prestep_report_html(r)
+        _ms = int(r.get("duration_ms") or 0)
+        dur = (f'<div style="font-size:11px;font-weight:400;color:{"var(--alert)" if _ms >= 60000 else "var(--muted)"};white-space:nowrap;">'
+               f'{_ms / 1000:.1f}s</div>') if _ms else ""
         return f"""<tr class="turn-row"{attrs}>
   <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])}</td>
   <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(r))}</td>
   <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}{failed}{lookup}</td>
   <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
-  <td class="admin-table-cell" data-label="Cost" style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}{split}</td>
+  <td class="admin-table-cell" data-label="Cost" style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}{split}{dur}</td>
 </tr>"""
 
     def _rollup_row(turns: list[dict], gid: str) -> str:

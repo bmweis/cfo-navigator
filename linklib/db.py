@@ -2775,6 +2775,8 @@ class Library:
             # cost (already inside cost_usd; broken out like rewrite_cost_usd).
             "ALTER TABLE ask_questions ADD COLUMN prestep_json TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE ask_questions ADD COLUMN prestep_cost_usd REAL NOT NULL DEFAULT 0",
+            # Wall time of the whole turn (pre-step, retrieval, answer call), 0 on older rows.
+            "ALTER TABLE ask_questions ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0",
             # FP&A Buddy Keep private (2026-10): 1 = the asker keeps this
             # conversation out of the member-visible past-questions list.
             # Set on every turn of a conversation together; admins still see it.
@@ -9520,7 +9522,8 @@ class Library:
                             failed: bool = False,
                             error: str = "",
                             prestep: Optional[dict] = None,
-                            prestep_cost_usd: float = 0.0) -> int:
+                            prestep_cost_usd: float = 0.0,
+                            duration_ms: int = 0) -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
@@ -9549,8 +9552,8 @@ class Library:
                 embed_input_tokens, embed_cost_usd,
                 exa_result_count, exa_cost_usd,
                 citations_json, stop_reason, is_private, web_scope, failed, error,
-                prestep_json, prestep_cost_usd, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                prestep_json, prestep_cost_usd, duration_ms, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
@@ -9560,7 +9563,8 @@ class Library:
              json.dumps(citations or []), stop_reason or "", int(bool(is_private)),
              web_scope if web_scope in ("open", "trusted") else "",
              int(bool(failed)), error if failed else "",
-             json.dumps(prestep) if prestep else "", float(prestep_cost_usd or 0), now),
+             json.dumps(prestep) if prestep else "", float(prestep_cost_usd or 0),
+             int(duration_ms or 0), now),
         )
         row_id = cur.lastrowid
         if not conversation_id:

@@ -36,8 +36,15 @@ Brian's approval), rather than raising a `ToolError` for it.
 """
 from __future__ import annotations
 
+import logging
+import time
+
 from linklib.db import Library
 from linklib.stop_reason import stop_reason_of
+
+_log = logging.getLogger(__name__)
+# Cloudflare cuts a request at about 100 s; log a turn that gets past 60 s.
+SLOW_TURN_MS = 60_000
 
 
 class UnknownConversationError(Exception):
@@ -162,6 +169,7 @@ def run_ask(
     from linklib.agent import EFFORT_SETTINGS as _TIERS
     if not model and effort in _TIERS:
         model = lib.get_role_model(f"buddy_{effort}")   # the tier's admin-chosen model; same as EFFORT_SETTINGS until changed
+    _t0 = time.monotonic()
     ans = answer_question(
         lib, question,
         model=model,
@@ -173,6 +181,10 @@ def run_ask(
         history=history,
         budget_usd=budget_left,
     )
+    duration_ms = int((time.monotonic() - _t0) * 1000)
+    if duration_ms >= SLOW_TURN_MS:
+        _log.warning("slow Buddy turn: %d ms effort=%s model=%s failed=%s",
+                     duration_ms, effort, getattr(ans, "model", ""), getattr(ans, "failed", False))
 
     if getattr(ans, "failed", False):
         # Record the spend (rewrite, embedding, Exa, any partial usage) on a
@@ -199,6 +211,7 @@ def run_ask(
                 web_scope=getattr(ans, "web_scope", ""),
                 failed=True, error=ans.error,
                 prestep=getattr(ans, "prestep", None), prestep_cost_usd=getattr(ans, "prestep_cost_usd", 0.0),
+                duration_ms=duration_ms,
             )
             usage_line = {"spent": round(lib.ask_cost_this_month(user_id), 2),
                           "cap": round(lib.get_effective_ask_cap(user_id), 2)}
@@ -243,6 +256,7 @@ def run_ask(
             is_private=is_private,
             web_scope=getattr(ans, "web_scope", ""),
             prestep=getattr(ans, "prestep", None), prestep_cost_usd=getattr(ans, "prestep_cost_usd", 0.0),
+            duration_ms=duration_ms,
         )
         new_conversation_id = conversation_id or str(row_id)
         turn_id = row_id
@@ -266,6 +280,7 @@ def run_ask(
         # (token-only or break-glass access with no users row).
         "turn_id": turn_id,
         "usage": usage_line,
+        "duration_ms": duration_ms,
         "is_private": bool(is_private),
         # "" unless the answer was cut off at the length limit; the web page
         # and MCP callers show it under the answer.
