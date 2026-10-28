@@ -40,6 +40,7 @@ import logging
 import time
 
 from linklib.db import Library
+from linklib.pricing import turn_cost_line
 from linklib.stop_reason import stop_reason_of
 
 _log = logging.getLogger(__name__)
@@ -280,6 +281,12 @@ def run_ask(
         # (token-only or break-glass access with no users row).
         "turn_id": turn_id,
         "usage": usage_line,
+        # The metered total for this turn (ask_questions.cost_usd: answer call,
+        # pre-step split, query embedding, any search, any follow-up rewrite) and
+        # the one-line sentence shown under the answer. None / "" when the turn
+        # was not recorded, so nothing is shown that the cap does not count.
+        "cost_usd": round(ans.cost_usd, 6) if turn_id is not None else None,
+        "cost_line": turn_cost_line(ans.cost_usd) if turn_id is not None else "",
         "duration_ms": duration_ms,
         "is_private": bool(is_private),
         # "" unless the answer was cut off at the length limit; the web page

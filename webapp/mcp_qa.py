@@ -173,8 +173,12 @@ def register_qa_tools(mcp: FastMCP, lib_factory: Callable[[], Library], opml_pat
 
         Returns `{"answer", "citations", "sources", "feed_sources",
         "web_sources", "followups_left", "conversation_id", "turn_id",
-        "usage", "capped"}` — the same shape `/ask`'s own JSON response
-        carries. A cited library source that's one of Brian's own
+        "usage", "cost_usd", "cost_line", "capped"}` — the same shape
+        `/ask`'s own JSON response carries. `cost_usd` is the metered total
+        for this turn (answer call, pre-step split, query embedding, any
+        search), the same figure that counts toward the monthly cap, and
+        `cost_line` is the one plain sentence shown under the answer on the
+        site; both are absent (None / "") on a capped turn. A cited library source that's one of Brian's own
         published pieces carries `"own_content": true` in its citation
         entry, unmodified from what `answer_question()` returns.
 

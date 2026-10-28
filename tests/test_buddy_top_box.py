@@ -147,39 +147,26 @@ def test_send_is_disabled_while_a_question_runs_and_enter_still_does_not_send(me
     assert pg.locator("#ask-thread .ask-q-bubble").count() == 1
 
 
-def test_admin_sees_the_estimate_in_the_depth_options_and_on_the_button(admin_pg):
+def test_every_user_sees_the_rounded_up_label_in_the_depth_options_and_on_the_button(admin_pg):
+    """The cost label is for every signed-in user now (it was admin-only): one
+    typical simple question per depth, rounded up to the next cent, fixed per depth
+    (it does not move when sources change)."""
     pg = admin_pg
-    cost, exa = pg.evaluate("[COST, EXA_UNIT]")
-    assert exa > 0 and set(cost) == {"quick", "standard", "deep"}
+    cost = pg.evaluate("COST")
+    assert set(cost) == {"quick", "standard", "deep"} and all(re.fullmatch(r"about \$\d+\.\d\d", v) for v in cost.values())
     for tier, label in (("quick", "Quick"), ("standard", "Standard"), ("deep", "Deep")):
-        want = "($%.3f)" % (cost[tier] + exa)                              # Current feed is on by default and searches the trusted sites
-        assert pg.inner_text("#ask-dd-top .ask-tag[data-tier='%s'] .ask-tag-cost" % tier) == want
+        assert pg.inner_text("#ask-dd-top .ask-tag[data-tier='%s'] .ask-tag-cost" % tier) == cost[tier]
         assert pg.inner_text("#ask-dd-top .ask-tag[data-tier='%s'] .ask-tag-name" % tier) == label
-    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % (cost["standard"] + exa)
+    want = "Standard, " + cost["standard"]
+    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == want
     assert "per query" not in pg.inner_text("body")
-    # The note lives at the bottom of the Depth dropdown (next to the amounts), not under the controls.
-    panel = "#ask-dd-top .ask-dd-panel[data-dd='depth'] .ask-cost-note"
-    assert pg.locator(panel).count() == 1
-    assert pg.locator(".ask-cost-note").count() == 1
-    assert pg.locator("#ask-dd-top [data-dd='sources'].ask-dd-panel .ask-cost-note").count() == 0
-    assert pg.locator(panel).text_content().strip() == (
-        "Dollar amounts are estimates. They cover the model only, not web search (about $0.007 a question) or thinking tokens.")
-    pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
-    assert pg.locator(panel).is_visible()
-    pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
-    # Current feed off and Open web off: no web search, no Exa call in any figure.
+    # Sources change what a turn can cost, not the label: it is a typical simple question.
     pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
     pg.click("#ask-dd-top .ask-tag[data-source='feed']")
-    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % cost["standard"]
-    # Open web alone is one Exa call.
-    pg.click("#ask-dd-top .ask-tag[data-source='open_web']")
-    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % (cost["standard"] + exa)
-    # Both on is still one call, not two.
-    pg.click("#ask-dd-top .ask-tag[data-source='feed']")
-    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Standard ($%.3f)" % (cost["standard"] + exa)
+    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == want
 
 
-def test_the_bubble_clone_carries_the_estimate_and_keeps_its_old_look(admin_pg):
+def test_the_bubble_clone_carries_the_label_and_keeps_its_old_look(admin_pg):
     pg = admin_pg
     pg.fill("#ask-q", "First question")
     pg.click("#ask-btn")
@@ -194,16 +181,16 @@ def test_the_bubble_clone_carries_the_estimate_and_keeps_its_old_look(admin_pg):
         return {t: document.querySelector("#fu [data-dd='" + k + "'].ask-dd-btn").getBoundingClientRect().top}; })""")
     assert abs(d["t"] - s["t"]) < 1                                       # still side by side
     assert pg.locator("#fu .ask-cost").count() == 0
+    assert not pg.locator("#fu .ask-dd-foot").is_visible()                # the footnote is the top box's, not the bubble's
 
 
-def test_a_member_sees_names_only_and_no_dollar_note(member_pg):
+def test_a_non_admin_sees_the_same_label_and_footnote(member_pg):
     pg = member_pg
-    assert pg.evaluate("COST") == {}
-    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Quick"
-    for t in pg.locator("#ask-dd-top .ask-tag[data-tier] .ask-tag-cost").all():
-        assert t.inner_text() == ""
-    assert pg.locator(".ask-cost-note").count() == 0
-    assert "$" not in pg.inner_text("#ask-dd-top")
+    cost = pg.evaluate("COST")
+    assert re.fullmatch(r"about \$\d+\.\d\d", cost["quick"])
+    assert pg.inner_text("#ask-dd-top [data-dd='depth'] .ask-dd-v") == "Quick, " + cost["quick"]
+    assert pg.locator("#ask-dd-foot").count() == 1
+    assert "Dollar amounts are estimates" not in pg.content()
 
 
 def test_search_past_questions_intro_says_what_the_list_is(buddy_html):
@@ -212,39 +199,41 @@ def test_search_past_questions_intro_says_what_the_list_is(buddy_html):
     assert "other members have already asked" not in html
 
 
-# --- Dropdown panels: the note lives only inside the Depth panel, and each panel is its
-# --- control's width. Measured, not read from the CSS (PR for the #690 follow-up).
+# --- Dropdown panels: each panel is its control's width. The cost footnote is a
+# --- plain paragraph under the Depth box (not in the panel, not a tooltip).
 
-def test_cost_note_is_inside_the_hidden_depth_panel_and_no_rule_can_show_it_alone(admin_html):
-    """Non-browser guard (Chromium tests do not run in CI, issue 669): the note is a
-    child of the Depth panel, which is `hidden`, and no CSS rule gives the note or the
-    panel a display that could beat `hidden`."""
-    m = re.search(r'<div class="ask-dd-panel" data-dd="depth" hidden>(.*?)\n\s*</div>\n\s*</div>\n\s*<div class="ask-dd-col">', admin_html, re.S)
-    assert m and "Dollar amounts are estimates." in m.group(1)
-    assert admin_html.count("Dollar amounts are estimates.") == 1
-    assert '<div class="ask-dd-panel" data-dd="sources"' in admin_html
-    css = admin_html
-    assert not re.search(r"\.ask-(?:cost-note|dd-note)\s*\{[^}]*display\s*:", css)
-    assert re.search(r"\.ask-dd-panel\[hidden\]\s*\{\s*display\s*:\s*none", css)
-    assert not re.search(r"\.ask-dd-panel\s*\{[^}]*display\s*:", css)
-
-
-def test_the_cost_note_is_not_rendered_for_a_non_admin(buddy_html):
-    assert "Dollar amounts are estimates." not in buddy_html[0]
+def test_footnote_is_a_visible_paragraph_under_the_depth_box_not_a_tooltip(admin_html):
+    """Non-browser guard (Chromium tests do not run in CI, issue 669): the footnote is
+    ordinary page text, rendered once, after the Depth panel inside the Depth column,
+    with no title attribute carrying it and no rule hiding it."""
+    m = re.search(r'<p class="ask-dd-foot" id="ask-dd-foot">([^<]*)</p>', admin_html)
+    assert m and admin_html.count('id="ask-dd-foot"') == 1
+    text = m.group(1)
+    assert "Benchmark questions cost two to three times as much" in text
+    assert "$" not in text and "\u2014" not in text and "member" not in text.lower()
+    assert 'title="Benchmark' not in admin_html
+    col = re.search(r'<div class="ask-dd-col">(.*?)</div>\s*<div class="ask-dd-col">', admin_html, re.S).group(1)
+    assert col.index('data-dd="depth" hidden') < col.index('id="ask-dd-foot"')   # directly after the box and its panel
+    assert not re.search(r"\.ask-dd-foot\s*\{[^}]*display\s*:\s*none", admin_html.split(".fu .ask-dd-foot")[0])
+    assert "Dollar amounts are estimates." not in admin_html
 
 
-def test_the_note_shows_only_while_the_depth_panel_is_open(admin_pg):
+def test_footnote_sits_under_the_box_and_takes_two_lines_on_a_phone(admin_pg):
     pg = admin_pg
-    note = "#ask-dd-top .ask-cost-note"
-    shown = lambda: pg.evaluate("(s) => { var e = document.querySelector(s); var r = e.getBoundingClientRect();"
-                                " var c = getComputedStyle(e); return c.display !== 'none' && c.visibility !== 'hidden' && r.height > 0; }", note)
-    assert not shown()                                                    # both closed
-    pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
-    assert not shown()                                                    # Sources open
+    btn, foot = _box(pg, "#ask-dd-top [data-dd='depth'].ask-dd-btn"), _box(pg, "#ask-dd-foot")
+    assert foot["t"] >= btn["b"] and foot["t"] - btn["b"] < 16           # directly under the box, closed
+    assert abs(foot["l"] - btn["l"]) < 4
+    shown = pg.evaluate("(s) => { var e = document.querySelector(s); var c = getComputedStyle(e);"
+                        " return c.display !== 'none' && c.visibility !== 'hidden' && e.getBoundingClientRect().height > 0; }", "#ask-dd-foot")
+    assert shown
+    line_h = pg.evaluate("parseFloat(getComputedStyle(document.getElementById('ask-dd-foot')).lineHeight)")
+    phone = pg.evaluate("innerWidth") < 500
+    assert foot["h"] / line_h < (2.2 if phone else 3.2)                   # two lines on a phone; the narrower half-width desktop column may take a third
+    assert pg.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    # Open: the panel still opens directly under the button, the footnote follows it.
     pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
-    assert shown()                                                        # Depth open
-    pg.keyboard.press("Escape")
-    assert not shown()
+    panel, foot2 = _box(pg, "#ask-dd-top .ask-dd-panel[data-dd='depth']"), _box(pg, "#ask-dd-foot")
+    assert panel["t"] - btn["b"] < 24 and foot2["t"] >= panel["b"]
 
 
 def test_each_panel_is_its_controls_width_and_starts_at_its_left_edge(admin_pg):
@@ -257,19 +246,14 @@ def test_each_panel_is_its_controls_width_and_starts_at_its_left_edge(admin_pg):
         pg.keyboard.press("Escape")
 
 
-def test_the_bubble_panels_keep_the_note_inside_depth_and_never_pass_the_bubble(admin_pg):
+def test_the_bubble_panels_never_pass_the_bubble(admin_pg):
     pg = admin_pg
     pg.fill("#ask-q", "First question")
     pg.click("#ask-btn")
     pg.wait_for_selector("#fu-q")
     pg.wait_for_timeout(600)
-    note = pg.locator("#fu .ask-dd-panel[data-dd='depth'] .ask-cost-note")
-    assert note.count() == 1 and pg.locator("#fu .ask-dd-panel[data-dd='sources'] .ask-cost-note").count() == 0
-    assert not note.is_visible()
     pg.click("#fu [data-dd='sources'].ask-dd-btn")
-    assert not note.is_visible()
     pg.click("#fu [data-dd='depth'].ask-dd-btn")
-    assert note.is_visible()
     for k in ("depth", "sources"):
         pg.click("#fu [data-dd='%s'].ask-dd-btn" % k) if pg.get_attribute("#fu [data-dd='%s'].ask-dd-btn" % k, "aria-expanded") != "true" else None
         p, f = _box(pg, "#fu .ask-dd-panel[data-dd='%s']" % k), _box(pg, "#fu")

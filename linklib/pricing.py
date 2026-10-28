@@ -284,3 +284,22 @@ def compute_exa_cost(endpoint: str = "search", num_results: int = 0) -> float:
     rates = EXA_PRICING.get(endpoint, _EXA_FALLBACK)
     overage = max(0, num_results - rates["included_results"])
     return (rates["base_per_1k"] + overage * rates["extra_per_1k_result"]) / 1_000
+
+
+def round_up_cent(amount: float) -> float:
+    """Round a dollar amount UP to the next whole cent (never below the input).
+    Rounding to 6 places first keeps float noise (0.03 stored as 0.030000000000000002)
+    from pushing an exact cent up a whole cent."""
+    import math
+    return math.ceil(round(amount * 100, 6)) / 100
+
+
+def turn_cost_line(cost_usd: float | None) -> str:
+    """The one plain sentence shown under an answer to its asker: what the turn
+    cost, in the same metered total that counts toward their monthly cap
+    (ask_questions.cost_usd). "" when there is nothing real to show."""
+    if cost_usd is None or cost_usd <= 0:
+        return ""
+    if cost_usd < 0.005:
+        return "This question cost less than $0.01."
+    return f"This question cost ${cost_usd:.2f}."

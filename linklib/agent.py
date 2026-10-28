@@ -103,6 +103,33 @@ def tier_cost_estimate(model: str, tier: str, tokens: tuple[int, int] | None = N
     return round((in_tok * r["input"] + out_tok * r["output"]) / 1_000_000, 4)
 
 
+# Query embedding for one simple question: the question text, a few dozen tokens.
+SIMPLE_QUESTION_EMBED_TOKENS = 60
+
+
+def typical_simple_turn_cost(model: str, tier: str, tokens: tuple[int, int] | None = None,
+                             exa_unit: float = 0.0) -> float | None:
+    """Typical cost of one simple question at a depth, in the same metered terms
+    the monthly cap uses: the answer call (model_pricing rates times typical
+    tokens, history else TIER_TOKEN_PROFILE), the query embedding, and one search
+    when the web-capable sources run. Excludes the benchmark pre-step, the
+    follow-up rewrite and thinking tokens. Unrounded."""
+    base = tier_cost_estimate(model, tier, tokens)
+    if base is None:
+        return None
+    from .pricing import compute_embedding_cost
+    return base + compute_embedding_cost("text-embedding-3-small", SIMPLE_QUESTION_EMBED_TOKENS) + exa_unit
+
+
+def tier_label_cost(model: str, tier: str, tokens: tuple[int, int] | None = None,
+                    exa_unit: float = 0.0) -> float | None:
+    """The dollar figure shown in the Depth dropdown: typical_simple_turn_cost
+    rounded UP to the next cent, so the label is never below the typical turn."""
+    from .pricing import round_up_cent
+    c = typical_simple_turn_cost(model, tier, tokens, exa_unit)
+    return None if c is None else round_up_cent(c)
+
+
 _STOP = {
     "the", "a", "an", "and", "or", "but", "for", "with", "how", "what", "why",
     "when", "should", "would", "could", "about", "into", "from", "that", "this",
