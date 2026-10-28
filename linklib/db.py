@@ -8148,6 +8148,61 @@ class Library:
         self.conn.commit()
         return cur.rowcount == 1
 
+    def plan_landing_import(self, rows: list[tuple[int, str, str]], replace_existing: bool = False) -> list[dict]:
+        """What importing (line, slug, url) rows into landing_url_manual would do,
+        with nothing written. Status: Unknown report, Unchanged, Set (the column
+        is empty), or Will replace (it holds a different value, which may have been
+        typed by hand: such a row is kept unless replace_existing). Each plan row
+        has `write` True only when applying would change the column."""
+        from . import figures as _fg
+        cur = {r["report_slug"]: (r["landing_url_manual"] or "")
+               for r in self.conn.execute("SELECT report_slug, landing_url_manual FROM benchmark_reports")}
+        plan = []
+        for line, slug, url in rows:
+            if slug not in cur:
+                status, write = "Unknown report", False
+            elif cur[slug] == url:
+                status, write = "Unchanged", False
+            elif not cur[slug]:
+                status, write = "Set", True
+            else:
+                status, write = "Will replace", bool(replace_existing)
+            plan.append({"line": line, "slug": slug, "current": cur.get(slug, ""), "new": url,
+                         "status": status, "write": write, "short_link": _fg.is_short_link(url)})
+        return plan
+
+    def apply_landing_import(self, rows: list[tuple[int, str, str]], replace_existing: bool = False) -> dict:
+        """Applies plan_landing_import in one transaction (all rows or none), then
+        reads every written value back. Returns counts."""
+        plan = self.plan_landing_import(rows, replace_existing)
+        todo = [p for p in plan if p["write"]]
+        try:
+            for p in todo:
+                self.conn.execute("UPDATE benchmark_reports SET landing_url_manual = ? WHERE report_slug = ?",
+                                  (p["new"], p["slug"]))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        for p in todo:
+            got = self.conn.execute("SELECT landing_url_manual FROM benchmark_reports WHERE report_slug = ?",
+                                    (p["slug"],)).fetchone()
+            if not got or got[0] != p["new"]:
+                raise RuntimeError(f"Read-back failed for {p['slug']}")
+        counts: dict = {"set": 0, "replaced": 0, "unchanged": 0, "unknown": 0, "kept": 0}
+        for p in plan:
+            if p["status"] == "Unknown report":
+                counts["unknown"] += 1
+            elif p["status"] == "Unchanged":
+                counts["unchanged"] += 1
+            elif p["status"] == "Set":
+                counts["set"] += 1
+            elif p["write"]:
+                counts["replaced"] += 1
+            else:
+                counts["kept"] += 1
+        return counts
+
     def list_benchmark_reports(self) -> list[dict]:
         rows = self.conn.execute(
             """SELECT r.*, (SELECT COUNT(*) FROM benchmark_figures f

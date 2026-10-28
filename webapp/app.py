@@ -37816,6 +37816,21 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
 <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;max-width:900px;">{summary["reports"]:,} reports, {summary["figures"]:,} figures, {summary["metrics"]:,} distinct metric names. {summary["null_value_num"]:,} {"figure has" if summary["null_value_num"] == 1 else "figures have"} a value that is not a plain number. Metric registry: {summary["registry"]:,} metrics, {summary["aliases"]:,} aliases. Metric name map: {summary["name_map"]:,} rows (filled by a later job).</p>
 {reports_table}
 
+<h2 style="font-size:16px;margin:28px 0 10px;">Landing URLs</h2>
+<form method="post" action="/admin/reader/figures/landing-preview" enctype="multipart/form-data"
+      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;max-width:900px;">
+  <label for="landing-tsv" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Landing URLs (TSV)</label>
+  <input type="file" id="landing-tsv" name="tsv" accept=".tsv,.txt,text/tab-separated-values,text/plain" style="max-width:100%;margin:0 0 12px;">
+  <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:0 0 14px;">
+    <input type="checkbox" name="replace_existing" value="1"> Replace existing values
+  </label>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Preview</button>
+    <span style="font-size:12.5px;color:var(--muted);">Preview writes nothing.</span>
+  </div>
+</form>
+<p style="font-size:13px;color:var(--muted);margin:0 0 8px;max-width:900px;">Two tab-separated columns, <code>report_slug</code> and <code>landing_url</code> (a header line is optional). The URL goes in the same place as the Save box in the table above. A value already set, which may have been typed by hand, is kept unless you tick &ldquo;Replace existing values&rdquo;. A short link (for example bit.ly) is allowed but flagged.</p>
+
 <h2 style="font-size:16px;margin:28px 0 10px;">Metric registry</h2>
 <form method="post" action="/admin/reader/figures/registry" enctype="multipart/form-data"
       style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;max-width:900px;">
@@ -38026,6 +38041,129 @@ async def admin_figures_load(request: Request):
 <p style="margin:18px 0 0;"><a href="/admin/reader/figures" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Back to Benchmark figures</a></p>
 </div>"""
     return HTMLResponse(_page("Figures loaded—Admin", "Admin", body, authed=True))
+
+
+def _landing_import_page(plan: list[dict], tsv_text: str, replace_existing: bool) -> HTMLResponse:
+    tone = {"Set": "", "Unchanged": "color:var(--muted);", "Will replace": "color:var(--caution);font-weight:600;",
+            "Unknown report": "color:var(--alert);font-weight:600;"}
+    empty_cell = '<span style="color:var(--muted);">empty</span>'
+    rows = []
+    for p in plan:
+        status = p["status"] + ("" if p["status"] != "Will replace" or p["write"] else " (kept, not ticked)")
+        short = (' <span style="color:var(--caution);font-weight:600;font-size:12px;">short link</span>'
+                 if p["short_link"] else "")
+        current = _esc(p["current"]) or empty_cell
+        rows.append(
+            f'<tr><td style="padding:10px 12px;font-size:13px;vertical-align:top;overflow-wrap:anywhere;">{_esc(p["slug"])}</td>'
+            f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;overflow-wrap:anywhere;">{current}</td>'
+            f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;overflow-wrap:anywhere;">{_esc(p["new"])}{short}</td>'
+            f'<td style="padding:10px 12px;font-size:13px;vertical-align:top;white-space:nowrap;{tone[p["status"]]}">{_esc(status)}</td></tr>')
+    n_write = sum(1 for p in plan if p["write"])
+    unknown = sum(1 for p in plan if p["status"] == "Unknown report")
+    table = f"""{_ADMIN_SCROLL_HINT_HTML}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
+<table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
+<thead><tr style="background:var(--accent-light);">
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_NAME}px;">Report slug</th>
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_MESSAGE}px;">Current value</th>
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_MESSAGE}px;">New value</th>
+  <th style="{_FIGURES_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Status</th>
+</tr></thead>
+<tbody>{"".join(rows)}</tbody>
+</table>
+</div>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+</script>"""
+    plural = "s" if n_write != 1 else ""
+    if n_write:
+        action = f"""<form method="post" action="/admin/reader/figures/landing-load" style="margin:16px 0 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+  <textarea name="tsv_text" hidden>{_esc(tsv_text)}</textarea>
+  <input type="hidden" name="replace_existing" value="{1 if replace_existing else 0}">
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Set {n_write} landing URL{plural}</button>
+  <span style="font-size:12.5px;color:var(--muted);">All or none are written in one step.</span>
+</form>"""
+    else:
+        action = '<p style="font-size:13.5px;color:var(--muted);margin:16px 0 0;">Nothing would change.</p>'
+    summary = f"{len(plan)} row{'s' if len(plan) != 1 else ''}: {n_write} would be written"
+    if unknown:
+        summary += f", {unknown} unknown report{'s' if unknown != 1 else ''}"
+    summary += ". Nothing has been written."
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/reader/figures" style="font-size:13px;color:var(--muted);">&larr; Benchmark figures</a></p>
+<h1>Preview landing URLs</h1>
+<p style="color:var(--muted);margin:0 0 16px;">{_esc(summary)}</p>
+{table}{action}
+</div>"""
+    return HTMLResponse(_page("Preview landing URLs—Admin", "Admin", body, authed=True))
+
+
+@app.post("/admin/reader/figures/landing-preview", response_class=HTMLResponse)
+async def admin_figures_landing_preview(request: Request):
+    """Parses a landing-URL TSV and shows what importing it would do. Writes nothing."""
+    _digest_gate(request, post=True)
+    from linklib.figures import parse_landing_tsv
+    form = await request.form(max_part_size=_DIGESTS_FORM_MAX_BYTES)
+    data = _figures_upload_bytes(form, "tsv")
+    if not data:
+        return _figures_page(error="Choose a landing-URL TSV file.", status=400)
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return _figures_page(error="The file is not UTF-8 text. Nothing was written.", status=400)
+    rows, errors = parse_landing_tsv(text)
+    if errors:
+        return _figures_page(error="Nothing was written. " + " ".join(errors), status=400)
+    replace = bool(form.get("replace_existing"))
+
+    def _work():
+        lib = _lib()
+        try:
+            return lib.plan_landing_import(rows, replace)
+        finally:
+            lib.close()
+    plan = await run_in_threadpool(_work)
+    return _landing_import_page(plan, text, replace)
+
+
+@app.post("/admin/reader/figures/landing-load", response_class=HTMLResponse)
+async def admin_figures_landing_load(request: Request):
+    """Applies the landing-URL import. Re-parses the posted text and re-plans
+    against the current database (never trusts the preview), in one transaction.
+    One archive_audit_log row and one figures-audit.jsonl line."""
+    _digest_gate(request, post=True)
+    from linklib import figures as _fg
+    form = await request.form(max_part_size=_DIGESTS_FORM_MAX_BYTES)
+    rows, errors = _fg.parse_landing_tsv(str(form.get("tsv_text") or ""))
+    if errors:
+        return _figures_page(error="Nothing was written. " + " ".join(errors), status=400)
+    replace = str(form.get("replace_existing") or "") == "1"
+    username = (_current_claims(request) or {}).get("username", "") or ""
+
+    def _work():
+        lib = _lib()
+        try:
+            counts = lib.apply_landing_import(rows, replace)
+            landings = _fg.resolve_landings(lib)
+            missing = sorted(k for k, v in landings.items() if not v["url"])
+            _log_archive_audit(lib, request, "edit", None,
+                               detail=(f"landing URL import: {counts['set']} set, {counts['replaced']} replaced, "
+                                       f"{counts['kept']} kept, {counts['unchanged']} unchanged, {counts['unknown']} unknown"))
+            return counts, len(landings), missing
+        finally:
+            lib.close()
+    try:
+        counts, total, missing = await run_in_threadpool(_work)
+    except Exception as exc:
+        return _figures_page(error=f"Nothing was written. {exc}", status=400)
+    _fg.append_audit(DB_PATH, {"event": "landing_import", "user": username, "rows": len(rows),
+                               "replace_existing": replace, **counts})
+    note = (f"Landing URLs imported: {counts['set']} set, {counts['replaced']} replaced, {counts['kept']} kept "
+            f"(existing value, not ticked), {counts['unchanged']} unchanged, {counts['unknown']} unknown report. "
+            f"{total - len(missing):,} of {total:,} reports now have a landing URL.")
+    if missing:
+        note += " Still cited by name with no link on file: " + ", ".join(missing[:40]) + (" and more." if len(missing) > 40 else ".")
+    return _figures_page(notice=_esc(note))
 
 
 @app.post("/admin/reader/figures/landing", response_class=HTMLResponse)
