@@ -158,7 +158,8 @@ def test_the_mcp_result_carries_the_markdown_unchanged(monkeypatch, tmp_path):
         model="claude-sonnet-4-6"))
     out = ao.run_ask(lib, uid, "q", effort="standard", use_library=True, use_feed=False, use_web=False)
     assert out["answer"] == TABLE
-    assert out["go_deeper"] == [{"name": "Example Benchmarks 2099 (2099)", "url": "https://example.test/eb"}]
+    assert out["go_deeper"] == [{"name": "Example Benchmarks 2099 (2099)", "html": "Example Benchmarks 2099 (2099)",
+                                 "url": "https://example.test/eb"}]
     lib.close()
 
 
@@ -254,16 +255,15 @@ RULE_TEXT = {
                            "combine numbers only within one source, one band and one year"],
     "nothing about the future": ["Say nothing about the future or about years the data does not cover",
                                  "Likely similar or slightly lower next year"],
-    "no unasked recommendations": ["Give no recommendation or \"practical read\" unless the question asks for one",
+    "no unasked recommendations": ["Give no recommendation unless the question asks for one",
                                    "Sitting below the median means you are behind"],
-    "one table per topic, 8 rows, fixed columns": ["one compact table per topic", "At most 8 rows per table",
-                                                   "metric, band as printed, statistic, value, report and year, match note",
-                                                   "Newest report first"],
+    "table mechanics, six rows, fixed columns": ["If a table helps, its columns are", "Six rows at most",
+                                                 "metric, band as printed, statistic, value, report and year, match note",
+                                                 "Newest report first"],
     "short match note, shared caveat once": ["The match note is a short phrase",
                                              "stated once above the table and never repeated in each row"],
-    "no restating after the table": ["Do not restate the same numbers in prose after the table"],
     "synthesize then point": ["Synthesize, then point to the source", "do not write one"],
-    "two publishers disagree": ["newest editions disagree, show both with their dates", "Do not average"],
+    "two publishers disagree": ["When two publishers disagree, show both", "Do not average"],
 }
 
 
@@ -281,10 +281,15 @@ def test_each_rule_and_its_example_is_in_the_figures_prompt(name):
         assert phrase in system, f"{name}: missing {phrase!r}"
 
 
-def test_no_rule_is_sent_to_a_turn_without_figures():
+# Since the retest fixes the claim and shape rules ride on every turn (tests/test_answer_rules.py);
+# only the figures mechanics are withheld from a turn with no figures.
+FIGURES_MECHANICS = ("table mechanics, six rows, fixed columns", "short match note, shared caveat once")
+
+
+def test_figures_mechanics_are_not_sent_to_a_turn_without_figures():
     system = _system(False)
-    for phrases in RULE_TEXT.values():
-        assert phrases[0] not in system
+    for name in FIGURES_MECHANICS:
+        assert RULE_TEXT[name][0] not in system
 
 
 def test_the_prompt_for_a_figures_turn_reaches_the_model(tmp_path, monkeypatch):

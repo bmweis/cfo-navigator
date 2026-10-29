@@ -142,7 +142,7 @@ def test_report_without_a_link_is_cited_by_name_with_the_note(lib, monkeypatch):
     c = _client(monkeypatch, cite_first_doc=True)
     ans = _ask(lib, "What is median net revenue retention at $15M ARR?")
     assert "No link on file for this report" in _doc_text(_docs(c.answer_calls()[0])[0])
-    assert ans.citations[0]["url"] == "" and ans.citations[0]["title"].startswith("Figures: Example Benchmarks 2099")
+    assert ans.citations[0]["url"] == "" and ans.citations[0]["title"].startswith("Example Benchmarks, Example Benchmarks 2099")
 
 
 def test_a_band_between_printed_bands_is_flagged_in_the_prompt(lib, monkeypatch):
