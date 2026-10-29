@@ -42,6 +42,7 @@ import time
 from linklib.db import Library
 from linklib.pricing import turn_cost_line
 from linklib.stop_reason import stop_reason_of
+from webapp.answer_render import go_deeper_items
 
 _log = logging.getLogger(__name__)
 # Cloudflare cuts a request at about 100 s; log a turn that gets past 60 s.
@@ -271,6 +272,10 @@ def run_ask(
         # API-verified citations only — what the answer's [n] markers map
         # to. own_content (when present) rides through unmodified.
         "citations": ans.citations,
+        # The benchmark reports the answer cited, for a "Go deeper" line: name
+        # and landing URL ("" = no link on file). The answer text itself is
+        # returned unchanged above.
+        "go_deeper": go_deeper_items(ans.citations),
         "sources":      [{"title": s["title"], "url": s["url"]} for s in ans.sources],
         "feed_sources": [{"title": s["title"], "url": s["url"]} for s in ans.feed_sources],
         "web_sources":  [{"title": s["title"], "url": s["url"]} for s in ans.web_sources],

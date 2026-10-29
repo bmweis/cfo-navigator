@@ -2055,6 +2055,11 @@ details[open] > summary .disclosure-caret{transform:rotate(90deg);}
 .ask-hist-answer h3,.ask-hist-answer h4,.ask-hist-answer h5,.ask-hist-answer h6{font-family:var(--font-head);color:var(--navy);font-weight:600;font-size:14.5px;margin:14px 0 6px;}
 .ask-hist-answer ul,.ask-hist-answer ol{margin:0 0 10px;padding-left:22px;}
 .ask-hist-answer li{margin-bottom:4px;}
+/* A markdown table in an answer (live page, history, past questions): the frame
+   scrolls sideways inside itself on a phone, never the page. */
+.ask-table{margin:0 0 14px;}
+.ask-table>table{width:100%;min-width:560px;margin:0;}
+.ask-table th,.ask-table td{font-size:13px;line-height:1.45;vertical-align:top;text-align:left;padding:8px 12px;}
 .ask-hist-answer code{background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:12.5px;}
 .ask-hist-answer sup.cite{line-height:0;}
 .ask-hist-answer sup.cite a{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}
@@ -24696,7 +24701,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
                   {tier_tags}
                 </div>
               </div>
-              {cost_note}
             </div>
             <div class="ask-dd-col">
               <label class="ask-dd-lbl"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
@@ -24707,6 +24711,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
                 <p class="ask-dd-note"><a href="/current-feed" style="color:var(--muted);">See what's in the current feed &rarr;</a></p>
               </div>
             </div>
+            {cost_note}
           </div>
         </div>
       </div>
@@ -24833,7 +24838,10 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu .ask-dd-h{{display:none;}}
 .fu .ask-dd-k{{display:inline;}}
 .ask-tag-cost{{margin-left:auto;font-weight:500;color:var(--muted);}}
-.ask-dd-foot{{margin:6px 2px 0;font-size:12px;line-height:1.45;color:var(--muted);}}
+/* A third item of the Depth and Sources row: it takes the whole row, so the line
+   is as wide as both controls together rather than the Depth column alone. */
+.fpa-intro-area-controls .ask-dd-row{{flex-wrap:wrap;}}
+.ask-dd-foot{{flex:0 0 100%;margin:6px 2px 0;font-size:12px;line-height:1.45;color:var(--muted);}}
 .fu .ask-dd-foot{{display:none;}}
 .ask-cost-line{{margin:8px 0 0;font-size:13px;color:var(--muted);}}
 .ask-q-wrap{{position:relative;flex:1;display:flex;}}
@@ -24845,6 +24853,10 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
    follow-up bubble's clone keeps its side-by-side row. */
 @media(max-width:640px){{
   .fpa-intro-area-controls .ask-dd-row{{flex-direction:column;align-items:stretch;gap:12px;}}
+  .fpa-intro-area-controls .ask-dd-foot{{flex:0 0 auto;}}
+  /* Stacked, the note belongs under the Depth box it describes, not after Sources. */
+  .fpa-intro-area-controls .ask-dd-foot{{order:1;margin-top:-6px;}}
+  .fpa-intro-area-controls .ask-dd-col:nth-of-type(2){{order:2;}}
 }}
 }}
 
@@ -24920,7 +24932,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
    right-hand (Sources) panel then lines up with its control's right edge instead,
    so it can't pass the bubble. */
 .fu .ask-dd-panel{{width:max(100%,220px);box-sizing:border-box;}}
-.fu .ask-dd-col:last-child .ask-dd-panel{{margin-left:min(0px,calc(100% - 220px));}}
+.fu .ask-dd-col:last-of-type .ask-dd-panel{{margin-left:min(0px,calc(100% - 220px));}}
 
 .ask-pq-row{{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}}
 .ask-pq-row[open]{{border-color:var(--navy);}}
@@ -25214,13 +25226,49 @@ function mdInline(s) {{
   }});
   return s;
 }}
+// Markdown tables (twin of webapp/answer_render.py's _try_table): header row,
+// separator row, body rows, all with the same cell count. Anything else
+// returns null so the lines render as ordinary text and nothing is dropped.
+function tableCells(t) {{
+  var body = t.slice(1, -1).split('\\\\|').join('\\u0000');
+  return body.split('|').map(function(c) {{ return c.trim().split('\\u0000').join('|'); }});
+}}
+function tryTable(lines, i) {{
+  var rowRe = /^\\|.*\\|$/;
+  var head = lines[i].trim();
+  if (i + 1 >= lines.length || !rowRe.test(head)) return null;
+  var sep = lines[i + 1].trim();
+  if (!rowRe.test(sep)) return null;
+  var heads = tableCells(head), seps = tableCells(sep), n = heads.length;
+  if (n < 2 || seps.length !== n) return null;
+  for (var k = 0; k < n; k++) {{ if (!/^:?-+:?$/.test(seps[k])) return null; }}
+  var body = [], j = i + 2;
+  while (j < lines.length && rowRe.test(lines[j].trim())) {{
+    var row = tableCells(lines[j].trim());
+    if (row.length !== n) return null;
+    body.push(row); j++;
+  }}
+  var out = '<div class="table-frame ask-table" style="overflow-x:auto;overflow-y:hidden;"><table><thead><tr>';
+  heads.forEach(function(c) {{ out += '<th>' + mdInline(c) + '</th>'; }});
+  out += '</tr></thead><tbody>';
+  body.forEach(function(r) {{
+    out += '<tr>';
+    r.forEach(function(c) {{ out += '<td>' + mdInline(c) + '</td>'; }});
+    out += '</tr>';
+  }});
+  return {{html: out + '</tbody></table></div>', next: j}};
+}}
 function mdToHtml(raw) {{
   var lines = (raw || '').split('\\n');
   var html = [], para = [], listType = null;
   function closeList() {{ if (listType) {{ html.push('</' + listType + '>'); listType = null; }} }}
   function flushPara() {{ if (para.length) {{ html.push('<p>' + para.join('<br>') + '</p>'); para = []; }} }}
-  lines.forEach(function(line) {{
-    var t = line.trim();
+  for (var li = 0; li < lines.length; li++) {{
+    var t = lines[li].trim();
+    if (t.charAt(0) === '|') {{
+      var tb = tryTable(lines, li);
+      if (tb) {{ flushPara(); closeList(); html.push(tb.html); li = tb.next - 1; continue; }}
+    }}
     var h = t.match(/^(#{{1,4}})\\s+(.*)$/);
     var ol = t.match(/^\\d+\\.\\s+(.*)$/);
     var ul = t.match(/^[-*]\\s+(.*)$/);
@@ -25246,7 +25294,7 @@ function mdToHtml(raw) {{
       closeList();
       para.push(mdInline(t));
     }}
-  }});
+  }}
   flushPara(); closeList();
   return html.join('');
 }}
@@ -25270,6 +25318,26 @@ function cutoffHtml(d) {{
   if (!d || !d.notice) return '';
   return '<p class="ask-cutoff" style="margin:8px 0 0;font-size:13px;color:var(--muted);">' +
          escapeHtml(d.notice) + '</p>';
+}}
+
+// "Go deeper": one line naming each benchmark report the answer cited, linked to
+// its landing page. Twin of webapp/answer_render.go_deeper_html; built from the
+// turn's citations, never from model text.
+function goDeeperHtml(d) {{
+  var seen = {{}}, parts = [];
+  (d && d.citations || []).forEach(function(c) {{
+    var t = String(c && c.title || '');
+    if (t.indexOf('Figures: ') !== 0) return;
+    var name = t.slice(9).trim();
+    if (!name || seen[name]) return;
+    seen[name] = 1;
+    var url = String(c.url || '');
+    parts.push(/^https?:\\/\\//i.test(url)
+      ? '<a href="' + encodeURI(url) + '" target="_blank" rel="noopener">' + escapeHtml(name) + '</a>'
+      : escapeHtml(name));
+  }});
+  if (!parts.length) return '';
+  return '<p class="ask-godeeper" style="margin:8px 0 0;font-size:13px;color:var(--ink-soft);">Go deeper: ' + parts.join(', ') + '</p>';
 }}
 
 // What this question cost, one plain line under the answer. The server sends
@@ -25604,7 +25672,7 @@ async function resumeConvoById(cid) {{
       var turn = document.createElement('div');
       turn.style.marginTop = '18px';
       turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(t.question) + '</div>' +
-                       '<div class="ask-answer">' + mdToHtml(t.answer) + cutoffHtml(t) + costLineHtml(t) + srcListHtml(t) + '</div>';
+                       '<div class="ask-answer">' + mdToHtml(t.answer) + cutoffHtml(t) + goDeeperHtml(t) + costLineHtml(t) + srcListHtml(t) + '</div>';
       var answerEl = turn.querySelector('.ask-answer');
       if (t.turn_id) {{
         answerEl.insertAdjacentHTML('beforeend', fbRowHtml(t.turn_id));
@@ -25748,7 +25816,7 @@ async function doAsk(followUp, skipSimilar) {{
     }}
 
     CITES = d.citations || [];
-    answerEl.innerHTML = mdToHtml(d.answer) + cutoffHtml(d) + costLineHtml(d) + srcListHtml(d);
+    answerEl.innerHTML = mdToHtml(d.answer) + cutoffHtml(d) + goDeeperHtml(d) + costLineHtml(d) + srcListHtml(d);
     if (d.turn_id) answerEl.insertAdjacentHTML('beforeend', fbRowHtml(d.turn_id));
     updateUsage(d.usage);
 
@@ -33242,6 +33310,8 @@ def _render_cited_answer(answer: str, citations_json: str,
     if cutoff:
         answer_html += (f'<p class="ask-cutoff" style="margin:8px 0 0;font-size:13px;'
                         f'color:var(--muted);">{_esc(cutoff)}</p>')
+    from webapp.answer_render import go_deeper_html
+    answer_html += go_deeper_html(cites)
     if cost_line:
         # Only ever passed for the asker's own turn, never for another user's.
         answer_html += f'<p class="ask-cost-line" style="margin:8px 0 0;font-size:13px;color:var(--muted);">{_esc(cost_line)}</p>'

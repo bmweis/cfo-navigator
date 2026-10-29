@@ -197,7 +197,7 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library
 
     sources = []
     if use_library:
-        sources.append("SAVED LIBRARY: the user's hand-curated archive of qualified "
+        sources.append("CURATED ARCHIVE: the user's hand-curated archive of qualified "
                        "sources — highest authority. Lead with it.")
     if use_feed:
         sources.append("CURRENT FEED: recent items from the user's subscribed "
@@ -206,7 +206,7 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library
     if use_web:
         sources.append("OPEN WEB: live search results from anywhere on the web, not "
                        "limited to the user's trusted sites. Less vetted than the "
-                       "library and the current feed; weigh it accordingly.")
+                       "curated archive and the current feed; weigh it accordingly.")
     source_list = "\n".join(f"{i+1}. {s}" for i, s in enumerate(sources))
 
     # Citations happen at the API level now (every source — library, feed,
@@ -1113,6 +1113,8 @@ def answer_question(
         done = dict(common)
         done["web_sources"] = exa_hits + native_web
         done["cost_usd"] = cost + common["cost_usd"]
+        if stop_reason_of(resp) == "max_tokens":
+            text = trim_to_full_sentence(text)
         return Answer(text=text, citations=citations,
                      input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r,
@@ -1125,6 +1127,41 @@ def answer_question(
         # admin-only `error` field, never to the user or the answer text.
         _log.exception("FP&A Buddy answer call failed (model=%s effort=%s)", model, effort)
         return Answer(text="", failed=True, error=f"Answer call failed: {e}", **common)
+
+
+_SENTENCE_END = re.compile(r"""[.!?]["'\u201d\u2019)\]]*(?:\[\d{1,2}\])*$|\|$""")
+
+
+def trim_to_full_sentence(text: str) -> str:
+    """For an answer cut off at the token ceiling: drop the unfinished tail so
+    the text ends on a complete sentence (or a complete table row). Text that
+    already ends cleanly is returned unchanged, and so is anything where the
+    trim would throw away most of the answer. Display text only; the caller
+    keeps the cut-off notice."""
+    t = (text or "").rstrip()
+    if not t:
+        return text or ""
+    lines = t.split("\n")
+    # A table row that never closed, or closed short of the table's width, is dropped whole.
+    def _open_row() -> bool:
+        last = lines[-1].strip()
+        if not last.startswith("|"):
+            return False
+        if not last.endswith("|") or len(last) < 2:
+            return True
+        prev = next((x.strip() for x in reversed(lines[:-1]) if x.strip().startswith("|")), "")
+        return bool(prev) and last.count("|") < prev.count("|")
+    while lines and _open_row():
+        lines.pop()
+    t = "\n".join(lines).rstrip()
+    if not t or _SENTENCE_END.search(t):
+        return t or (text or "")
+    # Cut back to the last sentence end followed by whitespace, or the last line break.
+    cut = max((m.end() for m in re.finditer(r"""[.!?]["'\u201d\u2019)\]]*(?:\[\d{1,2}\])*(?=\s)""", t)), default=-1)
+    cut = max(cut, t.rfind("\n") if t.rfind("\n") > 0 else -1)
+    if cut < len(t) * 0.25:
+        return t
+    return t[:cut].rstrip()
 
 
 def _retrieve_per_sub(lib: Library, subs, max_sources: int) -> tuple[list[list[dict]], int, float]:

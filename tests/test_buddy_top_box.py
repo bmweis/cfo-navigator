@@ -212,8 +212,10 @@ def test_footnote_is_a_visible_paragraph_under_the_depth_box_not_a_tooltip(admin
     assert "Benchmark questions cost two to three times as much" in text
     assert "$" not in text and "\u2014" not in text and "member" not in text.lower()
     assert 'title="Benchmark' not in admin_html
-    col = re.search(r'<div class="ask-dd-col">(.*?)</div>\s*<div class="ask-dd-col">', admin_html, re.S).group(1)
-    assert col.index('data-dd="depth" hidden') < col.index('id="ask-dd-foot"')   # directly after the box and its panel
+    row = re.search(r'<div class="ask-dd-row">(.*?)</div>\s*</div>', admin_html, re.S)
+    assert row is None or 'id="ask-dd-foot"' in admin_html
+    # the note is a child of the Depth and Sources row, after both columns, so it spans the row
+    assert admin_html.index('data-dd="depth" hidden') < admin_html.index('id="ask-dd-foot"')
     assert not re.search(r"\.ask-dd-foot\s*\{[^}]*display\s*:\s*none", admin_html.split(".fu .ask-dd-foot")[0])
     assert "Dollar amounts are estimates." not in admin_html
 

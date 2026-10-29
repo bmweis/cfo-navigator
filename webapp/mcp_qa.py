@@ -148,7 +148,8 @@ def register_qa_tools(mcp: FastMCP, lib_factory: Callable[[], Library], opml_pat
         web (see this module's own docstring for why this can't be a
         simple HTTP self-call to `/ask`).
 
-        `sources` is a subset of `["library", "feed", "web"]` (default
+        `sources` is a subset of `["library", "feed", "web"]` (`library` is the
+        Curated archive; default
         `["library", "web"]`) — which retrieval tiers to use. `"feed"` and
         `"web"` both mean the site's Current feed, so passing `"web"` also pulls
         RSS items (the Current feed is recent RSS items plus a web search
