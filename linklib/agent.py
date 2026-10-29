@@ -958,16 +958,16 @@ def answer_question(
     # library means no lookup. A question that names no registered metric
     # leaves `prestep` inactive and everything below behaves as it always did.
     from . import benchmark_prestep as _bp
-    prestep = _bp.Prestep()
+    prestep = _bp.Prestep(outcome="skipped: library source is off")
     if use_library:
         try:
             prestep = _bp.plan_turn(
                 lib, retrieval_question, tier=effort if effort in EFFORT_SETTINGS else "standard",
                 settings=settings, model=model, remaining_usd=budget_usd,
                 split_model=lib.get_role_model("prestep"))
-        except Exception:
+        except Exception as _e:
             _log.exception("benchmark pre-step failed; answering without it")
-            prestep = _bp.Prestep(split_fallback="prestep_error")
+            prestep = _bp.Prestep(split_fallback="prestep_error", outcome=f"error: {type(_e).__name__}")
     split_used = bool(prestep.active and prestep.split_ran and prestep.subs)
     sub_hits: list[list[dict]] = []
 
@@ -995,7 +995,7 @@ def answer_question(
         _tag_trusted(exa_hits, opml_path)
 
     prestep_cost = prestep.cost_usd
-    prestep_log = prestep.log() if (prestep.active or prestep.split_fallback) else {}
+    prestep_log = prestep.log()   # always: "ran", "skipped: <reason>" or "error: <class>"
     # Everything spent before the answer call; a failure still records it.
     common = dict(
         sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,

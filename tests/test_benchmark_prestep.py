@@ -103,7 +103,7 @@ def _ask(lib, q, **kw):
 def test_a_question_with_no_registered_metric_is_untouched(lib, monkeypatch):
     c = _client(monkeypatch)
     ans = _ask(lib, "How should I structure my sales compensation plan?")
-    assert not ans.failed and ans.prestep == {} and ans.prestep_cost_usd == 0
+    assert not ans.failed and not ans.prestep.get("subs") and ans.prestep["outcome"].startswith("skipped") and ans.prestep_cost_usd == 0
     assert c.split_calls() == [] and _docs(c.answer_calls()[0]) == []
     assert agent._PRESTEP_RULES not in c.answer_calls()[0]["system"]
 
@@ -383,7 +383,7 @@ def test_figures_documents_have_their_own_budget_and_say_what_was_left_out(lib, 
 def test_no_library_means_no_lookup(lib, monkeypatch):
     c = _client(monkeypatch)
     ans = _ask(lib, "What is median net revenue retention?", use_library=False)
-    assert ans.prestep == {} and not any(d["title"].startswith("Figures:") for d in _docs(c.answer_calls()[0]))
+    assert ans.prestep["outcome"].startswith("skipped") and not any(d["title"].startswith("Figures:") for d in _docs(c.answer_calls()[0]))
 
 
 def test_a_prestep_crash_is_logged_and_the_turn_continues(lib, monkeypatch):
@@ -461,13 +461,14 @@ def test_a_failed_turn_still_records_the_prestep_spend(lib, monkeypatch):
     assert row["failed"] == 1 and row["prestep_cost_usd"] > 0 and json.loads(row["prestep_json"])["split_ran"]
 
 
-def test_ordinary_turns_leave_the_log_empty(lib, monkeypatch):
+def test_ordinary_turns_record_a_skipped_outcome_never_an_empty_log(lib, monkeypatch):
     from webapp import ask_orchestrator
     _client(monkeypatch)
     uid = _user(lib)
     ask_orchestrator.run_ask(lib, uid, "How should I run quarterly planning?", use_feed=False)
     row = lib.list_ask_questions(user_id=None, limit=1)[0]
-    assert row["prestep_json"] == "" and row["prestep_cost_usd"] == 0
+    assert json.loads(row["prestep_json"]) == {"outcome": "skipped: no benchmark metric detected"}
+    assert row["prestep_cost_usd"] == 0
 
 
 # --- admin report + no-link rendering ----------------------------------------------
@@ -579,7 +580,7 @@ def test_ordinary_questions_do_not_trigger_the_full_text_path(tmp_path, monkeypa
     db = _unregistered_lib(tmp_path)
     c = _client(monkeypatch)
     ans = _ask(db, q)
-    assert ans.prestep == {} and c.split_calls() == []
+    assert ans.prestep["outcome"].startswith("skipped") and c.split_calls() == []
     db.close()
 
 

@@ -108,6 +108,9 @@ class Sub:
     cards: int = 0
     library_hits: int = 0
     truncated_rows: int = 0
+    illustrative_left_out: int = 0
+    illustrative_ids: set = field(default_factory=set)
+    segment_dropped: str = ""
 
 
 @dataclass
@@ -130,13 +133,19 @@ class Prestep:
     remaining_usd: float | None = None
     plan_text: str = ""                  # extra text block sent before the question
     system_rules: bool = False
+    # What the pre-step did this turn, always recorded: "ran", "skipped: <reason>" or
+    # "error: <class>". An empty record is not allowed.
+    outcome: str = ""
 
     def log(self) -> dict:
+        if not self.active and not self.split_fallback:
+            return {"outcome": self.outcome or "skipped: no benchmark metric detected"}
         mix: dict[str, int] = {}
         for s in self.subs:
             for k, v in s.match_mix.items():
                 mix[k] = mix.get(k, 0) + v
         return {
+            "outcome": self.outcome or "ran",
             "detected": self.detected, "signals": self.signals, "split_ran": self.split_ran,
             "split_fallback": self.split_fallback, "split_model": self.split_model,
             "requested_subs": self.requested_subs, "notice": self.notice,
@@ -144,6 +153,7 @@ class Prestep:
             "subs": [{"intent": s.intent, "text": s.text[:200], "metrics": s.metrics, "band": s.band, "segment": s.segment,
                       "year": s.year, "figure_rows": s.rows, "cards": s.cards,
                       "library_hits": s.library_hits, "figure_rows_left_out": s.truncated_rows,
+                      "illustrative_left_out": s.illustrative_left_out, "segment_dropped": s.segment_dropped,
                       "match_mix": s.match_mix} for s in self.subs],
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
             "remaining_usd": None if self.remaining_usd is None else round(self.remaining_usd, 4),
@@ -184,6 +194,41 @@ def _mask_spans(question: str, spans: list[tuple[int, int]]) -> str:
     return "".join(out)
 
 
+_name_key = fg.name_key
+
+
+def distinct_metric_count(found: list[dict], extra_names: list[str]) -> int:
+    """How many different METRICS a question asks about, not how many names it used.
+    Registry phrases that resolve to the same canonical metric are one (an ambiguous
+    phrase that names several is still one ask). A stored name that is only a variant
+    of one already counted ("Gross Margin %", "Gross Margin % (LTM)") is that metric."""
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    by_term: dict[str, set] = {}
+    for d in found:
+        by_term.setdefault(d["term"], set()).add(d["canonical"])
+    for owners in by_term.values():
+        owners = sorted(owners)
+        for o in owners[1:]:
+            parent[find(o)] = find(owners[0])
+        find(owners[0])
+    roots = {find(c) for owners in by_term.values() for c in owners}
+    seen_keys = {_name_key(c) for c in parent} | {_name_key(t) for t in by_term}
+    seen_keys.discard(frozenset())
+    extra_keys: set = set()
+    for n in extra_names:
+        k = _name_key(n)
+        if k and k not in seen_keys:
+            extra_keys.add(k)
+    return len(roots) + len(extra_keys)
+
+
 def detect(lib, question: str) -> dict:
     """Rules-only signals for a question; no model call."""
     found = fg.detect_metrics(lib, question)
@@ -215,8 +260,18 @@ def detect(lib, question: str) -> dict:
         idx = fg._load_metric_index(lib)
         for c in canon:
             covered |= fg._names_for(idx, c)
-        extra = [n for n in fg.detect_stored_metric_names(lib, masked)
-                 if _lc_text(n) not in covered and n not in terms]
+        known_keys = {k for k in (_name_key(x) for x in list(covered) + terms + canon) if k}
+        extra = []
+        for n in fg.detect_stored_metric_names(lib, masked):
+            if _lc_text(n) in covered or n in terms:
+                continue
+            k = _name_key(n)
+            # A variant of a metric already named ("Gross Margin %") is reached through that
+            # metric's lookup, and two variants of one stored metric are one lookup.
+            if k and k in known_keys:
+                continue
+            known_keys.add(k)
+            extra.append(n)
         room = MAX_SUBQUERIES - len(terms)
         extra = extra[:max(room, 0)]
         if extra:
@@ -237,7 +292,9 @@ def detect(lib, question: str) -> dict:
     over_time = bool(_OVER_TIME.search(question or ""))
     definition = bool(_DEFINITION.search(question or ""))
     reasons = []
-    if len(terms) >= 2:       # phrases, not canonical names: one ambiguous phrase is still one ask
+    registry_terms = {d["term"] for d in found}
+    n_metrics = distinct_metric_count(found, [t for t in terms if t not in registry_terms])
+    if n_metrics >= 2:        # distinct metrics, not names: "Gross Margin" and "Gross Margin %" are one
         reasons.append("more than one metric")
     if len(bands) >= 2:
         reasons.append("more than one band")
@@ -245,6 +302,7 @@ def detect(lib, question: str) -> dict:
         reasons.append("a benchmark ask inside a broader question")
     return {"metrics": canon, "terms": terms, "via_fts": via_fts, "found": found, "bands": bands, "over_time": over_time,
             "definition": definition, "mixed": mixed, "rest_words": len(rest_words), "split_reasons": reasons,
+            "n_metrics": n_metrics,
             "needs_split": bool(canon) and bool(reasons)}
 
 
@@ -260,7 +318,8 @@ SPLIT_SYSTEM = (
     "- metric: pick from the metric list you are given when one fits; otherwise the metric's plain name; "
     "empty for an \"other\" part.\n"
     "- band: the company size or range as the user wrote it (for example \"$25M ARR\"); empty if none.\n"
-    "- segment: a stated segment (for example \"B2B\"); empty if none.\n"
+    "- segment: a segment the user stated that narrows the peer group (for example \"Enterprise\" or \"Fintech\"); "
+    "empty if none. Never \"SaaS\", \"B2B\", \"software\" or \"company\": every report is a SaaS report.\n"
     "- year: \"all\" only if the part asks about change over time; a four-digit year only if the user named one; otherwise empty.\n"
     "- text: that part restated as a standalone search question.\n"
     "- rest_of_question: whatever the parts do not cover, or empty.\n"
@@ -453,15 +512,24 @@ def _card_docs(lib, metrics: list[str], budget: int) -> list[dict]:
     return out
 
 
-def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False) -> None:
+def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
+           include_illustrative: bool = False) -> None:
     """Fill sub.docs, sub.notes and counts. Reads only."""
     names = list(sub.metrics)
     rows: list[dict] = []
     seen_keys: set = set()
+    # "SaaS", "B2B SaaS", "software" and "company" are not segments (every report is SaaS), and a
+    # segment no stored figure prints narrows to nothing: search without it.
+    segment = fg.usable_segment(lib, sub.segment)
+    if sub.segment and not segment:
+        sub.segment_dropped = sub.segment
     for m in names:
-        res = fg.find_figures(lib, m, band=sub.band or None, segment=sub.segment or None,
+        res = fg.find_figures(lib, m, band=sub.band or None, segment=segment or None,
                               year=(sub.year if sub.year not in ("", "all") else None),
-                              all_editions=(sub.year == "all" or over_time), limit=FIGURE_FETCH_LIMIT)
+                              all_editions=(sub.year == "all" or over_time), limit=FIGURE_FETCH_LIMIT,
+                              include_illustrative=include_illustrative)
+        sub.illustrative_ids |= set(res.get("illustrative_ids", ()))
+        sub.illustrative_left_out = len(sub.illustrative_ids)
         sub.notes += res["notes"]
         if not res["rows"]:
             sub.notes.append(f"No stored figure matches '{m}'"
@@ -476,7 +544,7 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False) 
     # left a newer row of a later metric behind older rows of an earlier one, so a long
     # run of old rows could use up the character budget before it.
     sign = 1 if (over_time or sub.year == "all") else -1
-    rows.sort(key=lambda r: (fg._MATCH_RANK[r["match"]], sign * fg._year_num(r["report_year"])))
+    rows.sort(key=lambda r: (fg._MATCH_RANK[r["match"]], fg._has_sample_size(r), sign * fg._year_num(r["report_year"])))
     # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
     # segment, statistic, basis or a related metric) are sent only when nothing closer
     # exists, at most RELATED_CAP, and the notes say so.
@@ -592,8 +660,10 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
     ps = Prestep()
     sig = detect(lib, question)
     if not sig["metrics"]:
+        ps.outcome = "skipped: no benchmark metric detected"
         return ps
     ps.active = True
+    ps.outcome = "ran"
     ps.system_rules = True
     ps.detected = sig["metrics"]
     ps.signals = {k: sig[k] for k in ("bands", "over_time", "definition", "mixed", "rest_words", "split_reasons", "via_fts")}

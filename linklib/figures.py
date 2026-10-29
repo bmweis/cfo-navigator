@@ -624,6 +624,40 @@ def _family(row: dict) -> tuple[str, str]:
     return (_lc(row.get("source")), _lc(name))
 
 
+# A row from a worked example is not survey data. Matched on the fields a loader fills
+# for an example company (data period, segment, note, metric), never on the report name.
+_ILLUSTRATIVE = re.compile(r"illustrative|\bexample\b|worked example|hypothetical|sample company", re.I)
+
+
+def is_illustrative(row: dict) -> bool:
+    return any(_ILLUSTRATIVE.search(str(row.get(f) or "")) for f in ("data_period", "segment", "note", "metric"))
+
+
+def _has_sample_size(row: dict) -> int:
+    """0 when the report states a sample size (a survey), 1 when it does not."""
+    n = str(row.get("n") or "").strip().lower()
+    return 0 if n and n not in ("n/a", "na", "-", "none", "not stated") else 1
+
+
+# Words that are not a segment: every report is a SaaS report, so the word narrows nothing.
+GENERIC_SEGMENT_WORDS = {"saas", "b2b", "b2c", "software", "company", "companies", "startup", "startups",
+                         "business", "businesses", "tech", "technology", "cloud", "all", "any", "the", "a", "an", "and"}
+
+
+def usable_segment(lib, segment) -> str:
+    """The segment to search with, or "". A generic word ("SaaS", "B2B SaaS", "software",
+    "company") is dropped, and so is one no stored figure uses: pass a segment only when
+    the question states one that the figures print."""
+    seg = " ".join(str(segment or "").lower().replace("/", " ").split())
+    if not seg:
+        return ""
+    words = re.findall(r"[a-z0-9]+", seg)
+    if not words or all(w in GENERIC_SEGMENT_WORDS for w in words):
+        return ""
+    stored = {_lc(r[0]) for r in lib.conn.execute("SELECT DISTINCT segment FROM benchmark_figures")}
+    return seg if _lc(seg) in stored else ""
+
+
 def _year_num(y) -> int:
     m = re.search(r"\d{4}", str(y or ""))
     return int(m.group()) if m else -1
@@ -671,7 +705,7 @@ def _flag(row: dict, match: str, gap: str) -> None:
 
 def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year=None,
                  basis=None, denominator=None, all_editions: bool = False,
-                 limit: int = DEFAULT_LIMIT) -> dict:
+                 limit: int = DEFAULT_LIMIT, include_illustrative: bool = False) -> dict:
     """Stored figures for a metric, exact matches first, every gap disclosed.
 
     Returns {rows, resolution, notes, total_matching, returned, truncated,
@@ -698,8 +732,15 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
     seen_ids: set[int] = set()
     related = False
     targets = [r["canonical"] for r in resolution]
+    stored_names: list[str] | None = None
     for canonical in targets:
         names = _names_for(idx, canonical) | {_lc(metric)}
+        # A stored name that differs from a known name only by a symbol or a parenthetical
+        # ("Gross Margin %", "Gross Margin % (LTM)") is the same metric.
+        if stored_names is None:
+            stored_names = [r[0] for r in lib.conn.execute("SELECT DISTINCT lower(trim(metric)) FROM benchmark_figures")]
+        keys = {k for k in (name_key(n) for n in names) if k}
+        names |= {n for n in stored_names if n and name_key(n) in keys}
         marks = ",".join("?" for _ in names)
         for r in lib.conn.execute(
                 f"SELECT * FROM benchmark_figures WHERE lower(trim(metric)) IN ({marks})", tuple(names)):
@@ -717,6 +758,16 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         if related:
             notes.append(f"No figure is stored under '{metric}' or a registered name for it; these are "
                          "figures whose metric name contains the same words, which may measure something different.")
+
+    illustrative_left_out = 0
+    illustrative_ids: list[int] = []
+    if not include_illustrative:
+        kept_cand = [(r, c) for r, c in cand if not is_illustrative(r)]
+        illustrative_ids = [r["id"] for r, _ in cand if is_illustrative(r)]
+        illustrative_left_out = len(illustrative_ids)
+        cand = kept_cand
+        if illustrative_left_out:
+            notes.append(f"{illustrative_left_out} illustrative rows left out (a worked example company, not survey data).")
 
     rows = [_row_out(r, landings, canon) for r, canon in cand]
     for row in rows:
@@ -814,6 +865,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
                              f"has no figure for this; the {y} edition is the newest that does.")
 
     rows.sort(key=lambda r: (_MATCH_RANK[r["match"]],
+                             _has_sample_size(r),   # a survey that states its sample before a guide that does not
                              -_year_num(r["report_year"]) if not all_editions else _year_num(r["report_year"]),
                              r["source"], r["report"], r["band_basis"],
                              (parse_band(r["band"]) or {"lo": 0})["lo"], r["statistic"]))
@@ -823,7 +875,8 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         notes.append(f"{total} figures match; showing the first {limit}. Narrow the request (band, segment, statistic, year).")
         rows = rows[:limit]
     return {"rows": rows, "resolution": resolution, "notes": notes, "total_matching": total,
-            "returned": len(rows), "truncated": truncated, "unplaced_bands": unplaced}
+            "returned": len(rows), "truncated": truncated, "unplaced_bands": unplaced,
+            "illustrative_left_out": illustrative_left_out, "illustrative_ids": illustrative_ids}
 
 
 # --- coverage ------------------------------------------------------------------
@@ -966,8 +1019,33 @@ def _stem(w: str) -> str:
     return w
 
 
+# Spellings of the same expense line, folded to one short token on BOTH sides (the question
+# and the stored name) so "sales and marketing", "S&M" and "S&M % of Revenue" meet.
+_ABBR_PHRASES = (
+    (re.compile(r"sales\s*(?:and|&)\s*marketing"), "sm"),
+    (re.compile(r"general\s*(?:and|&)\s*administrative"), "ga"),
+    (re.compile(r"research\s*(?:and|&)\s*development"), "rd"),
+    (re.compile(r"(?<![a-z0-9])s\s*&\s*m(?![a-z0-9])"), "sm"),
+    (re.compile(r"(?<![a-z0-9])g\s*&\s*a(?![a-z0-9])"), "ga"),
+    (re.compile(r"(?<![a-z0-9])r\s*(?:&|and)\s*d(?![a-z0-9])"), "rd"),
+)
+_KEEP_SHORT = {"sm", "ga", "rd"}
+# Headcount words that name the same stored metric (Total employees, ...). Deliberately
+# small; "ARR per head" is a different metric and is not here.
+_TOKEN_SYNONYMS = {"headcount": "employees", "ftes": "employees", "fte": "employees",
+                   "staff": "employees", "workforce": "employees", "employees": "employees"}
+
+
 def _sig_tokens(text: str) -> list[str]:
-    return [_stem(t) for t in re.findall(r"[a-z0-9]+", _lc(text)) if len(t) > 2 and t not in _NAME_STOP]
+    t = _lc(text)
+    for rx, rep in _ABBR_PHRASES:
+        t = rx.sub(f" {rep} ", t)
+    out = []
+    for w in re.findall(r"[a-z0-9]+", t):
+        if (len(w) <= 2 and w not in _KEEP_SHORT) or w in _NAME_STOP:
+            continue
+        out.append(_stem(_TOKEN_SYNONYMS.get(w, w)))
+    return out
 
 
 # Words that name a company's size or a denominator, not a metric. A stored name made only of
@@ -976,6 +1054,16 @@ def _sig_tokens(text: str) -> list[str]:
 _GENERIC_NAME_WORDS = {"annual", "revenue", "arr", "year", "spend", "spending", "total", "company",
                        "size", "stage", "growth", "cost", "costs", "amount"}
 _PAREN = re.compile(r"\([^)]*\)")
+_OPTIONAL_NAME_WORDS = {"total", "annual"}
+# "S&M % of Revenue": the denominator is part of the name but a question asking for S&M
+# spend at some revenue size rarely repeats it (and the caller masks the size phrase).
+_DENOM_TAIL = re.compile(r"(?:\bas\s+an?\s+)?(?:%|percent(?:age)?)\s+of\s+(?:(?:total|net|annual)\s+)*(?:revenue|arr)\s*$")
+
+
+def name_key(name: str) -> frozenset:
+    """The significant words of a metric name with any parenthetical and symbols removed:
+    "Gross Margin", "Gross Margin %" and "Gross Margin % (LTM)" share one key."""
+    return frozenset(_sig_tokens(_PAREN.sub(" ", name or "")))
 
 
 def _min_span(seq: list[str], need: list[str]) -> int:
@@ -1014,7 +1102,13 @@ def detect_stored_metric_names(lib, text: str) -> list[str]:
     toks = list(dict.fromkeys(seq))
     if len(toks) < 2:
         return []
-    q = "metric : (" + " OR ".join(f'"{t}"' for t in toks) + ")"
+    # The index tokenizes a stored "S&M % of Revenue" as s, m, revenue, so an abbreviation
+    # token is searched as its letters too; the exact test below uses the folded tokens.
+    pool_toks = []
+    for t in toks:
+        pool_toks += list(t) if t in _KEEP_SHORT else [t]
+    pool_toks += [w for w in _TOKEN_SYNONYMS if _stem(_TOKEN_SYNONYMS[w]) in toks]
+    q = "metric : (" + " OR ".join(f'"{t}"' for t in dict.fromkeys(pool_toks)) + ")"
     try:
         names = [r[0] for r in lib.conn.execute(
             """SELECT DISTINCT f.metric FROM benchmark_figures_fts x
@@ -1026,18 +1120,34 @@ def detect_stored_metric_names(lib, text: str) -> list[str]:
     hits = []
     for n in names:
         nt = list(dict.fromkeys(_sig_tokens(_PAREN.sub(" ", n))))
-        if len(nt) < 2 or not all(t in have for t in nt):
+        if len(nt) < 2:
             continue
-        if all(t in _GENERIC_NAME_WORDS or _stem(t) in _GENERIC_NAME_WORDS for t in nt):
+        # Every word of the name must be in the question, except "total"/"annual", which
+        # a question often leaves out ("headcount" for "Total employees").
+        missing = [t for t in nt if t not in have]
+        tail = _DENOM_TAIL.search(_lc(_PAREN.sub(" ", n)))
+        optional = _OPTIONAL_NAME_WORDS | (set(_sig_tokens(tail.group(0))) if tail else set())
+        if any(t not in optional for t in missing):
             continue
-        if _min_span(seq, nt) > len(nt) + 3:
+        # Leaving a qualifier out must not leave a generic word to carry the match
+        # ("Annual R&D Spend" with "annual" dropped is "R&D spend", a size-field name).
+        if missing and any(t in _GENERIC_NAME_WORDS or _stem(t) in _GENERIC_NAME_WORDS
+                           for t in nt if t not in optional):
+            continue
+        if all(t in _GENERIC_NAME_WORDS or _stem(t) in _GENERIC_NAME_WORDS for t in nt if t in have):
+            continue
+        present = [t for t in nt if t in have]
+        if _min_span(seq, present) > len(present) + 3:
             continue
         hits.append((len(nt), n))
     hits.sort(key=lambda h: (-h[0], h[1].casefold()))
     out: list[str] = []
-    seen: set[str] = set()
+    seen: set = set()
     for _, n in hits:
-        if n.casefold() not in seen:
-            seen.add(n.casefold())
+        # One name per metric: "Gross Margin", "Gross Margin %" and "Gross Margin % (LTM)" are
+        # one, and must not crowd a second real metric out of the cap.
+        k = name_key(n) or n.casefold()
+        if k not in seen:
+            seen.add(k)
             out.append(n)
     return out[:FTS_NAME_MAX]

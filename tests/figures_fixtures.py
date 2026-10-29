@@ -10,9 +10,9 @@ COLS = fg.COLUMNS
 def frow(report="Example Benchmarks 2099", year="2099", source="Example Benchmarks",
          basis="ARR", band="$10M-$20M", segment="All", metric="Net revenue retention",
          denominator="", statistic="median", value="101", unit="percent", n="120",
-         page="14", note=""):
+         page="14", note="", data_period="FY2098"):
     return {"row_no": 0, "source": source, "report": report, "report_year": year,
-            "data_period": "FY2098", "band_basis": basis, "band": band, "segment": segment,
+            "data_period": data_period, "band_basis": basis, "band": band, "segment": segment,
             "metric": metric, "denominator": denominator, "statistic": statistic,
             "value": value, "unit": unit, "n": n, "page": page, "read_from": "table",
             "note": note, "value_num": fg.parse_value_num(value)}

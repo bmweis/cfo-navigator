@@ -33484,11 +33484,16 @@ def _prestep_report_html(r: dict) -> str:
     changes quietly."""
     raw = r.get("prestep_json") or ""
     if not raw:
-        return ""
+        return ('<div style="margin-top:4px;font-size:12px;color:var(--muted);">Benchmark lookup: '
+                'no record (a turn from before the outcome was recorded)</div>')
     try:
         d = json.loads(raw)
     except ValueError:
         return ""
+    outcome = str(d.get("outcome") or "")
+    if outcome.startswith(("skipped", "error")) and not d.get("subs"):
+        return (f'<div style="margin-top:4px;font-size:12px;color:var(--muted);">Benchmark lookup: '
+                f'{_esc(outcome)}</div>')
     fallbacks = {"no_key": "the split call could not run (no key)", "call_failed": "the split call failed",
                  "invalid_json": "the split call returned unusable output",
                  "over_cap": "the user's remaining budget could not cover a split",
@@ -33515,6 +33520,8 @@ def _prestep_report_html(r: dict) -> str:
         f'{" · band " + _esc(s["band"]) if s.get("band") else ""}'
         f'{" · segment " + _esc(s["segment"]) if s.get("segment") else ""}'
         f'{" · year " + _esc(s["year"]) if s.get("year") else ""}'
+        f'{" · segment dropped: " + _esc(s["segment_dropped"]) if s.get("segment_dropped") else ""}'
+        f'{" · " + str(s["illustrative_left_out"]) + " illustrative rows left out" if s.get("illustrative_left_out") else ""}'
         f'{" · searched: " + _esc(s["text"]) if s.get("text") else ""}'
         f': {s.get("figure_rows", 0)} figure rows'
         f'{" (" + _esc(", ".join(f"{k} {v}" for k, v in sorted((s.get("match_mix") or {}).items()))) + ")" if s.get("match_mix") else ""}'
