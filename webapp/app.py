@@ -28393,7 +28393,7 @@ def fpa_buddy_how_it_works(request: Request):
 <h3 style="font-size:14px;font-weight:700;color:var(--navy);margin:0 0 8px;">Where the answers come from</h3>
 <p style="margin:0 0 10px;font-size:16px;color:var(--ink-soft);line-height:1.65;">Three places, and you can see all of them.</p>
 <ul style="margin:0;padding-left:20px;font-size:16px;color:var(--ink-soft);line-height:1.65;">
-<li><strong>The archive.</strong> Nothing gets in automatically from the feeds. Articles come from bookmarks I saved over the years, pieces I save as I read, and my own writing. That's the difference between this and a tool pointed at the whole internet: I decided what belonged before anyone asked a question. Keyword search and meaning-based search run against it together, so a relevant piece surfaces even when your wording doesn't match its own.</li>
+<li><strong>The archive.</strong> Nothing gets in automatically from the feeds. Articles come from bookmarks I saved over the years, pieces I save as I read, and my own writing. That's the difference between this and a tool pointed at the whole internet: I decided what belonged before anyone asked a question. Keyword search and meaning-based search run against it together, so a relevant piece surfaces even when your wording doesn't match its own. Benchmark numbers are looked up in stored report data and cited to the report they came from.</li>
 <li><strong>The current feed.</strong> Recent items from the blogs and newsletters I subscribe to, plus a live search of a list of finance sources I trust. It's the same list that fills my own reader, which you can browse on the <a href="/current-feed" style="color:var(--accent);">current feed</a> page. How the search works is explained under <a href="/how-this-is-built/web-search" style="color:var(--accent);">web search</a>. On by default.</li>
 <li><strong>The open web.</strong> A live search of the whole web, not just my list. It's off by default, and anything it cites from outside my trusted list is tagged Open web in the sources.</li>
 </ul>
@@ -33399,8 +33399,12 @@ def _prestep_report_html(r: dict) -> str:
     subs = "".join(
         f'<li>[{_esc(s.get("intent", ""))}] {_esc(", ".join(s.get("metrics") or []) or "no metric")}'
         f'{" · band " + _esc(s["band"]) if s.get("band") else ""}'
+        f'{" · segment " + _esc(s["segment"]) if s.get("segment") else ""}'
         f'{" · year " + _esc(s["year"]) if s.get("year") else ""}'
-        f': {s.get("figure_rows", 0)} figure rows, {s.get("cards", 0)} cards, {s.get("library_hits", 0)} articles'
+        f'{" · searched: " + _esc(s["text"]) if s.get("text") else ""}'
+        f': {s.get("figure_rows", 0)} figure rows'
+        f'{" (" + _esc(", ".join(f"{k} {v}" for k, v in sorted((s.get("match_mix") or {}).items()))) + ")" if s.get("match_mix") else ""}'
+        f', {s.get("cards", 0)} cards, {s.get("library_hits", 0)} articles'
         f'{", " + str(s["figure_rows_left_out"]) + " left out for length" if s.get("figure_rows_left_out") else ""}</li>'
         for s in d.get("subs") or [])
     extras = ""
