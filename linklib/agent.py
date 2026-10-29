@@ -240,11 +240,15 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library
         "best-effort answer.\n\n"
         "Voice — write every answer this way:\n"
         f"{voice}"
+        + ANSWER_RULES                      # every turn, with or without a benchmark lookup
         + (_PRESTEP_RULES if benchmark_rules else "")
     )
 
 
 from .benchmark_prestep import PRESTEP_RULES as _PRESTEP_RULES  # noqa: E402
+from .answer_rules import ANSWER_RULES  # noqa: E402
+from .citation_label import make_label  # noqa: E402
+from .db import DIGEST_TAG  # noqa: E402
 
 
 def _safe_fts_query(question: str) -> str:
@@ -432,6 +436,8 @@ class Answer:
     prestep_input_tokens: int = 0
     prestep_output_tokens: int = 0
     prestep_notice: str = ""
+    # Likely breaches of the answer rules found by linklib.answer_lint (flag only).
+    lint_flags: list = field(default_factory=list)
 
 
 # Reuse one client across requests so its httpx connection pool stays warm —
@@ -703,7 +709,8 @@ def retrieve_exa(question: str, opml_path: str | None, max_results: int = 4,
             continue
         highlights = r.get("highlights") or []
         summary = " ".join(h for h in highlights if h) if highlights else (r.get("text") or "")
-        hits.append({"title": r.get("title") or url, "url": url, "summary": summary})
+        hits.append({"title": r.get("title") or url, "url": url, "summary": summary,
+                     "author": r.get("author") or "", "published_at": r.get("publishedDate") or ""})
 
     from .pricing import compute_exa_cost
     cost = compute_exa_cost("search", num_results=len(results))
@@ -754,7 +761,7 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
 
     def _add(title: str, url: str, kind: str, body: str,
              article_id: int | None = None, provider: str | None = None,
-             own_content: bool = False) -> None:
+             own_content: bool = False, label: dict | None = None) -> None:
         nonlocal used
         body = (body or "").strip()
         if not body:
@@ -762,6 +769,10 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
         used += len(body)
         doc_blocks.append(make_document_block(title or url, body))
         doc = {"title": title or url, "url": url, "type": kind}
+        if label:
+            # Whose work this is, for the citation list (Chicago style); the title
+            # above stays what the model sees.
+            doc["label"] = label
         if article_id is not None:
             # Library sources keep their articles.id so a persisted citation
             # can be traced back to the archive row (feed/web are transient —
@@ -785,13 +796,18 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
             break
         _add(h.get("title", ""), h.get("url", ""), "library",
              _ground_body(h, min(source_chars, global_chars - used)),
-             article_id=h.get("id"), own_content=bool(h.get("is_own_content")))
+             article_id=h.get("id"), own_content=bool(h.get("is_own_content")),
+             label=make_label(author=h.get("author"), source=h.get("source"), title=h.get("title"),
+                              year=h.get("published_at"), url=h.get("url"),
+                              kind="report" if DIGEST_TAG in (h.get("tags") or []) else "article"))
 
     for item in feed_items:
         if used >= global_chars:
             break
         _add(item.get("title", ""), item.get("url", ""), "feed",
-             (item.get("summary") or "")[: min(source_chars, global_chars - used)])
+             (item.get("summary") or "")[: min(source_chars, global_chars - used)],
+             label=make_label(author=item.get("author"), source=item.get("source"), title=item.get("title"),
+                              year=item.get("published_at"), url=item.get("url")))
 
     for item in (exa_hits or []):
         if used >= global_chars:
@@ -803,7 +819,9 @@ def _build_source_documents(lib_hits: list[dict], feed_items: list[dict],
         # marker that tells them apart for the "Powered by Exa" caption.
         _add(item.get("title", ""), item.get("url", ""), "web",
              (item.get("summary") or "")[: min(source_chars, global_chars - used)],
-             provider="exa")
+             provider="exa",
+             label=make_label(author=item.get("author"), title=item.get("title"),
+                              year=item.get("published_at"), url=item.get("url")))
 
     return doc_blocks, sent_docs
 
@@ -958,16 +976,16 @@ def answer_question(
     # library means no lookup. A question that names no registered metric
     # leaves `prestep` inactive and everything below behaves as it always did.
     from . import benchmark_prestep as _bp
-    prestep = _bp.Prestep()
+    prestep = _bp.Prestep(outcome="skipped: library source is off")
     if use_library:
         try:
             prestep = _bp.plan_turn(
                 lib, retrieval_question, tier=effort if effort in EFFORT_SETTINGS else "standard",
                 settings=settings, model=model, remaining_usd=budget_usd,
                 split_model=lib.get_role_model("prestep"))
-        except Exception:
+        except Exception as _e:
             _log.exception("benchmark pre-step failed; answering without it")
-            prestep = _bp.Prestep(split_fallback="prestep_error")
+            prestep = _bp.Prestep(split_fallback="prestep_error", outcome=f"error: {type(_e).__name__}")
     split_used = bool(prestep.active and prestep.split_ran and prestep.subs)
     sub_hits: list[list[dict]] = []
 
@@ -995,7 +1013,7 @@ def answer_question(
         _tag_trusted(exa_hits, opml_path)
 
     prestep_cost = prestep.cost_usd
-    prestep_log = prestep.log() if (prestep.active or prestep.split_fallback) else {}
+    prestep_log = prestep.log()   # always: "ran", "skipped: <reason>" or "error: <class>"
     # Everything spent before the answer call; a failure still records it.
     common = dict(
         sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
@@ -1115,10 +1133,15 @@ def answer_question(
         done["cost_usd"] = cost + common["cost_usd"]
         if stop_reason_of(resp) == "max_tokens":
             text = trim_to_full_sentence(text)
+        try:
+            from .answer_lint import lint_answer
+            lint = lint_answer(text)
+        except Exception:
+            lint = []
         return Answer(text=text, citations=citations,
                      input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r,
-                     stop_reason=stop_reason_of(resp), **done)
+                     stop_reason=stop_reason_of(resp), lint_flags=lint, **done)
     except Exception as e:
         # The rewrite/embedding/Exa calls already spent real money even
         # though the answer call failed — keep their cost on the Answer so

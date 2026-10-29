@@ -47,8 +47,10 @@ def test_source_documents_order_manifest_and_citations_flag():
     feed = [{"title": "Feed B", "url": "https://b", "summary": "sb"}]
     blocks, sent = agent._build_source_documents(hits, feed)
     assert [d["type"] for d in sent] == ["library", "feed"]   # library first
-    assert sent[0] == {"title": "Lib A", "url": "https://a", "type": "library"}
-    assert sent[1] == {"title": "Feed B", "url": "https://b", "type": "feed"}
+    assert sent[0] == {"title": "Lib A", "url": "https://a", "type": "library",
+                       "label": {"org": "a", "work": "Lib A", "year": "", "kind": "article"}}
+    assert sent[1] == {"title": "Feed B", "url": "https://b", "type": "feed",
+                       "label": {"org": "b", "work": "Feed B", "year": "", "kind": "article"}}
     for b in blocks:
         assert b["type"] == "document"
         assert b["citations"] == {"enabled": True}

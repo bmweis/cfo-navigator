@@ -16,6 +16,12 @@ Q = "How do peers size FP&A teams?"
 
 
 def _ask(pg, handler):
+    # Since the retest fixes a lost response is recovered by polling /ask/result/<id>
+    # (tests/test_buddy_request_recovery.py). Here the server has no such turn, so
+    # after a short grace the same failure line shows.
+    pg.add_init_script("window.__askRecover={pollMs:60,graceMs:300,maxMs:3000}")
+    pg.route(re.compile(r"^http://buddy\.test/ask/result/.*"), lambda r: r.fulfill(
+        status=200, content_type="application/json", body='{"status":"unknown"}'))
     pg.route(re.compile(r"^http://buddy\.test/ask$"), handler)
     pg.goto(ORIGIN + "/tools/fpa-buddy")
     pg.fill("#ask-q", Q)
@@ -29,7 +35,7 @@ def test_html_502_shows_failure_line_and_restores_question(phone):
     text, box = _ask(pg, lambda r: r.fulfill(
         status=502, content_type="text/html",
         body="<html><body><h1>502 Bad Gateway</h1>cloudflare</body></html>"))
-    assert FAILED_TURN_MESSAGE in text
+    assert "Something went wrong. Try again." in text
     assert "Bad Gateway" not in text
     assert box == Q
 

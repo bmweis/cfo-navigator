@@ -165,23 +165,31 @@ FIGURES_TITLE_PREFIX = "Figures: "
 
 
 def go_deeper_items(cites: list[dict] | None) -> list[dict]:
-    """[{name, url}] for each distinct benchmark report the answer cited, in
-    citation order. url is "" for a report with no landing URL (named, not
-    linked). A non-http(s) url is treated as no link."""
+    """[{name, html, url}] for each distinct benchmark report the answer cited, in
+    citation order. `name` is the plain Chicago-style label, `html` the same with the
+    report title in italics; url is "" for a report with no landing URL (named, not
+    linked). A non-http(s) url is treated as no link. A report is a citation that
+    carries `figures`, or (stored before labels existed) a "Figures: " title."""
+    from linklib.citation_label import label_html, label_text
     out: list[dict] = []
     seen: set[str] = set()
     for c in cites or []:
         if not isinstance(c, dict):
             continue
         title = str(c.get("title") or "")
-        if not title.startswith(FIGURES_TITLE_PREFIX):
+        legacy = title.startswith(FIGURES_TITLE_PREFIX)
+        if not (c.get("figures") or legacy):
             continue
-        name = title[len(FIGURES_TITLE_PREFIX):].strip()
+        if legacy and not c.get("label"):
+            name = title[len(FIGURES_TITLE_PREFIX):].strip()
+            name_html = _esc(name)
+        else:
+            name, name_html = label_text(c), label_html(c)
         if not name or name in seen:
             continue
         seen.add(name)
         url = str(c.get("url") or "")
-        out.append({"name": name, "url": url if re.match(r"https?://", url, re.I) else ""})
+        out.append({"name": name, "html": name_html, "url": url if re.match(r"https?://", url, re.I) else ""})
     return out
 
 
@@ -192,8 +200,8 @@ def go_deeper_html(cites: list[dict] | None) -> str:
     parts = []
     for it in items:
         if it["url"]:
-            parts.append(f'<a href="{_esc(it["url"])}" target="_blank" rel="noopener">{_esc(it["name"])}</a>')
+            parts.append(f'<a href="{_esc(it["url"])}" target="_blank" rel="noopener">{it["html"]}</a>')
         else:
-            parts.append(_esc(it["name"]))
+            parts.append(it["html"])
     return ('<p class="ask-godeeper" style="margin:8px 0 0;font-size:13px;color:var(--ink-soft);">'
             "Go deeper: " + ", ".join(parts) + "</p>")

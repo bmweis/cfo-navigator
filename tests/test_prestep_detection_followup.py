@@ -109,9 +109,13 @@ def _lookup(lib, metrics, band="$25M", year="", over_time=False):
 
 def test_less_close_rows_are_not_sent_when_a_closer_one_exists(lib):
     load_report(lib, "noise", [
-        frow(report="Noise Report 2099", year="2099", source="Noise Co", band="$20M-$50M", segment="B2C",
+        frow(report="Noise Report 2099", year="2099", source="Noise Co", band="$20M-$50M", segment="Consumer",
              metric="ARR per employee", value=str(100 + i), statistic=f"stat{i}") for i in range(30)])
-    sub = bp.Sub(intent="benchmark", text="q", metrics=["ARR per employee"], band="$25M", segment="All")
+    # "Enterprise" is a segment the figures print (a generic word like "B2B" or "All" is dropped).
+    load_report(lib, "ent", [
+        frow(report="Enterprise Report 2099", year="2099", source="Ent Co", band="$20M-$50M", segment="Enterprise",
+             metric="ARR per employee", value="170000")])
+    sub = bp.Sub(intent="benchmark", text="q", metrics=["ARR per employee"], band="$25M", segment="Enterprise")
     bp.lookup(lib, sub, "standard", {r["report_slug"]: r for r in lib.list_benchmark_reports()})
     assert set(sub.match_mix) <= {"exact", "adjacent_band"} and sub.rows == sum(sub.match_mix.values()) > 0
     assert all("Noise" not in d["title"] for d in sub.docs)
@@ -120,9 +124,12 @@ def test_less_close_rows_are_not_sent_when_a_closer_one_exists(lib):
 
 def test_with_no_close_row_at_most_the_cap_is_sent_and_the_note_says_so(lib):
     load_report(lib, "far", [
-        frow(report="Far Report 2099", year="2099", source="Far Co", band="$20M-$50M", segment="B2C",
+        frow(report="Far Report 2099", year="2099", source="Far Co", band="$20M-$50M", segment="Consumer",
              metric="Net revenue retention", value=str(100 + i), statistic=f"stat{i}") for i in range(40)])
-    sub = bp.Sub(intent="benchmark", text="q", metrics=["Net revenue retention"], band="$25M", segment="B2B")
+    load_report(lib, "ent", [
+        frow(report="Enterprise Report 2099", year="2099", source="Ent Co", band="$20M-$50M", segment="Enterprise",
+             metric="Burn multiple", value="1.3")])
+    sub = bp.Sub(intent="benchmark", text="q", metrics=["Net revenue retention"], band="$25M", segment="Enterprise")
     bp.lookup(lib, sub, "standard", {r["report_slug"]: r for r in lib.list_benchmark_reports()})
     assert 0 < sub.rows <= bp.RELATED_CAP
     assert not (set(sub.match_mix) & set(bp.CLOSE_MATCHES))
@@ -137,7 +144,7 @@ def test_a_newer_bracketing_row_is_not_crowded_out_by_older_rows(lib):
         frow(report="New Report 2099", year="2099", source="New Co", band="$20M-$50M", metric="New metric", value="7")])
     sub = _lookup(lib, ["Old metric", "New metric"], band="$25M")
     titles = [d["title"] for d in sub.docs]
-    assert titles and titles[0] == "Figures: New Report 2099 (2099)"
+    assert titles and titles[0] == "New Co, New Report 2099 (2099)"
 
 
 # --- 2. the report row ---------------------------------------------------------------
@@ -189,9 +196,9 @@ def test_figures_never_displace_the_articles(lib, monkeypatch):
     c = tbp.FakeClient(split_text=_two_benchmark_parts())
     monkeypatch.setattr(agent, "_get_client", lambda: c)
     agent.answer_question(lib, Q, use_feed=False)
-    docs = [b["title"] for b in c.answer_calls()[0]["messages"][-1]["content"] if b.get("type") == "document"]
-    assert sum(1 for t in docs if t.startswith("Org structure digest")) == 6
-    assert any(t.startswith("Figures:") for t in docs)
+    docs = [b for b in c.answer_calls()[0]["messages"][-1]["content"] if b.get("type") == "document"]
+    assert sum(1 for d in docs if d["title"].startswith("Org structure digest")) == 6
+    assert any(d["source"]["data"].startswith(bp.FIGURES_HEADER) for d in docs)
 
 
 # --- the fourth slot is reserved for the rest of the question ------------------------

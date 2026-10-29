@@ -74,6 +74,10 @@ def test_network_failure_logs_stage_and_offers_recovery_note(phone):
     pg.route(re.compile(r"^http://buddy\.test/ask/client-error$"),
              lambda r: (beacons.append(r.request.post_data), r.fulfill(status=204)))
     pg.route(re.compile(r"^http://buddy\.test/ask$"), lambda r: r.abort())
+    # The page now polls /ask/result/<id> before giving up; here the server has no such turn.
+    pg.add_init_script("window.__askRecover={pollMs:60,graceMs:300,maxMs:3000}")
+    pg.route(re.compile(r"^http://buddy\.test/ask/result/.*"), lambda r: r.fulfill(
+        status=200, content_type="application/json", body='{"status":"unknown"}'))
     pg.goto(ORIGIN + "/tools/fpa-buddy")
     pg.fill("#ask-q", Q)
     pg.click("#ask-btn")

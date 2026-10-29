@@ -35,7 +35,7 @@ def register_figures_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
     async def find_figures(ctx: Context, metric: str, band: str = "", segment: str = "",
                            statistic: str = "", year: str = "", basis: str = "",
                            denominator: str = "", all_editions: bool = False,
-                           limit: int = fg.DEFAULT_LIMIT) -> dict:
+                           limit: int = fg.DEFAULT_LIMIT, include_illustrative: bool = False) -> dict:
         """Stored benchmark figures for a metric, exactly as the reports print
         them. `metric` may be a canonical name, an alias or a raw report name.
         Optional narrowing: `band` (a printed band or a size such as "$25M"),
@@ -47,7 +47,9 @@ def register_figures_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         list of how it differs from the request. A size between printed bands
         returns the bands either side, flagged. Default is the newest edition
         per publisher; `all_editions=True` returns every edition, oldest first.
-        `notes` says what was left out. Each row has `link` (the report's
+        `notes` says what was left out. Rows from a worked example company
+        ("illustrative", "example", "hypothetical", "sample company") are left out
+        unless `include_illustrative=True`; the count is in `illustrative_left_out`. Each row has `link` (the report's
         landing URL) or `link_note` "no link on file". Admin role only."""
         require_admin(ctx, lib_factory)
         if not (metric or "").strip():
@@ -57,7 +59,8 @@ def register_figures_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
             return fg.find_figures(lib, metric, band=band or None, segment=segment or None,
                                    statistic=statistic or None, year=year or None,
                                    basis=basis or None, denominator=denominator or None,
-                                   all_editions=all_editions, limit=max(1, min(int(limit), 200)))
+                                   all_editions=all_editions, limit=max(1, min(int(limit), 200)),
+                                   include_illustrative=include_illustrative)
         finally:
             lib.close()
 
