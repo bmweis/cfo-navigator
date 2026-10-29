@@ -146,6 +146,10 @@ def extract_citations(content_blocks, sent_docs: list[dict],
                         entry["article_id"] = info["article_id"]
                     if info.get("provider") is not None:
                         entry["provider"] = info["provider"]
+                    if info.get("label"):
+                        entry["label"] = info["label"]      # whose work it is (Chicago-style citation list)
+                    if info.get("figures"):
+                        entry["figures"] = True             # a stored benchmark report, for the Go deeper line
                     if info.get("own_content"):
                         # Published-content ingestion (2026-09): Brian's own
                         # writing, surfaced on merit like any other source —

@@ -93,6 +93,15 @@ def _doc_text(d) -> str:
     return d["source"]["data"]
 
 
+def _is_figures(d) -> bool:
+    """A stored-figures document (titled "<Source>, <Report> (<year>)" since the retest fixes)."""
+    return _doc_text(d).startswith(bp.FIGURES_HEADER)
+
+
+def _eb99(d) -> bool:
+    return _is_figures(d) and "Example Benchmarks 2099" in d["title"]
+
+
 def _ask(lib, q, **kw):
     kw.setdefault("use_feed", False)
     return agent.answer_question(lib, q, **kw)
@@ -114,9 +123,9 @@ def test_one_metric_gets_figures_documents_and_no_model_call(lib, monkeypatch):
     assert c.split_calls() == [] and ans.prestep["split_ran"] is False and ans.prestep["split_fallback"] == ""
     call = c.answer_calls()[0]
     titles = [d["title"] for d in _docs(call)]
-    assert "Figures: Example Benchmarks 2099 (2099)" in titles
+    assert "Example Benchmarks, Example Benchmarks 2099 (2099)" in titles
     assert agent._PRESTEP_RULES in call["system"]
-    body = next(_doc_text(d) for d in _docs(call) if d["title"].startswith("Figures: Example Benchmarks 2099"))
+    body = next(_doc_text(d) for d in _docs(call) if _eb99(d))
     assert "$10M-$20M" in body and "match: exact" in body and "value 104" in body
     assert ans.prestep["detected"] == ["Net revenue retention"]
 
@@ -126,7 +135,7 @@ def test_figure_citation_resolves_to_the_report_landing_url(lib, monkeypatch):
     _client(monkeypatch, cite_first_doc=True)
     ans = _ask(lib, "What is median net revenue retention at $15M ARR?")
     assert ans.citations[0]["url"] == "https://reports.example.test/eb-2099"
-    assert ans.citations[0]["title"].startswith("Figures: Example Benchmarks 2099")
+    assert ans.citations[0]["title"].startswith("Example Benchmarks, Example Benchmarks 2099") and ans.citations[0]["figures"]
 
 
 def test_report_without_a_link_is_cited_by_name_with_the_note(lib, monkeypatch):
@@ -139,7 +148,7 @@ def test_report_without_a_link_is_cited_by_name_with_the_note(lib, monkeypatch):
 def test_a_band_between_printed_bands_is_flagged_in_the_prompt(lib, monkeypatch):
     c = _client(monkeypatch)
     _ask(lib, "What is the median net revenue retention at $25M ARR?")
-    body = next(_doc_text(d) for d in _docs(c.answer_calls()[0]) if d["title"].startswith("Figures: Example Benchmarks 2099"))
+    body = next(_doc_text(d) for d in _docs(c.answer_calls()[0]) if _eb99(d))
     assert body.count("match: adjacent_band") >= 2 and "you asked for '$25M'" in body
 
 
@@ -150,7 +159,7 @@ def test_no_data_says_so_in_the_lookup_notes(lib, monkeypatch):
     ans = _ask(lib, "What is the median net revenue retention at $25M ARR?")
     notes = "\n".join(_texts(c.answer_calls()[0]))
     assert "No stored figure matches" in notes and "do not estimate" in notes.lower()
-    assert not any(d["title"].startswith("Figures:") for d in _docs(c.answer_calls()[0]))
+    assert not any(_is_figures(d) for d in _docs(c.answer_calls()[0]))
     assert ans.prestep["subs"][0]["figure_rows"] == 0
 
 
@@ -243,7 +252,7 @@ def test_each_subquery_keeps_its_own_character_budget(lib, monkeypatch):
     c = FakeClient()
     monkeypatch.setattr(agent, "_get_client", lambda: c)
     _ask(lib, MULTI_Q, effort="standard")
-    lib_docs = [d for d in _docs(c.answer_calls()[0]) if not d["title"].startswith("Figures:")]
+    lib_docs = [d for d in _docs(c.answer_calls()[0]) if not _is_figures(d)]
     total = sum(len(_doc_text(d)) for d in lib_docs)
     per_source = agent.EFFORT_SETTINGS["standard"]["source_chars"]
     assert total == 3 * 8 * per_source > budget          # 3 sub-queries, none sharing one budget
@@ -280,8 +289,7 @@ def test_splitter_exception_falls_back_to_one_lookup_and_records_it(lib, monkeyp
     assert not ans.failed and ans.text == "Answer text."
     assert ans.prestep["split_fallback"] == "call_failed" and ans.prestep["split_ran"] is False
     assert "secret-xyz" not in json.dumps(ans.prestep) and "secret-xyz" not in ans.text
-    titles = [d["title"] for d in _docs(c.answer_calls()[0])]
-    assert any(t.startswith("Figures:") for t in titles)       # the rules-only lookup still ran
+    assert any(_is_figures(d) for d in _docs(c.answer_calls()[0]))       # the rules-only lookup still ran
     assert ans.prestep["subs"][0]["metrics"] == ["net revenue retention", "burn multiple"]
 
 
@@ -375,7 +383,7 @@ def test_figures_documents_have_their_own_budget_and_say_what_was_left_out(lib, 
     monkeypatch.setitem(bp.FIGURES_CHARS, "standard", 1500)
     c = _client(monkeypatch)
     ans = _ask(lib, "What is median net revenue retention?")
-    text = " ".join(_doc_text(d) for d in _docs(c.answer_calls()[0]) if d["title"].startswith("Figures:"))
+    text = " ".join(_doc_text(d) for d in _docs(c.answer_calls()[0]) if _is_figures(d))
     assert "left out for length" in text and ans.prestep["subs"][0]["figure_rows_left_out"] > 0
     assert "left out for length" in "\n".join(_texts(c.answer_calls()[0]))
 
@@ -383,7 +391,7 @@ def test_figures_documents_have_their_own_budget_and_say_what_was_left_out(lib, 
 def test_no_library_means_no_lookup(lib, monkeypatch):
     c = _client(monkeypatch)
     ans = _ask(lib, "What is median net revenue retention?", use_library=False)
-    assert ans.prestep["outcome"].startswith("skipped") and not any(d["title"].startswith("Figures:") for d in _docs(c.answer_calls()[0]))
+    assert ans.prestep["outcome"].startswith("skipped") and not any(_is_figures(d) for d in _docs(c.answer_calls()[0]))
 
 
 def test_a_prestep_crash_is_logged_and_the_turn_continues(lib, monkeypatch):
@@ -530,7 +538,7 @@ def test_a_benchmark_inside_a_hiring_question_is_split_and_both_answered(lib, mo
         "rest_of_question": "Hiring plan."}))
     ans = _ask(lib, "What is median NRR at $15M ARR, and how many AEs should we hire next year?")
     assert ans.prestep["split_ran"] and [s["intent"] for s in ans.prestep["subs"]] == ["benchmark", "other"]
-    assert any(d["title"].startswith("Figures:") for d in _docs(c.answer_calls()[0]))
+    assert any(_is_figures(d) for d in _docs(c.answer_calls()[0]))
     assert "Answer every part" in "\n".join(_texts(c.answer_calls()[0]))
 
 
@@ -557,7 +565,7 @@ def test_unregistered_metric_names_trigger_a_lookup(tmp_path, monkeypatch):
     ans = _ask(db, "What are total employees and expense as a percent of revenue at $20-$30M revenue?")
     assert sorted(ans.prestep["detected"]) == ["Expense as a percent of revenue", "Total employees"]
     assert ans.prestep["signals"]["via_fts"] is True
-    text = " ".join(_doc_text(d) for d in _docs(c.answer_calls()[0]) if d["title"].startswith("Figures:"))
+    text = " ".join(_doc_text(d) for d in _docs(c.answer_calls()[0]) if _is_figures(d))
     assert "value 140" in text and "value 88" in text and "match: exact" in text
     db.close()
 

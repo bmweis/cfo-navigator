@@ -18,27 +18,53 @@ def _system(benchmark_rules):
     return a._build_system(True, False, False, _Lib(), benchmark_rules=benchmark_rules)
 
 
-RULES = {
-    "table first": ["one compact table", "metric, band as printed, statistic", "value, report and year, match note"],
-    "short prose, full sentence": ["keep the prose short", "end on a full sentence"],
-    "period exactly as given": ["exactly as the figures give it", "only from numbers shown", "Count the years"],
+# Rules about claims and the shape of an answer hold on EVERY turn (retest fixes, Part C2):
+# the $20-$30M turn ran no lookup and was answered without them.
+EVERY_TURN = {
+    "lead with sentences, publisher and year inside": ["3 to 5 sentences", "publisher and year inside the sentence"],
+    "at most one small table, six rows": ["at most one small table", "Six rows at most"],
+    "one line on what is missing": ["what the data does not cover"],
+    "no practical read, advice, commentary, multiples": ["No \"practical read\"", "investor multiples"],
+    "no illustrative figures as benchmarks": ["illustrative or worked-example company is not a benchmark"],
     "no unsupported causes": ["Do not state a cause", "attribute it to that source by name"],
+    "no invented numbers": ["Never state a number, range or headcount that no source gives"],
     "derived labelled, stored preferred": ["derived, not in report", "show the inputs", "use the stored figure"],
-    "newest edition and change table": ["newest edition", "every edition in one small table, oldest to newest"],
+    "medians do not add, no mixed bands": ["Medians do not add", "Do not mix bands in one table"],
+    "nothing about the future or an unstated market shift": ["Say nothing about the future", "market shift"],
+    "no unasked recommendation": ["Give no recommendation unless the question asks for one"],
+    "disagreeing publishers both shown": ["When two publishers disagree, show both"],
     "date every source": ["year of every source", "more than three years old"],
+}
+# Figures mechanics stay in the figures block.
+FIGURES_ONLY = {
+    "table columns": ["metric, band as printed, statistic", "value, report and year, match note"],
+    "period exactly as given": ["exactly as the figures give it", "only from numbers shown", "Count the years"],
+    "newest edition and change table": ["newest edition", "every edition in one small table, oldest to newest"],
 }
 
 
-@pytest.mark.parametrize("name", list(RULES))
-def test_rule_is_in_the_prompt_of_a_figures_turn(name):
-    system = _system(True)
-    for phrase in RULES[name]:
+@pytest.mark.parametrize("name", list(EVERY_TURN))
+@pytest.mark.parametrize("figures", [True, False])
+def test_claim_and_shape_rules_are_on_every_turn(name, figures):
+    system = _system(figures)
+    for phrase in EVERY_TURN[name]:
         assert phrase in system, f"{name}: missing {phrase!r}"
 
 
-def test_rules_are_not_sent_without_figures():
+@pytest.mark.parametrize("name", list(FIGURES_ONLY))
+def test_figures_mechanics_are_in_the_prompt_of_a_figures_turn(name):
+    system = _system(True)
+    for phrase in FIGURES_ONLY[name]:
+        assert phrase in system, f"{name}: missing {phrase!r}"
+
+
+def test_figures_mechanics_are_not_sent_without_figures():
     system = _system(False)
-    assert "derived, not in report" not in system and PRESTEP_RULES not in system
+    assert PRESTEP_RULES not in system and "metric, band as printed" not in system
+
+
+def test_the_old_figures_only_table_first_rule_is_gone():
+    assert "Put the figures first" not in PRESTEP_RULES and "Put the figures first" not in _system(True)
 
 
 def test_only_one_label_for_derived_numbers():

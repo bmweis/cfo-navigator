@@ -154,7 +154,7 @@ def test_a_newer_guide_without_a_sample_cannot_outrank_survey_data_by_year(lib):
     sub = bp.Sub(intent="benchmark", text="q", metrics=["Gross Margin"])
     bp.lookup(lib, sub, "standard", {r["report_slug"]: r for r in lib.list_benchmark_reports()}, include_illustrative=True)
     titles = [d["title"] for d in sub.docs]
-    assert titles[0].startswith("Figures: Example Benchmarks") and any("Planning Guide" in t for t in titles[1:])
+    assert titles[0].startswith("Example Benchmarks, Example Benchmarks") and any("Planning Guide" in t for t in titles[1:])
 
 
 # --- 1: why prestep_json was empty ----------------------------------------------------

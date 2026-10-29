@@ -42,6 +42,7 @@ import re
 import threading
 import time
 
+from linklib.citation_label import label_text
 from linklib.db import Library
 from linklib.pricing import turn_cost_line
 from linklib.stop_reason import stop_reason_of
@@ -369,7 +370,9 @@ def _run_ask_turn(lib, user_id, question, *, model, effort, use_library, use_fee
         "answer": ans.text,
         # API-verified citations only — what the answer's [n] markers map
         # to. own_content (when present) rides through unmodified.
-        "citations": ans.citations,
+        # `label_text` is the Chicago-style line (organization, title, year; a report title
+        # in *asterisks*, an article title quoted) for callers that print a plain list.
+        "citations": [dict(c, label_text=label_text(c, markdown=True)) for c in (ans.citations or [])],
         # The benchmark reports the answer cited, for a "Go deeper" line: name
         # and landing URL ("" = no link on file). The answer text itself is
         # returned unchanged above.

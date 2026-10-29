@@ -25323,6 +25323,43 @@ function cutoffHtml(d) {{
          escapeHtml(d.notice) + '</p>';
 }}
 
+// Chicago-style citation label: organization, title, year. Twin of
+// linklib/citation_label.label_html (tests/test_citation_labels.py runs both on the
+// same fixtures). A report title is italic, an article title is quoted; a citation
+// stored before labels existed shows its title (a bare URL shown as its domain).
+function citeDomain(u) {{
+  u = String(u || '').trim(); if (!u) return '';
+  if (u.indexOf('//') < 0) u = '//' + u;
+  try {{ return new URL(u, 'https://x.invalid').hostname.toLowerCase().replace(/^www\\./, ''); }} catch(_) {{ return ''; }}
+}}
+function citeIsUrl(s) {{
+  s = String(s || '').replace(/\\s+/g, ' ').trim();
+  return !!s && (/^(?:https?:\\/\\/|www\\.)\\S+$/i.test(s) || /^[a-z0-9-]+(?:\\.[a-z0-9-]+)+(?:\\/\\S*)?$/i.test(s));
+}}
+function citeParts(c) {{
+  var lab = c && c.label;
+  if (lab && typeof lab === 'object') {{
+    return {{org: String(lab.org || '').trim(), work: String(lab.work || '').trim(), year: String(lab.year || '').trim(),
+            kind: lab.kind === 'report' ? 'report' : 'article'}};
+  }}
+  var t = String(c && c.title || '').replace(/\\s+/g, ' ').trim();
+  if (!t || citeIsUrl(t)) t = citeDomain((c && c.url) || t);
+  return {{org: '', work: t, year: '', kind: 'plain'}};
+}}
+function citeLabelText(c) {{
+  var p = citeParts(c), w = p.work;
+  if (w && p.kind === 'article') w = '"' + w + '"';
+  var out = [p.org, w].filter(Boolean).join(', ');
+  return (p.year && out) ? out + ' (' + p.year + ')' : out;
+}}
+function citeLabelHtml(c) {{
+  var p = citeParts(c), w = escapeHtml(p.work);
+  if (w && p.kind === 'report') w = '<i>' + w + '</i>';
+  else if (w && p.kind === 'article') w = '&quot;' + w + '&quot;';
+  var out = [escapeHtml(p.org), w].filter(Boolean).join(', ');
+  return (p.year && out) ? out + ' (' + escapeHtml(p.year) + ')' : out;
+}}
+
 // "Go deeper": one line naming each benchmark report the answer cited, linked to
 // its landing page. Twin of webapp/answer_render.go_deeper_html; built from the
 // turn's citations, never from model text.
@@ -25330,14 +25367,16 @@ function goDeeperHtml(d) {{
   var seen = {{}}, parts = [];
   (d && d.citations || []).forEach(function(c) {{
     var t = String(c && c.title || '');
-    if (t.indexOf('Figures: ') !== 0) return;
-    var name = t.slice(9).trim();
+    var legacy = t.indexOf('Figures: ') === 0;
+    if (!(c && c.figures) && !legacy) return;
+    var name = (legacy && !c.label) ? t.slice(9).trim() : citeLabelText(c);
     if (!name || seen[name]) return;
     seen[name] = 1;
     var url = String(c.url || '');
+    var inner = (legacy && !c.label) ? escapeHtml(name) : citeLabelHtml(c);
     parts.push(/^https?:\\/\\//i.test(url)
-      ? '<a href="' + encodeURI(url) + '" target="_blank" rel="noopener">' + escapeHtml(name) + '</a>'
-      : escapeHtml(name));
+      ? '<a href="' + encodeURI(url) + '" target="_blank" rel="noopener">' + inner + '</a>'
+      : inner);
   }});
   if (!parts.length) return '';
   return '<p class="ask-godeeper" style="margin:8px 0 0;font-size:13px;color:var(--ink-soft);">Go deeper: ' + parts.join(', ') + '</p>';
@@ -25361,8 +25400,8 @@ function srcListHtml(d) {{
     if (c.type === 'web' && c.trusted === false) ownTag += ' <span class="ask-src-open">Open web</span>';
     // The emoji rides inside the pill so a long title can never drop below it.
     // A benchmark report with no landing URL is cited by name, not as a link to this page.
-    if (!c.url) return '<li><span>' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span> ' : '') + '[' + c.n + '] ' + escapeHtml(c.title) + '</span> <span class="ask-src-open">no link on file</span></li>';
-    return '<li><a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span>' : '') + '<span>[' + c.n + '] ' + escapeHtml(c.title) + '</span></a>' + ownTag + '</li>';
+    if (!c.url) return '<li><span>' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span> ' : '') + '[' + c.n + '] ' + citeLabelHtml(c) + '</span> <span class="ask-src-open">no link on file</span></li>';
+    return '<li><a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span>' : '') + '<span>[' + c.n + '] ' + citeLabelHtml(c) + '</span></a>' + ownTag + '</li>';
   }});
   // Suggest-content nudge: always rendered, even with zero citations — that's
   // the case where Buddy came up empty-handed, exactly the moment worth
@@ -33382,6 +33421,14 @@ def _ask_settings_badge(row: dict) -> str:
     return f'{srcs} <span style="color:var(--muted);">{_esc(model_short)} &middot; {_esc(row.get("effort") or "")}</span>'
 
 
+def _citation_label_html(c: dict) -> str:
+    """Chicago-style label for one citation: organization, title, year. A citation
+    stored before labels existed renders its title as before; a title that is only
+    a URL is shown as its domain."""
+    from linklib.citation_label import label_html
+    return label_html(c) or _esc(c.get("url") or "")
+
+
 def _render_cited_answer(answer: str, citations_json: str,
                          stop_reason: str = "", cost_line: str = "") -> tuple[str, str]:
     """Citation rendering for the server-rendered ask surfaces — /ask/history,
@@ -33462,7 +33509,7 @@ def _render_cited_answer(answer: str, citations_json: str,
             items.append(f'<li><span style="display:inline-flex;gap:5px;align-items:flex-start;max-width:100%;">'
                          f'<span aria-hidden="true">{_ASK_SOURCE_ICONS.get(c.get("type"), "")}</span>'
                          f'<span>[{_esc(c.get("n") if c.get("n") is not None else "")}] '
-                         f'{_esc(c.get("title") or "")}</span></span> '
+                         f'{_citation_label_html(c)}</span></span> '
                          f'<span style="color:var(--muted);font-size:11px;">no link on file</span></li>')
             continue
         items.append(
@@ -33470,11 +33517,28 @@ def _render_cited_answer(answer: str, citations_json: str,
             f'style="display:inline-flex;gap:5px;align-items:flex-start;max-width:100%;">'
             f'<span aria-hidden="true">{_ASK_SOURCE_ICONS.get(c.get("type"), "")}</span>'
             f'<span>[{_esc(c.get("n") if c.get("n") is not None else "")}] '
-            f'{_esc(c.get("title") or c.get("url") or "")}</span></a>{archive_ref}{own_tag}</li>'
+            f'{_citation_label_html(c)}</span></a>{archive_ref}{own_tag}</li>'
         )
     sources_html = ('<ul style="margin:8px 0 0;padding-left:18px;list-style:none;font-size:13px;'
                     f'display:flex;flex-direction:column;gap:4px;">{"".join(items)}</ul>')
     return answer_html, sources_html
+
+
+def _lint_flags_html(r: dict) -> str:
+    """Likely breaches of the answer rules for one turn (linklib.answer_lint), admin
+    report only. Flag only: nothing is rewritten and the user never sees these."""
+    raw = r.get("lint_flags") or ""
+    if not raw:
+        return ""
+    try:
+        flags = json.loads(raw)
+    except ValueError:
+        return ""
+    if not flags:
+        return ""
+    items = "".join(f'<li><b>{_esc(f.get("phrase", ""))}</b>: {_esc(f.get("snippet", ""))}</li>' for f in flags)
+    return (f'<details style="margin-top:4px;font-size:12px;color:var(--ink-soft);"><summary style="cursor:pointer;">'
+            f'Answer rule flags: {len(flags)}</summary><ul style="margin:6px 0 0;padding-left:18px;">{items}</ul></details>')
 
 
 def _prestep_report_html(r: dict) -> str:
@@ -33584,7 +33648,7 @@ def admin_ask_report(request: Request, user: str = ""):
         # error: this report is admin-only and the cost is real spend.
         failed = (f'<div style="font-size:12px;margin-top:3px;"><span style="color:var(--alert);font-weight:600;">&#9888; Failed</span> '
                   f'<span style="color:var(--muted);">{_esc(r.get("error") or "No answer was produced.")}</span></div>') if r.get("failed") else ""
-        lookup = _prestep_report_html(r)
+        lookup = _prestep_report_html(r) + _lint_flags_html(r)
         _ms = int(r.get("duration_ms") or 0)
         dur = (f'<div style="font-size:11px;font-weight:400;color:{"var(--alert)" if _ms >= 60000 else "var(--muted)"};white-space:nowrap;">'
                f'{_ms / 1000:.1f}s</div>') if _ms else ""

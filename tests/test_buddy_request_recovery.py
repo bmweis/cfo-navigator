@@ -163,7 +163,7 @@ def test_result_requires_login(env):
 
 # ---- the page (Chromium) ---------------------------------------------------------
 
-from test_buddy_phone_fixes import ORIGIN, Site, buddy_html, phone  # noqa: E402,F401
+from test_buddy_phone_fixes import ORIGIN, Site, buddy_html, phone  # noqa: E402,F401,F811
 
 Q = "How do peers size FP&A teams?"
 STORED = {"status": "done", "answer": "Recovered answer [1].", "citations": [

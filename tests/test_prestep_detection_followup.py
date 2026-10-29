@@ -144,7 +144,7 @@ def test_a_newer_bracketing_row_is_not_crowded_out_by_older_rows(lib):
         frow(report="New Report 2099", year="2099", source="New Co", band="$20M-$50M", metric="New metric", value="7")])
     sub = _lookup(lib, ["Old metric", "New metric"], band="$25M")
     titles = [d["title"] for d in sub.docs]
-    assert titles and titles[0] == "Figures: New Report 2099 (2099)"
+    assert titles and titles[0] == "New Co, New Report 2099 (2099)"
 
 
 # --- 2. the report row ---------------------------------------------------------------
@@ -196,9 +196,9 @@ def test_figures_never_displace_the_articles(lib, monkeypatch):
     c = tbp.FakeClient(split_text=_two_benchmark_parts())
     monkeypatch.setattr(agent, "_get_client", lambda: c)
     agent.answer_question(lib, Q, use_feed=False)
-    docs = [b["title"] for b in c.answer_calls()[0]["messages"][-1]["content"] if b.get("type") == "document"]
-    assert sum(1 for t in docs if t.startswith("Org structure digest")) == 6
-    assert any(t.startswith("Figures:") for t in docs)
+    docs = [b for b in c.answer_calls()[0]["messages"][-1]["content"] if b.get("type") == "document"]
+    assert sum(1 for d in docs if d["title"].startswith("Org structure digest")) == 6
+    assert any(d["source"]["data"].startswith(bp.FIGURES_HEADER) for d in docs)
 
 
 # --- the fourth slot is reserved for the rest of the question ------------------------

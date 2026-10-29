@@ -36,6 +36,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import figures as fg
+from .citation_label import make_label
 
 _log = logging.getLogger(__name__)
 
@@ -57,6 +58,9 @@ FIGURE_FETCH_LIMIT = 150
 CLOSE_MATCHES = ("exact", "adjacent_band")
 RELATED_CAP = 8
 CARD_SUFFIX = " (workbook definition)"
+# First line of every figures document. The document title is "<Source>, <Report> (<year>)",
+# so this line is what tells the model (and the tests) it is holding stored report figures.
+FIGURES_HEADER = "Stored benchmark figures (exact numbers from the published report)."
 # Rough size of the splitter call, for the pre-flight estimate only.
 SPLIT_EST_TOKENS = (1100, 400)
 
@@ -461,7 +465,7 @@ def _figure_docs(rows: list[dict], budget: int, reports: dict) -> tuple[list[dic
     left_out = 0
     for slug, grp in by_report.items():
         head = grp[0]
-        lines = [f"Metric: {', '.join(sorted({g['metric'] for g in grp}))}"]
+        lines = [FIGURES_HEADER, f"Metric: {', '.join(sorted({g['metric'] for g in grp}))}"]
         kept = 0
         for g in grp:
             line = _row_line(g)
@@ -473,12 +477,19 @@ def _figure_docs(rows: list[dict], budget: int, reports: dict) -> tuple[list[dic
         if len(grp) > kept:
             lines.append(f"({len(grp) - kept} more figures in this report matched and were left out for length.)")
         rep = reports.get(slug, {})
-        title = f"Figures: {head['report']} ({head['report_year']})" if head["report_year"] else f"Figures: {head['report']}"
+        # Titled "<Source>, <Report> (<year>)" so the model names the publisher in its own
+        # sentences. The citation carries `figures` (the Go deeper line keys off it, not the title).
+        who = (head["source"] or "").strip()
+        title = ", ".join(x for x in (who, head["report"]) if x) or head["report"]
+        if head["report_year"]:
+            title += f" ({head['report_year']})"
         if not head["link"]:
-            lines.insert(0, "No link on file for this report. Cite it by name.")
+            lines.insert(1, "No link on file for this report. Cite it by name.")
         body = "\n".join(lines)
         used += len(body)
-        sent = {"title": title, "url": head["link"], "type": "library"}
+        sent = {"title": title, "url": head["link"], "type": "library", "figures": True,
+                "label": make_label(source=head["source"], title=head["report"], year=head["report_year"],
+                                    url=head["link"], kind="report")}
         if rep.get("article_id"):
             sent["article_id"] = rep["article_id"]
         docs.append({"title": title, "body": body, "sent": sent})
@@ -577,54 +588,32 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
 
 
 PRESTEP_RULES = (
-    "\n\nBenchmark figures (only when documents titled \"Figures: ...\" are present):\n"
-    "- Each \"Figures:\" document holds exact numbers from one published report. State a figure only as "
+    "\n\nBenchmark figures (only when documents starting \"Stored benchmark figures\" are present):\n"
+    "- Each such document holds exact numbers from one published report. State a figure only as "
     "the document prints it, with its band, basis, statistic and sample size when given, and cite it.\n"
     "- Every figure line ends with a match tag. When it is not \"match: exact\", say in plain words how it "
     "differs from what the user asked (the band, basis, statistic, segment or definition), using the text in "
     "brackets after the tag. Never present a close figure as an exact one.\n"
-    "- Default to the newest edition of each publisher's report. When a Figures document for a newer edition "
+    "- Default to the newest edition of each publisher's report. When a figures document for a newer edition "
     "of the same publisher is present, do not use an older edition's number for the same thing. For a question "
     "about change over time, show every edition in one small table, oldest to newest.\n"
     "- If the lookup notes say nothing close was found, say so plainly. Do not estimate a benchmark from "
     "memory and do not stretch a loosely related figure.\n"
-    "- Do not average or combine figures from different reports or bases yourself. A number you derive must "
-    "be labelled \"derived, not in report\".\n"
+    "- Do not average or combine figures from different reports or bases yourself.\n"
     "- A document titled \"... (workbook definition)\" governs. Give that definition first. If other sources "
     "define the metric differently, say so after it, newest source first.\n"
     "- The question may mix a benchmark ask with a broader one. Answer both: the benchmark part from the "
     "figures, the rest normally.\n"
     "- A report whose document says \"No link on file\" is cited by name only.\n"
-    "\nAnswer format when figures are present:\n"
-    "- Synthesize, then point to the source. Give the headline figures and a short read of them, not every "
-    "row a report holds. The page adds a \"Go deeper\" line naming each report you cited, so do not write one.\n"
-    "- Put the figures first in one compact table per topic with the columns, in this order: metric, band as "
-    "printed, statistic, value, report and year, match note. At most 8 rows per table unless the user asked "
-    "for every edition. Newest report first. Do not restate the same numbers in prose after the table.\n"
+    "- Name the publisher in your own sentences (the document title starts with it). The page adds a \"Go "
+    "deeper\" line naming each report you cited, so do not write one.\n"
+    "\nTable mechanics when figures are present:\n"
+    "- If a table helps, its columns are, in this order: metric, band as printed, statistic, value, report and "
+    "year, match note. Six rows at most unless the user asked for every edition. Newest report first.\n"
     "- The match note is a short phrase of a few words. A caveat that applies to every row (for example, "
     "\"band wider than asked\") is stated once above the table and never repeated in each row.\n"
-    "- Then keep the prose short: what the numbers say, how close they are to the ask, and what is missing. "
-    "Always end on a full sentence.\n"
-    "- When two publishers' newest editions disagree, show both with their dates. Do not average them or pick one.\n"
-    "\nRules for numbers and claims:\n"
     "- State a period exactly as the figures give it (the years printed), and compute a percent change or "
-    "difference only from numbers shown in the answer. Count the years between two dates correctly.\n"
-    "- Do not state a cause or reason for a change unless a cited source states it. If a source does, "
-    "attribute it to that source by name; otherwise leave the cause out. Good: \"Example Benchmarks says the "
-    "dip followed hiring freezes [2].\" Bad: \"The dip reflects the overhiring era.\" when no source says so.\n"
-    "- Label every derived number \"derived, not in report\" inline and show the inputs next to it. Good: "
-    "\"up 12% (derived, not in report: 150 to 168)\". Bad: \"up 12%\". When a stored "
-    "figure exists for the same thing (for example an implied total employees row), use the stored figure "
-    "and cite it instead of deriving one.\n"
-    "- Medians do not add. Never present a sum or a \"stack\" of medians. List each ratio with its own band, "
-    "year and source, and combine numbers only within one source, one band and one year. Good: three separate "
-    "rows, each with its own band and report. Bad: a \"typical cost stack\" that adds medians from different "
-    "reports or bands.\n"
-    "- Say nothing about the future or about years the data does not cover. Good: \"The 2025 edition is the "
-    "newest on file.\" Bad: \"Likely similar or slightly lower next year.\"\n"
-    "- Give no recommendation or \"practical read\" unless the question asks for one. Good: end with what the "
-    "numbers say and what is missing. Bad: \"Sitting below the median means you are behind.\"\n"
-    "- Give the year of every source you take a number from. Say when a source is more than three years old."
+    "difference only from numbers shown in the answer. Count the years between two dates correctly."
 )
 
 
