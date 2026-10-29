@@ -88,8 +88,10 @@ def test_retrieve_exa_success_shapes_hits_and_cost(monkeypatch):
     assert num_results == 2
     assert hits == [
         {"title": "Article A", "url": "https://a.com/1",
-         "summary": "Median ACV is $25k. Growth benchmarks vary."},
-        {"title": "Article B", "url": "https://b.com/2", "summary": "Full text body."},
+         "summary": "Median ACV is $25k. Growth benchmarks vary.",
+         "author": "", "published_at": ""},
+        {"title": "Article B", "url": "https://b.com/2", "summary": "Full text body.",
+         "author": "", "published_at": ""},
     ]
     assert cost == pytest.approx(pricing.compute_exa_cost("search", num_results=2))
 

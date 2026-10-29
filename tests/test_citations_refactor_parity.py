@@ -53,6 +53,9 @@ def test_build_source_documents_matches_golden_pre_refactor_output():
         doc_blocks, sent_docs = agent._build_source_documents(**scenario["kwargs"])
         expected = golden[scenario["name"]]
         assert doc_blocks == expected["doc_blocks"], f"doc_blocks drifted for scenario {scenario['name']!r}"
+        # "label" is additive (Chicago-style citation label, retest fixes
+        # Part D); every pre-refactor key must still be byte-identical.
+        sent_docs = [{k: v for k, v in d.items() if k != "label"} for d in sent_docs]
         assert sent_docs == expected["sent_docs"], f"sent_docs drifted for scenario {scenario['name']!r}"
 
 
