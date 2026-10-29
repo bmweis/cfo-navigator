@@ -2777,6 +2777,14 @@ class Library:
             "ALTER TABLE ask_questions ADD COLUMN prestep_cost_usd REAL NOT NULL DEFAULT 0",
             # Wall time of the whole turn (pre-step, retrieval, answer call), 0 on older rows.
             "ALTER TABLE ask_questions ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0",
+            # Retest fixes (2026-10): the page's random id for one submit (so a
+            # dropped response can be recovered and a resubmit never runs or bills
+            # twice), the exact payload POST /ask returned (what the recovery poll
+            # hands back), and the answer-claim lint flags (flag only).
+            "ALTER TABLE ask_questions ADD COLUMN request_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE ask_questions ADD COLUMN result_json TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE ask_questions ADD COLUMN lint_flags TEXT NOT NULL DEFAULT ''",
+            "CREATE INDEX IF NOT EXISTS idx_ask_questions_request ON ask_questions(user_id, request_id) WHERE request_id <> ''",
             # FP&A Buddy Keep private (2026-10): 1 = the asker keeps this
             # conversation out of the member-visible past-questions list.
             # Set on every turn of a conversation together; admins still see it.
@@ -9578,7 +9586,9 @@ class Library:
                             error: str = "",
                             prestep: Optional[dict] = None,
                             prestep_cost_usd: float = 0.0,
-                            duration_ms: int = 0) -> int:
+                            duration_ms: int = 0,
+                            request_id: str = "",
+                            lint_flags: Optional[list] = None) -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
@@ -9607,8 +9617,8 @@ class Library:
                 embed_input_tokens, embed_cost_usd,
                 exa_result_count, exa_cost_usd,
                 citations_json, stop_reason, is_private, web_scope, failed, error,
-                prestep_json, prestep_cost_usd, duration_ms, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                prestep_json, prestep_cost_usd, duration_ms, request_id, lint_flags, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
@@ -9619,7 +9629,8 @@ class Library:
              web_scope if web_scope in ("open", "trusted") else "",
              int(bool(failed)), error if failed else "",
              json.dumps(prestep) if prestep else "", float(prestep_cost_usd or 0),
-             int(duration_ms or 0), now),
+             int(duration_ms or 0), request_id or "",
+             json.dumps(lint_flags) if lint_flags else "", now),
         )
         row_id = cur.lastrowid
         if not conversation_id:
@@ -9628,6 +9639,23 @@ class Library:
             )
         self.conn.commit()
         return row_id
+
+    def set_ask_result(self, row_id: int, payload: dict) -> None:
+        """Store the exact payload POST /ask returned for this turn, so the
+        recovery poll can hand the same thing back after a dropped response."""
+        self.conn.execute("UPDATE ask_questions SET result_json=? WHERE id=?",
+                          (json.dumps(payload), row_id))
+        self.conn.commit()
+
+    def get_ask_by_request(self, user_id: int | None, request_id: str) -> dict | None:
+        """The recorded turn for (user, request id), or None. Another user's id
+        and an unknown id are the same answer: None."""
+        if not request_id or user_id is None:
+            return None
+        r = self.conn.execute(
+            "SELECT id, failed, result_json, conversation_id FROM ask_questions "
+            "WHERE user_id=? AND request_id=? ORDER BY id DESC LIMIT 1", (user_id, request_id)).fetchone()
+        return dict(r) if r else None
 
     def ask_cost_all_time(self, user_id: int) -> float:
         row = self.conn.execute(

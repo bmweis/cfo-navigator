@@ -36,7 +36,10 @@ Brian's approval), rather than raising a `ToolError` for it.
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
+import threading
 import time
 
 from linklib.db import Library
@@ -75,6 +78,61 @@ def answer_cutoff_notice(stop_reason: str | None) -> str:
     return ANSWER_CUTOFF_NOTICE if stop_reason == "max_tokens" else ""
 
 
+class AskInFlight(Exception):
+    """The same request id is already being answered. The caller returns a
+    "running" response; the page polls /ask/result/<id> for the stored answer."""
+
+
+# One id per submit, made by the page. A shape check only; the server never
+# trusts it for anything but looking up the caller's own turn.
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def clean_request_id(raw) -> str:
+    s = str(raw or "").strip()
+    return s if _REQUEST_ID_RE.match(s) else ""
+
+
+# Requests being answered right now, in this process: (user_id, request_id) -> start.
+# In memory on purpose: a restart loses the running turn anyway, and the poll
+# then reports "unknown" instead of "running" forever.
+_INFLIGHT: dict[tuple[int, str], float] = {}
+_INFLIGHT_LOCK = threading.RLock()
+# A running entry older than this is treated as gone (a thread that died).
+_INFLIGHT_MAX_SECONDS = 600
+
+
+def inflight_now(user_id: int | None, request_id: str) -> bool:
+    if user_id is None or not request_id:
+        return False
+    with _INFLIGHT_LOCK:
+        t = _INFLIGHT.get((user_id, request_id))
+        return t is not None and (time.monotonic() - t) < _INFLIGHT_MAX_SECONDS
+
+
+def result_for_request(lib: Library, user_id: int | None, request_id: str) -> dict:
+    """What the recovery poll returns: {"status": running|done|failed|unknown, ...}.
+    `done` carries the same payload POST /ask returned. Only the user who asked
+    can read it; another user's id is "unknown", same as an id that never existed."""
+    rid = clean_request_id(request_id)
+    if not rid or user_id is None:
+        return {"status": "unknown"}
+    row = lib.get_ask_by_request(user_id, rid)
+    if row:
+        if row["failed"]:
+            return {"status": "failed", "failed": True, "detail": FAILED_TURN_MESSAGE}
+        if row["result_json"]:
+            try:
+                return {"status": "done", **json.loads(row["result_json"])}
+            except ValueError:
+                pass
+        # Recorded but the payload is not there yet (written a moment after the row).
+        return {"status": "running"}
+    if inflight_now(user_id, rid):
+        return {"status": "running"}
+    return {"status": "unknown"}
+
+
 class AskTurnFailed(Exception):
     """The answer call did not produce an answer. The turn was recorded as a
     failed row (so its spend still counts) and is never shown as a question.
@@ -102,6 +160,7 @@ def run_ask(
     conversation_id: str = "",
     opml_path: str | None = None,
     is_private: bool = False,
+    request_id: str = "",
 ) -> dict:
     """Answer one FP&A Buddy turn, exactly as `POST /ask` does.
 
@@ -117,6 +176,44 @@ def run_ask(
     web_sources/followups_left/conversation_id/turn_id/usage) — matching
     `POST /ask`'s JSON response contract field-for-field.
     """
+    request_id = clean_request_id(request_id)
+    if request_id and user_id is not None:
+        # A resubmit of the same id never runs or bills a second turn. The check
+        # and the claim sit under one lock so two near-simultaneous posts cannot
+        # both pass it.
+        with _INFLIGHT_LOCK:
+            prior = result_for_request(lib, user_id, request_id)
+            if prior["status"] == "done":
+                prior.pop("status")
+                return prior
+            if prior["status"] == "failed":
+                raise AskTurnFailed(usage=_usage_line(lib, user_id))
+            if prior["status"] == "running":
+                raise AskInFlight(request_id)
+            _INFLIGHT[(user_id, request_id)] = time.monotonic()
+        try:
+            return _run_ask_turn(lib, user_id, question, model=model, effort=effort,
+                                 use_library=use_library, use_feed=use_feed, use_web=use_web,
+                                 conversation_id=conversation_id, opml_path=opml_path,
+                                 is_private=is_private, request_id=request_id)
+        finally:
+            with _INFLIGHT_LOCK:
+                _INFLIGHT.pop((user_id, request_id), None)
+    return _run_ask_turn(lib, user_id, question, model=model, effort=effort,
+                         use_library=use_library, use_feed=use_feed, use_web=use_web,
+                         conversation_id=conversation_id, opml_path=opml_path,
+                         is_private=is_private, request_id="")
+
+
+def _usage_line(lib: Library, user_id: int | None) -> dict | None:
+    if user_id is None:
+        return None
+    return {"spent": round(lib.ask_cost_this_month(user_id), 2),
+            "cap": round(lib.get_effective_ask_cap(user_id), 2)}
+
+
+def _run_ask_turn(lib, user_id, question, *, model, effort, use_library, use_feed, use_web,
+                  conversation_id, opml_path, is_private, request_id) -> dict:
     from linklib.agent import answer_question, MAX_FOLLOWUPS
 
     # Follow-up turn: rebuild history from the conversation's recorded rows
@@ -213,7 +310,7 @@ def run_ask(
                 web_scope=getattr(ans, "web_scope", ""),
                 failed=True, error=ans.error,
                 prestep=getattr(ans, "prestep", None), prestep_cost_usd=getattr(ans, "prestep_cost_usd", 0.0),
-                duration_ms=duration_ms,
+                duration_ms=duration_ms, request_id=request_id,
             )
             usage_line = {"spent": round(lib.ask_cost_this_month(user_id), 2),
                           "cap": round(lib.get_effective_ask_cap(user_id), 2)}
@@ -258,7 +355,8 @@ def run_ask(
             is_private=is_private,
             web_scope=getattr(ans, "web_scope", ""),
             prestep=getattr(ans, "prestep", None), prestep_cost_usd=getattr(ans, "prestep_cost_usd", 0.0),
-            duration_ms=duration_ms,
+            duration_ms=duration_ms, request_id=request_id,
+            lint_flags=getattr(ans, "lint_flags", None),
         )
         new_conversation_id = conversation_id or str(row_id)
         turn_id = row_id
@@ -267,7 +365,7 @@ def run_ask(
         usage_line = {"spent": round(spent, 2), "cap": round(cap, 2)}
 
     followups_left = max(0, MAX_FOLLOWUPS - prior_questions)
-    return {
+    payload = {
         "answer": ans.text,
         # API-verified citations only — what the answer's [n] markers map
         # to. own_content (when present) rides through unmodified.
@@ -301,3 +399,7 @@ def run_ask(
         "notice": " ".join(x for x in (answer_cutoff_notice(stop_reason_of(ans)),
                                        getattr(ans, "prestep_notice", "")) if x),
     }
+    if turn_id is not None and request_id:
+        # What the recovery poll hands back if this response never reaches the page.
+        lib.set_ask_result(turn_id, payload)
+    return payload

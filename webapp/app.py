@@ -100,6 +100,9 @@ from webapp.ask_orchestrator import (
     ForbiddenConversationError as _AskForbiddenConversationError,
     UnknownConversationError as _AskUnknownConversationError,
     AskTurnFailed as _AskTurnFailed,
+    AskInFlight as _AskInFlight,
+    clean_request_id as _ask_clean_request_id,
+    result_for_request as _ask_result_for_request,
     FAILED_TURN_MESSAGE as _ASK_FAILED_TURN_MESSAGE,
     answer_cutoff_notice as _answer_cutoff_notice,
     run_ask,
@@ -25792,29 +25795,13 @@ async function doAsk(followUp, skipSimilar) {{
     loadRecent();
   }}
   var stage = 'fetch', t0 = Date.now();
-  try {{
-    var resp = await fetch('/ask', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{ question: q, effort: effort, sources: sources, conversation_id: convoId,
-        private: (!followUp && !convoId) ? !!(document.getElementById('ask-private') || {{}}).checked : undefined }})
-    }});
-    // An edge error page (Cloudflare, Railway) is HTML, so the body may not parse.
-    stage = 'parse';
-    var d = await resp.json().catch(function() {{ return {{}}; }});
-    stage = 'render';
-    if (stale()) {{ if (d.usage) updateUsage(d.usage); dropLate(resp.ok && !d.capped); return; }}
-    if (!resp.ok) {{
-      // A 5xx with no JSON detail is the same failure to the reader.
-      var edgeFail = resp.status >= 500 && !d.detail;
-      answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(edgeFail ? {json.dumps(_ASK_FAILED_TURN_MESSAGE)} : (d.detail || 'Error')) + '</span>';
-      if (d.usage) updateUsage(d.usage);
-      // The question goes back in the box so a retry is one tap.
-      if (d.failed || edgeFail) {{ qEl.value = q; qEl.dispatchEvent(new Event('input')); }}
-      done(asked ? 'ready' : 'none');
-      return;
-    }}
+  // One random id per submit. The server stores it with the turn, so a response
+  // this page never receives can be fetched later, and a resubmit with the same
+  // id never runs or bills a second turn.
+  var rid = newRequestId();
 
+  // Draw a finished turn (the POST response, or the stored copy the poll fetched).
+  function renderResult(d) {{
     CITES = d.citations || [];
     answerEl.innerHTML = mdToHtml(d.answer) + cutoffHtml(d) + goDeeperHtml(d) + costLineHtml(d) + srcListHtml(d);
     if (d.turn_id) answerEl.insertAdjacentHTML('beforeend', fbRowHtml(d.turn_id));
@@ -25834,6 +25821,95 @@ async function doAsk(followUp, skipSimilar) {{
     recentUpsert(convoId, d.followups_left === 0);
     done(d.followups_left === 0 ? 'limit' : 'ready');
     turn.scrollIntoView({{behavior:'smooth', block:'start'}});
+  }}
+
+  function showFailure(withHint) {{
+    answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong. Try again.</span>' +
+      (withHint ? ' <span style="color:var(--muted);font-size:13px;">Your answer may have been saved. Check Recent conversations before asking again.</span>' : '');
+    qEl.value = q; qEl.dispatchEvent(new Event('input'));
+    done(asked ? 'ready' : 'none');
+  }}
+
+  // The response was lost or unreadable. The server may have finished anyway, so
+  // ask for the stored answer by id: every 3 seconds for up to 3 minutes, and once
+  // more the moment the page becomes visible again (a phone that was locked or
+  // backgrounded). Only after that does the failure line show.
+  var recovering = false;
+  function recover(hint) {{
+    if (recovering) return;
+    recovering = true;
+    answerEl.innerHTML = '<div class="ask-loading"><span class="dots"><span></span><span></span><span></span></span>' +
+      '<span class="ask-loading-label">Still working&hellip;</span></div>';
+    // Timings: every 3 s, up to 3 min, 15 s of grace for "unknown". Tests shorten them.
+    var RC = window.__askRecover || {{pollMs: 3000, graceMs: 15000, maxMs: 180000}};
+    var giveUpAt = Date.now() + RC.maxMs, timer = null, finished = false, busy = false, unknownSince = 0;
+    function stop() {{ finished = true; if (timer) clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); }}
+    async function check() {{
+      if (finished || busy) return;
+      busy = true;
+      try {{
+        var r = await fetch('/ask/result/' + encodeURIComponent(rid), {{cache:'no-store'}});
+        var j = r.ok ? await r.json() : {{status:'unknown'}};
+        if (finished) return;
+        if (stale()) {{ stop(); dropLate(j.status === 'done'); return; }}
+        if (j.status === 'done') {{
+          stop();
+          try {{ renderResult(j); }}
+          catch(e2) {{ console.error('FP&A Buddy render failed after recovery', e2); showFailure(true); }}
+          return;
+        }}
+        if (j.status === 'failed') {{
+          stop();
+          answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(j.detail || {json.dumps(_ASK_FAILED_TURN_MESSAGE)}) + '</span>';
+          qEl.value = q; qEl.dispatchEvent(new Event('input'));
+          done(asked ? 'ready' : 'none');
+          return;
+        }}
+        // "unknown" is the server saying it has no such turn running or stored. A
+        // request still on its way can look like that for a moment, so allow a short
+        // grace; after it the turn is not coming.
+        if (j.status === 'unknown') {{
+          if (!unknownSince) unknownSince = Date.now();
+          if (Date.now() - unknownSince > RC.graceMs) {{ stop(); showFailure(hint); return; }}
+        }} else {{ unknownSince = 0; }}
+      }} catch(e3) {{ /* still offline: keep trying until the time is up */ }}
+      finally {{ busy = false; }}
+      if (finished) return;
+      if (Date.now() >= giveUpAt) {{ stop(); showFailure(hint); return; }}
+      timer = setTimeout(check, RC.pollMs);
+    }}
+    function onVis() {{ if (document.visibilityState === 'visible') check(); }}
+    document.addEventListener('visibilitychange', onVis);
+    check();
+  }}
+
+  try {{
+    var resp = await fetch('/ask', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{ question: q, effort: effort, sources: sources, conversation_id: convoId, request_id: rid,
+        private: (!followUp && !convoId) ? !!(document.getElementById('ask-private') || {{}}).checked : undefined }})
+    }});
+    // An edge error page (Cloudflare, Railway) is HTML, so the body may not parse.
+    stage = 'parse';
+    var d = await resp.json().catch(function() {{ return {{}}; }});
+    stage = 'render';
+    if (stale()) {{ if (d.usage) updateUsage(d.usage); dropLate(resp.ok && !d.capped); return; }}
+    // Still being answered (a resubmit of this id), or an edge timeout with no JSON
+    // from us: the turn may be running or stored, so ask for it instead of giving up.
+    if (resp.status === 202 || (!resp.ok && resp.status >= 500 && !d.detail && !d.failed)) {{
+      recover(true);
+      return;
+    }}
+    if (!resp.ok) {{
+      answerEl.innerHTML = '<span style="color:var(--alert);">' + escapeHtml(d.detail || 'Error') + '</span>';
+      if (d.usage) updateUsage(d.usage);
+      // The question goes back in the box so a retry is one tap.
+      if (d.failed) {{ qEl.value = q; qEl.dispatchEvent(new Event('input')); }}
+      done(asked ? 'ready' : 'none');
+      return;
+    }}
+    renderResult(d);
   }} catch(e) {{
     if (stale()) {{ dropLate(false); return; }}
     console.error('FP&A Buddy ask failed', e);
@@ -25841,14 +25917,17 @@ async function doAsk(followUp, skipSimilar) {{
     try {{ navigator.sendBeacon('/ask/client-error', new Blob([JSON.stringify({{
       stage: stage, name: (e && e.name) || '', message: String((e && e.message) || e).slice(0, 200),
       elapsed_ms: Date.now() - t0, online: navigator.onLine, visibility: document.visibilityState,
-      effort: effort }})], {{type: 'application/json'}})); }} catch(_) {{}}
+      effort: effort, request_id: rid }})], {{type: 'application/json'}})); }} catch(_) {{}}
     // The server may have finished and stored the answer even though this page lost it.
-    answerEl.innerHTML = '<span style="color:var(--alert);">Something went wrong. Try again.</span>' +
-      (stage === 'fetch' || stage === 'render'
-        ? ' <span style="color:var(--muted);font-size:13px;">Your answer may have been saved. Check Recent conversations before asking again.</span>' : '');
-    qEl.value = q; qEl.dispatchEvent(new Event('input'));
-    done(asked ? 'ready' : 'none');
+    recover(stage === 'fetch' || stage === 'render');
   }}
+}}
+
+function newRequestId() {{
+  try {{ if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); }} catch(_) {{}}
+  var a = new Uint8Array(16);
+  try {{ crypto.getRandomValues(a); }} catch(_) {{ for (var i = 0; i < 16; i++) a[i] = Math.floor(Math.random() * 256); }}
+  return Array.prototype.map.call(a, function(x) {{ return ('0' + x.toString(16)).slice(-2); }}).join('');
 }}
 
 document.addEventListener('keydown', function(e) {{
@@ -25977,6 +26056,7 @@ async def ask(request: Request):
     effort = (payload.get("effort") or "standard")
     conversation_id = (payload.get("conversation_id") or "").strip()
     is_private = bool(payload.get("private"))   # first turn only; a follow-up inherits
+    request_id = _ask_clean_request_id(payload.get("request_id"))
     # Clients no longer send conversation history — on a follow-up the server
     # rebuilds it from the conversation's recorded ask_questions rows below,
     # so fabricated history is impossible. A stale pre-deploy tab may still
@@ -25999,12 +26079,12 @@ async def ask(request: Request):
     return await run_in_threadpool(
         _ask_blocking, request, question, model=model, effort=effort,
         use_library=use_library, use_feed=use_feed, use_web=use_web,
-        conversation_id=conversation_id, is_private=is_private)
+        conversation_id=conversation_id, is_private=is_private, request_id=request_id)
 
 
 def _ask_blocking(request: Request, question: str, *, model: str, effort: str,
                   use_library: bool, use_feed: bool, use_web: bool,
-                  conversation_id: str, is_private: bool):
+                  conversation_id: str, is_private: bool, request_id: str = ""):
     lib = _lib()
     try:
         user_id = _current_user_id(lib, request)
@@ -26024,7 +26104,12 @@ def _ask_blocking(request: Request, question: str, *, model: str, effort: str,
                 conversation_id=conversation_id,
                 opml_path=OPML_PATH,
                 is_private=is_private,
+                request_id=request_id,
             )
+        except _AskInFlight:
+            # The same request id is still being answered: nothing new runs.
+            # The page polls GET /ask/result/<id> for the stored answer.
+            return JSONResponse({"status": "running"}, status_code=202)
         except _AskUnknownConversationError:
             raise HTTPException(status_code=404, detail="unknown conversation")
         except _AskForbiddenConversationError:
@@ -26036,6 +26121,26 @@ def _ask_blocking(request: Request, question: str, *, model: str, effort: str,
                                 status_code=502)
     finally:
         lib.close()
+
+
+@app.get("/ask/result/{request_id}")
+async def ask_result(request_id: str, request: Request):
+    """Recovery for a Buddy turn whose response never reached the page (a dropped
+    connection on a phone). {status: running|done|failed|unknown}; `done` carries
+    the same payload POST /ask returned. Only the user who asked can read it: another
+    user's id, and an id that never existed, both answer "unknown"."""
+    _require_member(request)
+    return await run_in_threadpool(_ask_result_blocking, request, request_id)
+
+
+def _ask_result_blocking(request: Request, request_id: str):
+    lib = _lib()
+    try:
+        user_id = _current_user_id(lib, request)
+        out = _ask_result_for_request(lib, user_id, request_id)
+    finally:
+        lib.close()
+    return JSONResponse(out, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/ask/client-error")
@@ -26052,9 +26157,18 @@ async def ask_client_error(request: Request):
         d = {}
     def _s(k, n=200):
         return str(d.get(k, ""))[:n].replace("\n", " ")
+    uid = None
+    try:
+        lib = _lib()
+        try:
+            uid = _current_user_id(lib, request)
+        finally:
+            lib.close()
+    except Exception:
+        pass
     logging.getLogger("webapp.ask").warning(
-        "Buddy page failure shown to a user: stage=%s error=%s message=%s elapsed_ms=%s online=%s visibility=%s effort=%s",
-        _s("stage", 20), _s("name", 60), _s("message"), _s("elapsed_ms", 12),
+        "Buddy page failure shown to a user: user_id=%s request_id=%s stage=%s error=%s message=%s elapsed_ms=%s online=%s visibility=%s effort=%s",
+        uid, _s("request_id", 64), _s("stage", 20), _s("name", 60), _s("message"), _s("elapsed_ms", 12),
         _s("online", 8), _s("visibility", 12), _s("effort", 12))
     return Response(status_code=204)
 
