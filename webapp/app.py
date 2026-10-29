@@ -24840,7 +24840,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-tag-cost{{margin-left:auto;font-weight:500;color:var(--muted);}}
 /* A third item of the Depth and Sources row: it takes the whole row, so the line
    is as wide as both controls together rather than the Depth column alone. */
-.ask-dd-row{{flex-wrap:wrap;}}
+.fpa-intro-area-controls .ask-dd-row{{flex-wrap:wrap;}}
 .ask-dd-foot{{flex:0 0 100%;margin:6px 2px 0;font-size:12px;line-height:1.45;color:var(--muted);}}
 .fu .ask-dd-foot{{display:none;}}
 .ask-cost-line{{margin:8px 0 0;font-size:13px;color:var(--muted);}}
@@ -24854,6 +24854,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 @media(max-width:640px){{
   .fpa-intro-area-controls .ask-dd-row{{flex-direction:column;align-items:stretch;gap:12px;}}
   .fpa-intro-area-controls .ask-dd-foot{{flex:0 0 auto;}}
+  /* Stacked, the note belongs under the Depth box it describes, not after Sources. */
+  .fpa-intro-area-controls .ask-dd-foot{{order:1;margin-top:-6px;}}
+  .fpa-intro-area-controls .ask-dd-col:nth-of-type(2){{order:2;}}
 }}
 }}
 
@@ -24929,7 +24932,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
    right-hand (Sources) panel then lines up with its control's right edge instead,
    so it can't pass the bubble. */
 .fu .ask-dd-panel{{width:max(100%,220px);box-sizing:border-box;}}
-.fu .ask-dd-col:last-child .ask-dd-panel{{margin-left:min(0px,calc(100% - 220px));}}
+.fu .ask-dd-col:last-of-type .ask-dd-panel{{margin-left:min(0px,calc(100% - 220px));}}
 
 .ask-pq-row{{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}}
 .ask-pq-row[open]{{border-color:var(--navy);}}

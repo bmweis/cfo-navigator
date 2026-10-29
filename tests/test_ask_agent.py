@@ -294,7 +294,7 @@ def test_system_prompt_has_persona_and_no_verbatim_guardrail(tmp_path):
         lib.close()
     assert "advisor" in s
     assert "verbatim" in s              # the monetization guardrail
-    assert "saved library" in s         # library-first grounding
+    assert "curated archive" in s       # library-first grounding
     assert "clarifying question" in s   # engages, doesn't one-shot
     # Citations moved to the API level — the prompted-marker era is over.
     assert "[n]" not in s
