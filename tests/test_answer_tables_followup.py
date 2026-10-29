@@ -423,3 +423,13 @@ def test_sources_dropdown_still_opens_under_its_button(page_html):
 def test_figures_prompt_is_not_oversized():
     # The added rules stay a short block (they ride on every figures turn).
     assert len(PRESTEP_RULES) < 6000
+
+
+def test_how_it_works_archive_bullet_names_benchmark_lookup(admin_client=None):
+    import re
+    from webapp import app as appmod
+    src = open(appmod.__file__).read()
+    m = re.search(r"<li><strong>The archive\.</strong>(.*?)</li>", src, re.S)
+    assert m and m.group(1).rstrip().endswith(
+        "Benchmark numbers are looked up in stored report data and cited to the report they came from.")
+    assert src.count("Benchmark numbers are looked up in stored report data") == 1
