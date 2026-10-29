@@ -40,6 +40,9 @@ from . import figures as fg
 _log = logging.getLogger(__name__)
 
 MAX_SUBQUERIES = 4
+# The fourth retrieval is reserved for the part of the question that is not a benchmark
+# lookup, so benchmark parts stop at three (a 4-of-4 split left the rest unsearched).
+MAX_BENCHMARK_PARTS = MAX_SUBQUERIES - 1
 SPLIT_MAX_TOKENS = 600
 SPLIT_TIMEOUT_SECONDS = 10.0
 SPLIT_ROLE = "prestep"
@@ -557,6 +560,30 @@ PRESTEP_RULES = (
 )
 
 
+def _reserve_other_slot(subs: list[Sub], rest: str) -> list[Sub]:
+    """Cap benchmark/definition parts at MAX_BENCHMARK_PARTS and keep the last slot for
+    one "other" part (the rest of the question). Parts beyond the cap are not dropped:
+    their text and metrics move into the "other" part, so the figures are still looked
+    up and the words are still searched for articles. Total parts never exceed
+    MAX_SUBQUERIES, so the number of retrievals is unchanged."""
+    lookups = [x for x in subs if x.intent != "other"]
+    others = [x for x in subs if x.intent == "other"]
+    if len(lookups) <= MAX_BENCHMARK_PARTS:
+        return subs
+    overflow = lookups[MAX_BENCHMARK_PARTS:]
+    keep = lookups[:MAX_BENCHMARK_PARTS]
+    other = others[0] if others else Sub(intent="other", text=rest or "")
+    extra = " ".join(x.text for x in overflow)
+    other.text = " ".join(t for t in (other.text, extra) if t).strip()
+    for x in others[1:]:
+        other.text = (other.text + " " + x.text).strip()
+    for x in overflow + others[1:]:
+        for m in x.metrics:
+            if m not in other.metrics:
+                other.metrics.append(m)
+    return keep + [other]
+
+
 def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
               remaining_usd: float | None, split_model: str | None = None,
               client_factory=None) -> Prestep:
@@ -606,6 +633,8 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
                 if res.rest and not any(x.intent == "other" for x in subs) and len(subs) < MAX_SUBQUERIES:
                     subs = subs + [Sub(intent="other", text=res.rest)]
                     ps.requested_subs = len(subs)
+                subs = _reserve_other_slot(subs, res.rest)
+                ps.requested_subs = len(subs)
                 if remaining_usd is not None:
                     allowed = len(subs)
                     while allowed > 1 and (estimate_extra_usd(model, tier, settings, allowed, False) > remaining_usd - res.cost_usd):

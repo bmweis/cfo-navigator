@@ -192,3 +192,31 @@ def test_figures_never_displace_the_articles(lib, monkeypatch):
     docs = [b["title"] for b in c.answer_calls()[0]["messages"][-1]["content"] if b.get("type") == "document"]
     assert sum(1 for t in docs if t.startswith("Org structure digest")) == 6
     assert any(t.startswith("Figures:") for t in docs)
+
+
+# --- the fourth slot is reserved for the rest of the question ------------------------
+
+def _four_benchmark_parts():
+    subs = [{"intent": "benchmark", "metric": m, "band": "$20-$30M", "segment": "", "year": "", "text": f"{m} at $25M"}
+            for m in ("ARR per employee", "Total employees (full and part-time)", "Net revenue retention", "Gross margin")]
+    return json.dumps({"subqueries": subs, "rest_of_question": "How should we structure the org?"})
+
+
+def test_four_benchmark_parts_become_three_plus_other_and_the_other_is_searched(lib, monkeypatch):
+    fx.add_digest(lib, "org-1", text="How to structure the org: functions, spans and layers at a mid-size SaaS company.",
+                  title="Org structure digest")
+    c = tbp.FakeClient(split_text=_four_benchmark_parts())
+    monkeypatch.setattr(agent, "_get_client", lambda: c)
+    ans = agent.answer_question(lib, Q, use_feed=False)
+    intents = [s["intent"] for s in ans.prestep["subs"]]
+    assert intents == ["benchmark", "benchmark", "benchmark", "other"], intents
+    assert len(intents) <= bp.MAX_SUBQUERIES
+    other = ans.prestep["subs"][-1]
+    assert "structure the org" in other["text"] and "Gross margin" in other["text"]   # nothing dropped
+    docs = [b["title"] for b in c.answer_calls()[0]["messages"][-1]["content"] if b.get("type") == "document"]
+    assert any("Org structure digest" in t for t in docs), docs
+
+
+def test_reserve_other_slot_leaves_three_or_fewer_parts_alone():
+    subs = [bp.Sub(intent="benchmark", text="a", metrics=["a"]) for _ in range(3)]
+    assert bp._reserve_other_slot(subs, "rest") is subs
