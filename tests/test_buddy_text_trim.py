@@ -59,6 +59,9 @@ def test_browser_failed_ask_shows_a_plain_line_and_logs_the_raw_error(buddy_html
     try:
         ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
         pg = ctx.new_page()
+        # 753: a lost response starts recovery ("Still working...") and polls for the stored
+        # answer; the failure line shows only after the poll gives up. Shorten the timings.
+        pg.add_init_script("window.__askRecover={pollMs:60,graceMs:300,maxMs:3000}")
         site = Site(html)
         logged = []
         pg.on("console", lambda m: logged.append(m.text) if m.type == "error" else None)
@@ -74,7 +77,10 @@ def test_browser_failed_ask_shows_a_plain_line_and_logs_the_raw_error(buddy_html
         pg.wait_for_selector("#ask-q")
         pg.fill("#ask-q", "A question that will fail")
         pg.click("#ask-btn")
-        pg.wait_for_selector("#ask-thread .ask-answer span")
+        pg.wait_for_function(
+            "document.querySelector('#ask-thread .ask-answer') && "
+            "document.querySelector('#ask-thread .ask-answer').innerText.includes('Something went wrong')",
+            timeout=15000)
         text = pg.inner_text("#ask-thread .ask-answer").strip()
         assert text.startswith("Something went wrong. Try again.")   # then the recovery note (turn 20 follow-up)
         assert "Failed to fetch" not in pg.inner_text("body") and "TypeError" not in pg.inner_text("body")
