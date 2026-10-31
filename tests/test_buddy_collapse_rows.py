@@ -23,7 +23,8 @@ def test_past_question_rows_are_collapsed_on_load_and_open_on_a_tap(phone):
     assert pg.is_visible("#past-questions .ask-pq-sum")
     pg.locator("#past-questions .ask-pq-sum").first.tap()
     assert pg.is_visible("#past-questions .ask-hist-answer")
-    assert pg.is_visible("#past-questions .ask-hist-answer ~ ul")
+    assert pg.is_visible("#past-questions .ask-src-disc > summary")      # sources: collapsed disclosure
+    assert pg.locator("#past-questions .ask-src-disc[open]").count() == 0
     pg.locator("#past-questions .ask-pq-sum").first.tap()
     assert not pg.is_visible("#past-questions .ask-hist-answer")
 
