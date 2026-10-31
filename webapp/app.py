@@ -2063,6 +2063,18 @@ details[open] > summary .disclosure-caret{transform:rotate(90deg);}
 .ask-table{margin:0 0 14px;}
 .ask-table>table{width:100%;min-width:560px;margin:0;}
 .ask-table th,.ask-table td{font-size:13px;line-height:1.45;vertical-align:top;text-align:left;padding:8px 12px;}
+/* On a phone every column must be reachable, so each row becomes a labelled card
+   (the column name comes from the cell's data-label). The header row is hidden. */
+@media(max-width:600px){
+  .ask-table>table{min-width:0;}
+  .ask-table table,.ask-table tbody,.ask-table tr,.ask-table td{display:block;width:auto;}
+  .ask-table thead{display:none;}
+  .ask-table tr{padding:8px 0;border-top:1px solid var(--table-border);}
+  .ask-table tbody tr:first-child{border-top:0;}
+  .ask-table td{padding:2px 12px;}
+  .ask-table td::before{content:attr(data-label) ": ";font-weight:600;color:var(--ink-soft);}
+  .site-main.site-main .table-frame.ask-table table td{border-top:0!important;}
+}
 .ask-hist-answer code{background:var(--surface-2);border-radius:4px;padding:1px 6px;font-size:12.5px;}
 .ask-hist-answer sup.cite{line-height:0;}
 .ask-hist-answer sup.cite a{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}
@@ -25294,7 +25306,7 @@ function tryTable(lines, i) {{
   out += '</tr></thead><tbody>';
   body.forEach(function(r) {{
     out += '<tr>';
-    r.forEach(function(c) {{ out += '<td>' + mdInline(c) + '</td>'; }});
+    r.forEach(function(c, k) {{ out += '<td data-label="' + escapeHtml(heads[k]) + '">' + mdInline(c) + '</td>'; }});
     out += '</tr>';
   }});
   return {{html: out + '</tbody></table></div>', next: j}};
@@ -33550,6 +33562,26 @@ def _lint_flags_html(r: dict) -> str:
             f'Answer rule flags: {len(flags)}</summary><ul style="margin:6px 0 0;padding-left:18px;">{items}</ul></details>')
 
 
+def _stripped_html(r: dict) -> str:
+    """Sentences linklib.answer_strip removed from this turn's answer (admin report only).
+    The user saw the cleaned answer; this is the record a person reviews."""
+    raw = r.get("stripped_json") or ""
+    try:
+        items = json.loads(raw) if raw else []
+    except ValueError:
+        return ""
+    if not items:
+        return ""
+    removed = [i for i in items if i.get("action") == "removed"]
+    kept = len(items) - len(removed)
+    head = (f"{len(removed)} sentence{'s' if len(removed) != 1 else ''} removed" if removed else
+            f"{kept} flagged sentence{'s' if kept != 1 else ''} kept (answer too short to strip)")
+    lis = "".join(f'<li><b>{_esc(i.get("pattern", ""))}</b> ({_esc(i.get("action", ""))}): {_esc(i.get("sentence", ""))}</li>'
+                  for i in items)
+    return (f'<details style="margin-top:4px;font-size:12px;color:var(--ink-soft);"><summary style="cursor:pointer;">'
+            f'{head}</summary><ul style="margin:6px 0 0;padding-left:18px;">{lis}</ul></details>')
+
+
 def _prestep_report_html(r: dict) -> str:
     """The benchmark lookup log of one turn for the admin report (issue 738, B4):
     one summary line, the full detail one tap away. Empty for a turn the
@@ -33634,6 +33666,8 @@ def admin_ask_report(request: Request, user: str = ""):
         month_start = datetime.now(_tz.utc).strftime("%Y-%m-01")
         month_cost = lib.ask_cost_total(user_id=filter_user_id, since=month_start)
         users = lib.list_users()
+        strip_turns = lib.conn.execute(
+            "SELECT COUNT(*) FROM ask_questions WHERE stripped_json LIKE '%\"removed\"%'").fetchone()[0]
     finally:
         lib.close()
 
@@ -33657,7 +33691,7 @@ def admin_ask_report(request: Request, user: str = ""):
         # error: this report is admin-only and the cost is real spend.
         failed = (f'<div style="font-size:12px;margin-top:3px;"><span style="color:var(--alert);font-weight:600;">&#9888; Failed</span> '
                   f'<span style="color:var(--muted);">{_esc(r.get("error") or "No answer was produced.")}</span></div>') if r.get("failed") else ""
-        lookup = _prestep_report_html(r) + _lint_flags_html(r)
+        lookup = _prestep_report_html(r) + _lint_flags_html(r) + _stripped_html(r)
         _ms = int(r.get("duration_ms") or 0)
         dur = (f'<div style="font-size:11px;font-weight:400;color:{"var(--alert)" if _ms >= 60000 else "var(--muted)"};white-space:nowrap;">'
                f'{_ms / 1000:.1f}s</div>') if _ms else ""
@@ -33720,6 +33754,7 @@ def admin_ask_report(request: Request, user: str = ""):
   <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
     <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${total_cost:.2f}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:2px;">Total cost, all time</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px;">Answers with sentences removed: {strip_turns:,}</div>
   </div>
   <div style="text-align:center;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;">
     <div style="font-size:24px;font-weight:700;color:var(--navy);font-family:var(--font-head);">${month_cost:.2f}</div>

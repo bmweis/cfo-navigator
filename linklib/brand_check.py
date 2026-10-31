@@ -605,6 +605,8 @@ TABLE_OVERRIDE_ALLOWLIST = {
     ".site-main.site-main table.admin-table-responsive.admin-table-responsive td, "
     ".site-main.site-main table.bk-stack.bk-stack td":
         "mobile card layout: cells carry no top border (replaces the specificity-losing rule below)",
+    ".site-main.site-main .table-frame.ask-table table td":
+        "mobile card layout for answer tables on /tools/fpa-buddy and the history pages: cells carry no top border",
     ".site-main.site-main table.ff-table.ff-table td, .site-main.site-main table.fs-table.fs-table td":
         "mobile card layout for the feeds tables: cells carry no top border",
 }

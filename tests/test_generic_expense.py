@@ -85,7 +85,7 @@ def test_literal_question_reaches_every_function_family(lib):
     titles = [d["title"] for s in ps.subs for d in s.docs]
     assert any("Example Spending 2026" in t for t in titles) and any("Example Benchmarks 2025" in t for t in titles)
     notes = " ".join(n for s in ps.subs for n in s.notes)
-    assert "No stored figure matches" not in notes
+    assert "No stored figure was found" not in notes
 
 
 def test_headcount_is_not_displaced(lib):

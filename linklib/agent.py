@@ -179,7 +179,7 @@ VOICE_FPA_BUDDY_DEFAULT = """You are FP&A Buddy: a trusted senior FP&A / strateg
 
 
 def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library,
-                  benchmark_rules: bool = False) -> str:
+                  benchmark_rules: bool = False, effort: str = "standard") -> str:
     """Build the advisor system prompt, describing only the active source types.
 
     Voice: appends the DB-backed voice_core + voice_fpa_buddy settings.
@@ -240,13 +240,14 @@ def _build_system(use_library: bool, use_feed: bool, use_web: bool, lib: Library
         "best-effort answer.\n\n"
         "Voice — write every answer this way:\n"
         f"{voice}"
+        + HARD_RULES + length_rule(effort)  # every turn; first, so they win over what follows
         + ANSWER_RULES                      # every turn, with or without a benchmark lookup
         + (_PRESTEP_RULES if benchmark_rules else "")
     )
 
 
 from .benchmark_prestep import PRESTEP_RULES as _PRESTEP_RULES  # noqa: E402
-from .answer_rules import ANSWER_RULES  # noqa: E402
+from .answer_rules import ANSWER_RULES, HARD_RULES, length_rule  # noqa: E402
 from .citation_label import make_label  # noqa: E402
 from .db import DIGEST_TAG  # noqa: E402
 
@@ -438,6 +439,9 @@ class Answer:
     prestep_notice: str = ""
     # Likely breaches of the answer rules found by linklib.answer_lint (flag only).
     lint_flags: list = field(default_factory=list)
+    # Sentences removed from the answer by linklib.answer_strip ([{sentence, pattern, action}]);
+    # stored on ask_questions.stripped_json. `text` is already the cleaned answer.
+    stripped: list = field(default_factory=list)
 
 
 # Reuse one client across requests so its httpx connection pool stays warm —
@@ -1068,7 +1072,7 @@ def answer_question(
 
     try:
         system = _build_system(use_library, use_feed, use_web, lib,
-                               benchmark_rules=bool(prestep.active and prestep.system_rules))
+                               benchmark_rules=bool(prestep.active and prestep.system_rules), effort=effort)
     except VoicePromptMissing as e:
         return Answer(text="", failed=True, error=f"Voice prompt not configured: {e}", **common)
 
@@ -1133,12 +1137,21 @@ def answer_question(
         done["cost_usd"] = cost + common["cost_usd"]
         if stop_reason_of(resp) == "max_tokens":
             text = trim_to_full_sentence(text)
+        stripped: list = []
+        try:
+            from .answer_strip import strip_answer
+            text, stripped = strip_answer(text)
+        except Exception:
+            _log.exception("answer strip failed; answer left as written")
         try:
             from .answer_lint import lint_answer
             lint = lint_answer(text)
+            # A sentence the strip kept (too short an answer) is still a breach to show.
+            lint += [{"phrase": r["pattern"], "snippet": r["sentence"][:200]}
+                     for r in stripped if r.get("action") == "kept_short"]
         except Exception:
             lint = []
-        return Answer(text=text, citations=citations,
+        return Answer(text=text, citations=citations, stripped=stripped,
                      input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r,
                      stop_reason=stop_reason_of(resp), lint_flags=lint, **done)

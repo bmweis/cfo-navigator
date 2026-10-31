@@ -2784,6 +2784,8 @@ class Library:
             "ALTER TABLE ask_questions ADD COLUMN request_id TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE ask_questions ADD COLUMN result_json TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE ask_questions ADD COLUMN lint_flags TEXT NOT NULL DEFAULT ''",
+            # Sentences removed from the stored answer (linklib.answer_strip); JSON list or ''.
+            "ALTER TABLE ask_questions ADD COLUMN stripped_json TEXT NOT NULL DEFAULT ''",
             "CREATE INDEX IF NOT EXISTS idx_ask_questions_request ON ask_questions(user_id, request_id) WHERE request_id <> ''",
             # FP&A Buddy Keep private (2026-10): 1 = the asker keeps this
             # conversation out of the member-visible past-questions list.
@@ -9588,7 +9590,8 @@ class Library:
                             prestep_cost_usd: float = 0.0,
                             duration_ms: int = 0,
                             request_id: str = "",
-                            lint_flags: Optional[list] = None) -> int:
+                            lint_flags: Optional[list] = None,
+                            stripped: Optional[list] = None) -> int:
         """Record one Ask turn. Backs all three surfaces (admin report, a
         user's own history, and the public community view) from one row.
         `conversation_id` groups follow-up turns; pass "" on the first turn of
@@ -9617,8 +9620,8 @@ class Library:
                 embed_input_tokens, embed_cost_usd,
                 exa_result_count, exa_cost_usd,
                 citations_json, stop_reason, is_private, web_scope, failed, error,
-                prestep_json, prestep_cost_usd, duration_ms, request_id, lint_flags, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                prestep_json, prestep_cost_usd, duration_ms, request_id, lint_flags, stripped_json, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (conversation_id, turn_index, user_id, question.strip(), answer,
              model, effort, int(use_library), int(use_feed), int(use_web),
              input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
@@ -9630,7 +9633,8 @@ class Library:
              int(bool(failed)), error if failed else "",
              json.dumps(prestep) if prestep else "", float(prestep_cost_usd or 0),
              int(duration_ms or 0), request_id or "",
-             json.dumps(lint_flags) if lint_flags else "", now),
+             json.dumps(lint_flags) if lint_flags else "",
+             json.dumps(stripped) if stripped else "", now),
         )
         row_id = cur.lastrowid
         if not conversation_id:

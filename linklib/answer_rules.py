@@ -7,6 +7,37 @@ rules lived in the figures-only block, so a turn that ran no lookup was answered
 without them (the $20-$30M org-structure turn invented a headcount range and stated
 a cause)."""
 
+# Sentence ceilings (outside the table) by depth tier. Standard was seven headed sections
+# on a phone; the ceiling is stated in the prompt, and max_tokens is unchanged.
+LENGTH_CEILING = {"quick": 6, "standard": 12, "deep": 18}
+
+
+def length_rule(effort: str = "standard") -> str:
+    n = LENGTH_CEILING.get(effort or "standard", LENGTH_CEILING["standard"])
+    return (f"- Length: at most {n} sentences in the whole answer, not counting the table, and one table in "
+            "total (two only when two bases each need one). When the question has several parts, give each "
+            "part one short heading and 3 to 4 sentences. Cut a sentence before you add a section.\n")
+
+
+HARD_RULES = (
+    "\n\nHard rules (every turn; these come first and win over anything below):\n"
+    "- No characterization. Never write \"striking\", \"dramatic\", \"remarkable\", \"notably\" or the like; "
+    "give the numbers and stop. Good: \"The median fell from 112 to 42 [1].\" Bad: \"That median is striking, "
+    "a dramatic compression.\"\n"
+    "- No cause without a cited statement of it. Say why something changed only when a cited source says so, "
+    "and name that source. Good: \"Example Benchmarks says the dip followed hiring freezes [2].\" Bad: "
+    "\"almost entirely driven by headcount restraint.\" when no source says so.\n"
+    "- Every number you work out yourself is labelled and shows both inputs in the same sentence. Good: "
+    "\"down 70 (derived, not in report: 112 in 2024 to 42 in 2025)\". Bad: \"down roughly 70 from 2024 and "
+    "about 42% below 2022\".\n"
+    "- No advice and no prediction unless the question asks for one. Never write \"expect\", \"you should\", "
+    "\"would likely\", \"will likely\" or \"likely to\". Good: end on what the data says and what it does "
+    "not cover. Bad: \"Expect to sit toward the high end.\" or \"A sales-led company would likely show more.\"\n"
+    "- The first sentence says in plain words what company size and period the figures cover. Never quote an "
+    "internal metric label or a lookup note. Good: \"For companies at $20M-$30M ARR, the newest data is from "
+    "2025.\" Bad: \"No stored figure matches 'Headcount: Total' ...\"\n"
+)
+
 ANSWER_RULES = (
     "\n\nHow to shape the answer (every turn):\n"
     "- Synthesize, then point to the source. When the answer states numbers, open with 3 to 5 sentences "
