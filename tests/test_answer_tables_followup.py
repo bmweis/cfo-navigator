@@ -53,7 +53,7 @@ def test_a_markdown_table_renders_as_a_framed_table():
 
 def test_citation_markers_in_cells_render_like_prose():
     out = render_answer_markdown(TABLE, LIVE_CITES)
-    assert '<td>$181,905 <sup class="cite"><a href="https://example.test/a"' in out
+    assert '>$181,905 <sup class="cite"><a href="https://example.test/a"' in out
     prose = render_answer_markdown("$181,905 [1]", LIVE_CITES)
     assert '$181,905 <sup class="cite"><a href="https://example.test/a"' in prose
 
@@ -66,7 +66,7 @@ def test_cells_are_escaped_and_links_stay_inert():
 
 def test_escaped_pipe_is_a_literal_pipe_in_a_cell():
     out = render_answer_markdown("| a | b |\n|---|---|\n| x \\| y | z |", [])
-    assert "<td>x | y</td>" in out
+    assert ">x | y</td>" in out
 
 
 @pytest.mark.parametrize("text", [
@@ -374,7 +374,13 @@ def test_tables_render_in_the_live_page_and_never_scroll_the_page(page_html, wid
         frame = pg.evaluate("(() => { const f = document.querySelector('#ask-thread .ask-table'); "
                             "return [f.scrollWidth, f.clientWidth]; })()")
         if mobile:
-            assert frame[0] > frame[1], frame             # the frame scrolls inside itself
+            # Answer discipline (2026-10-31): below 600px rows stack as labelled cards, so the
+            # frame has nothing to scroll and every cell sits inside the viewport.
+            assert frame[0] <= frame[1], frame
+            assert pg.evaluate("[...document.querySelectorAll('#ask-thread .ask-table td')].every("
+                               "td => { const r = td.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })")
+            assert pg.evaluate("getComputedStyle(document.querySelector('#ask-thread .ask-table td'), '::before').content"
+                               ).strip('"')
         assert "Go deeper:" in pg.inner_text("#ask-thread .ask-answer")
         pg.locator("#ask-thread .ask-answer").first.screenshot(path=str(SCRATCH / f"answer_tables_{width}.png"))
     finally:

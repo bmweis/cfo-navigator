@@ -358,6 +358,7 @@ def _run_ask_turn(lib, user_id, question, *, model, effort, use_library, use_fee
             prestep=getattr(ans, "prestep", None), prestep_cost_usd=getattr(ans, "prestep_cost_usd", 0.0),
             duration_ms=duration_ms, request_id=request_id,
             lint_flags=getattr(ans, "lint_flags", None),
+            stripped=getattr(ans, "stripped", None),
         )
         new_conversation_id = conversation_id or str(row_id)
         turn_id = row_id

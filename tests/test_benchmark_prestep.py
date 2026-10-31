@@ -158,7 +158,7 @@ def test_no_data_says_so_in_the_lookup_notes(lib, monkeypatch):
     c = _client(monkeypatch)
     ans = _ask(lib, "What is the median net revenue retention at $25M ARR?")
     notes = "\n".join(_texts(c.answer_calls()[0]))
-    assert "No stored figure matches" in notes and "do not estimate" in notes.lower()
+    assert "No stored figure was found" in notes and "do not estimate" in notes.lower()
     assert not any(_is_figures(d) for d in _docs(c.answer_calls()[0]))
     assert ans.prestep["subs"][0]["figure_rows"] == 0
 

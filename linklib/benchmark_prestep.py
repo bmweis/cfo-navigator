@@ -572,8 +572,10 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
         sub.illustrative_left_out = len(sub.illustrative_ids)
         sub.notes += res["notes"]
         if not res["rows"]:
-            sub.notes.append(f"No stored figure matches '{m}'"
-                             + (f" at {sub.band}" if sub.band else "") + ". Say so plainly; do not estimate it.")
+            sub.notes.append(f"No stored figure was found for the metric labelled '{m}'"
+                             + (f" at {sub.band}" if sub.band else "")
+                             + ". That label is internal: never quote it. Describe the metric in plain words, say "
+                               "plainly that no figure is on file for it, and do not estimate it.")
         for r in res["rows"]:
             key = (r["report_slug"], r["figure_key"])
             if key not in seen_keys:

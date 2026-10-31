@@ -110,7 +110,9 @@ def _try_table(lines: list[str], i: int, cites: list[dict], scope: str = "") -> 
     out += [f"<th>{_inline(c, cites, scope)}</th>" for c in heads]
     out.append("</tr></thead><tbody>")
     for row in body:
-        out.append("<tr>" + "".join(f"<td>{_inline(c, cites, scope)}</td>" for c in row) + "</tr>")
+        # data-label carries the column name for the stacked phone layout (CSS ::before).
+        out.append("<tr>" + "".join(f'<td data-label="{_esc(heads[k])}">{_inline(c, cites, scope)}</td>'
+                                    for k, c in enumerate(row)) + "</tr>")
     out.append("</tbody></table></div>")
     return "".join(out), j
 
