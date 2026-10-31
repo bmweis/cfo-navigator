@@ -705,7 +705,8 @@ def _flag(row: dict, match: str, gap: str) -> None:
 
 def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year=None,
                  basis=None, denominator=None, all_editions: bool = False,
-                 limit: int = DEFAULT_LIMIT, include_illustrative: bool = False) -> dict:
+                 limit: int = DEFAULT_LIMIT, include_illustrative: bool = False,
+                 basis_hint: str = "") -> dict:
     """Stored figures for a metric, exact matches first, every gap disclosed.
 
     Returns {rows, resolution, notes, total_matching, returned, truncated,
@@ -717,7 +718,13 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
     rest dropped; when none agree, the report's rows are kept and flagged.
     A requested band returns the containing band, or else the bands either
     side. The newest edition per publisher and report family is used unless
-    all_editions=True or `year` is given."""
+    all_editions=True or `year` is given.
+
+    Expense families (S&M, R&D, G&A, customer success, total opex): rows are found by rules
+    on the stored name and denominator and returned in basis groups (revenue, ARR, basis not
+    stated), the asked basis first. The asked basis is read from `metric`, `denominator` and
+    `basis_hint` (the user's own words). Each row carries `basis_group` and `other_basis`;
+    nothing is converted, merged or averaged. `groups` lists the groups present."""
     idx = _load_metric_index(lib)
     landings = resolve_landings(lib)
     notes: list[str] = []
@@ -751,6 +758,23 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         for r in lib.conn.execute("SELECT * FROM benchmark_figures WHERE lower(trim(metric)) = ?", (_lc(metric),)):
             seen_ids.add(r["id"])
             cand.append((dict(r), ""))
+    # Expense families: "S&M expense", "Sales and marketing" and "S&M % of Revenue" are one
+    # family, found by rules on the stored name and denominator (see expense_line_of).
+    fam_keys = expense_family_request(metric)
+    family_mode = False
+    if fam_keys:
+        for r in family_candidates(lib, fam_keys):
+            if r["id"] not in seen_ids:
+                seen_ids.add(r["id"])
+                cand.append((r, ""))
+                family_mode = True
+        family_mode = family_mode or any(expense_line_of(r["metric"], r["denominator"], r["unit"]) for r, _ in cand)
+        if family_mode:
+            # A row found only by its name (not through the registry) must pass the family
+            # rule too: a dollar-amount "S&M expense" is not a percent-of-revenue figure.
+            cand = [(r, c) for r, c in cand
+                    if c or expense_line_of(r["metric"], r["denominator"], r["unit"])]
+    basis_ask = asked_basis(f"{metric} {basis_hint}", denominator) if family_mode else ""
     if not cand:
         for r in _fts_metric_rows(lib, metric):
             cand.append((r, targets[0] if len(targets) == 1 else ""))
@@ -782,12 +806,46 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         if not rows:
             notes.append(f"No stored figure for that metric is from a {year} edition.")
 
+    # Basis groups (family mode only): the revenue-basis and ARR-basis forms of one measure
+    # are returned together, never merged or converted, the asked basis first. The match
+    # flag is NOT changed (a row in the other group is kept as exact or adjacent_band);
+    # `other_basis` and a plain-words gap say it.
+    groups_out: list[dict] = []
+    for r in rows:
+        r["basis_group"] = ""          # only set for an expense-family row
+        r["other_basis"] = False
+        r["basis_rank"] = 0
+    if family_mode:
+        rank_map = dict(_BASIS_RANK_DEFAULT)
+        if basis_ask:
+            rank_map = {basis_ask: 0, ("arr" if basis_ask == "revenue" else "revenue"): 1, "unstated": 2}
+        for r in rows:
+            g = basis_group_of(r)
+            r["basis_group"] = g
+            r["basis_rank"] = rank_map[g]
+            if basis_ask and g not in (basis_ask, "unstated"):
+                r["other_basis"] = True
+                r["gaps"].append(f"other basis: this figure is stated {BASIS_LABELS[g]}; you asked {BASIS_LABELS[basis_ask]}")
+            elif g == "unstated":
+                r["gaps"].append("basis not stated: the report does not say whether this is a percent of revenue or of ARR")
+        present = sorted({r["basis_group"] for r in rows}, key=lambda g: rank_map[g])
+        groups_out = [{"basis": g, "label": BASIS_LABELS[g], "asked": g == basis_ask,
+                       "count": sum(1 for r in rows if r["basis_group"] == g)} for g in present]
+        if basis_ask and any(g["basis"] not in (basis_ask, "unstated") for g in groups_out):
+            other = [g for g in groups_out if g["basis"] not in (basis_ask, "unstated")][0]
+            notes.append(f"Figures are grouped by basis. You asked {BASIS_LABELS[basis_ask]}; the other basis "
+                         f"({other['label']}) is also on file and is returned flagged as other basis. "
+                         "The two are never converted, merged or averaged.")
+        elif len(groups_out) > 1:
+            notes.append("Figures are grouped by basis (" + "; ".join(g["label"] for g in groups_out)
+                         + "). The two are never converted, merged or averaged.")
+
     # Per-report refinement: keep rows that agree with a request, else flag.
     by_report: dict[str, list[dict]] = {}
     for r in rows:
         by_report.setdefault(r["report_slug"], []).append(r)
     asks = [("band_basis", basis, _basis_key, "different_basis", "basis"),
-            ("denominator", denominator, _lc, "different_basis", "denominator"),
+            ("denominator", None if family_mode else denominator, _lc, "different_basis", "denominator"),
             ("segment", segment, _lc, "different_segment", "segment"),
             ("statistic", statistic, _lc, "different_statistic", "statistic")]
     for slug, grp in by_report.items():
@@ -864,7 +922,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
                 notes.append(f"The newest {later[0]['report'] or fam[1]} on file ({later[0]['report_year']}) "
                              f"has no figure for this; the {y} edition is the newest that does.")
 
-    rows.sort(key=lambda r: (_MATCH_RANK[r["match"]],
+    rows.sort(key=lambda r: (r["basis_rank"], _MATCH_RANK[r["match"]],
                              _has_sample_size(r),   # a survey that states its sample before a guide that does not
                              -_year_num(r["report_year"]) if not all_editions else _year_num(r["report_year"]),
                              r["source"], r["report"], r["band_basis"],
@@ -873,8 +931,22 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
     truncated = total > limit
     if truncated:
         notes.append(f"{total} figures match; showing the first {limit}. Narrow the request (band, segment, statistic, year).")
-        rows = rows[:limit]
-    return {"rows": rows, "resolution": resolution, "notes": notes, "total_matching": total,
+        if family_mode and len(groups_out) > 1:
+            # Keep both bases in view: each group gets an equal share of the cap first.
+            share = max(limit // len(groups_out), 1)
+            by_g: dict[str, list[dict]] = {}
+            for r in rows:
+                by_g.setdefault(r["basis_group"], []).append(r)
+            keep = {g: v[:share] for g, v in by_g.items()}
+            spare = limit - sum(len(v) for v in keep.values())
+            for g, v in by_g.items():
+                extra = v[share:share + max(spare, 0)]
+                keep[g] += extra
+                spare -= len(extra)
+            rows = [r for r in rows if r in keep[r["basis_group"]]]
+        else:
+            rows = rows[:limit]
+    return {"rows": rows, "resolution": resolution, "notes": notes, "groups": groups_out, "total_matching": total,
             "returned": len(rows), "truncated": truncated, "unplaced_bands": unplaced,
             "illustrative_left_out": illustrative_left_out, "illustrative_ids": illustrative_ids}
 
@@ -1151,3 +1223,161 @@ def detect_stored_metric_names(lib, text: str) -> list[str]:
             seen.add(k)
             out.append(n)
     return out[:FTS_NAME_MAX]
+
+
+# --- expense families and basis groups (opex by function, 2026-10) ---------------
+#
+# A function's spend ("S&M expense", "Sales and marketing", "S&M % of Revenue") is stored
+# under many names, and the basis (revenue or ARR) is often only in the `denominator`
+# column. Names are matched by RULES, never by a hand-filled list: about 8,600 distinct
+# names are stored and a list would go stale with every load. The guard is a strict
+# whitelist: after the function words are taken out, every remaining word of the name
+# must be an expense or denominator word, so "Marketing Expenses per $ of New Logo ARR",
+# "S&M efficiency" and "S&M headcount as % of employees" are a different measure and
+# never join a family. A row also needs a percent form (a revenue or ARR denominator, a
+# "%" in the name, or a percent unit), so a dollar amount is not a ratio family member.
+
+FAMILY_LABELS = {"sm": "Sales and marketing expense", "rd": "Research and development expense",
+                 "ga": "General and administrative expense", "cs": "Customer success expense",
+                 "opex": "Total operating expense"}
+FUNCTION_FAMILIES = ("sm", "rd", "ga", "cs")
+BY_FUNCTION_LABEL = "Operating expenses by function"
+
+_FAMILY_FOLD = (
+    (re.compile(r"customer\s+(?:success|support)"), " cs "),
+    (re.compile(r"total\s+operating\s+expenses?|operating\s+expenses?|opex|total\s+expenses?"), " opex "),
+)
+# Words that may stay in a family name. Anything else (per, new, logo, efficiency, magic,
+# cac, payback, headcount, employees, mix, growth, ...) means a different measure.
+_FAMILY_WORDS = {"expense", "expenses", "spend", "spending", "cost", "costs", "percent", "pct",
+                 "percentage", "revenue", "arr", "gaap", "total", "net", "annual", "ending", "average",
+                 "the", "of", "as", "a", "an", "in", "and", "is", "share"}
+_REQUEST_EXTRA = {"by", "function", "functions", "functional", "department", "departments", "at",
+                  "for", "size", "line", "lines", "operating", "show", "me", "what"}
+_PCT_NAME = re.compile(r"%|percent|pct")
+_REV_DENOM = re.compile(r"(?:%|percent(?:age)?)\s+of\s+(?:(?:total|net|annual|gaap|ending)\s+)*revenue|\bof\s+revenue\b|%\s*revenue")
+_ARR_DENOM = re.compile(r"(?:%|percent(?:age)?)\s+of\s+(?:(?:total|net|annual|gaap|ending|average|ending-period)\s+)*arr\b|\bof\s+(?:ending\s+)?arr\b|annual\s+recurring\s+revenue")
+
+BASIS_LABELS = {"revenue": "as a percent of revenue", "arr": "as a percent of ARR",
+                "unstated": "basis not stated"}
+_BASIS_RANK_DEFAULT = {"revenue": 0, "arr": 1, "unstated": 2}
+
+
+def denominator_basis(*texts) -> str:
+    """"revenue", "arr" or "" from a denominator (or a name that carries one). ARR is
+    checked first: "annual recurring revenue" would otherwise read as revenue."""
+    t = _lc(" ".join(str(x or "") for x in texts))
+    if _ARR_DENOM.search(t):
+        return "arr"
+    if _REV_DENOM.search(t):
+        return "revenue"
+    return ""
+
+
+def _family_tokens(text: str) -> tuple[list[str], list[str]]:
+    """(function keys found, leftover words) for a name or request."""
+    t = _PAREN.sub(" ", _lc(text))
+    for rx, rep in _ABBR_PHRASES:
+        t = rx.sub(f" {rep} ", t)
+    for rx, rep in _FAMILY_FOLD:
+        t = rx.sub(rep, t)
+    words = re.findall(r"[a-z0-9]+", t)
+    funcs = [w for w in words if w in _KEEP_SHORT or w in ("cs", "opex")]
+    rest = [w for w in words if w not in _KEEP_SHORT and w not in ("cs", "opex")]
+    return funcs, rest
+
+
+def expense_line_of(name: str, denominator: str = "", unit: str = "") -> str:
+    """The family key ("sm", "rd", "ga", "cs", "opex") of a stored row, or "" when the
+    row is not a percent-form expense line. One function key per name."""
+    funcs, rest = _family_tokens(name)
+    if len(set(funcs)) != 1:
+        return ""
+    if any(w not in _FAMILY_WORDS for w in rest):
+        return ""
+    has_pct = bool(_PCT_NAME.search(_lc(name)) or denominator_basis(denominator, name)
+                   or _PCT_NAME.search(_lc(unit)))
+    if not has_pct:
+        return ""
+    # A denominator that is stated and is not revenue or ARR (dollars, employees, new logo
+    # ARR) is another measure even when the name looks right.
+    d = _lc(denominator)
+    if d and not denominator_basis(d) and not _PCT_NAME.search(d):
+        return ""
+    if d and denominator_basis(d) == "" and _PCT_NAME.search(d):
+        return ""      # "percent of employees"
+    return funcs[0]
+
+
+def expense_family_request(text: str) -> list[str]:
+    """Family keys a metric phrase asks for, or [] when it is not a family request. Every
+    word must be a function, expense or denominator word, so "S&M efficiency" is not one."""
+    funcs, rest = _family_tokens(text)
+    if not funcs:
+        return []
+    if any(w not in _FAMILY_WORDS and w not in _REQUEST_EXTRA for w in rest):
+        return []
+    low = _lc(text)
+    if "opex" in funcs and len(set(funcs)) == 1 and re.search(r"\bby\s+(?:function|department)|functional", low):
+        return list(FUNCTION_FAMILIES)
+    if set(funcs) == {"opex"} and re.search(r"\bfunction", low):
+        return list(FUNCTION_FAMILIES)
+    seen: list[str] = []
+    for f in funcs:
+        if f not in seen:
+            seen.append(f)
+    return seen
+
+
+def asked_basis(text: str, denominator: str | None = None) -> str:
+    """The basis a request names: "revenue", "arr" or "" (neither, or both)."""
+    d = denominator_basis(denominator)
+    if d:
+        return d
+    t = _lc(text)
+    arr, rev = bool(_ARR_DENOM.search(t)), bool(_REV_DENOM.search(t))
+    if arr and not rev:
+        return "arr"
+    if rev and not arr:
+        return "revenue"
+    return ""
+
+
+def detect_expense_families(text: str) -> list[str]:
+    """Metric terms to look up for a question that asks about a function's spend, by rules.
+    "Operating expenses by function" is one term; named functions are one term each. A
+    question must carry an expense or percent cue, not just the letters S&M."""
+    low = _lc(text)
+    if not re.search(r"expense|spend|cost|opex|%|percent|budget|headcount|org", low):
+        pass
+    if re.search(r"\b(?:opex|operating\s+expenses?|expenses?|spend|costs?)\s+by\s+(?:function|department)", low) \
+            or re.search(r"\bfunctional\s+(?:spend|opex|expenses?)", low):
+        return [BY_FUNCTION_LABEL]
+    funcs, _ = _family_tokens(text)
+    if not funcs or not re.search(r"expense|spend|cost|opex|%|percent|budget|ratio|of\s+(?:revenue|arr)", low):
+        return []
+    out: list[str] = []
+    for f in funcs:
+        if f in FAMILY_LABELS and f != "opex" and FAMILY_LABELS[f] not in out:
+            out.append(FAMILY_LABELS[f])
+    return out
+
+
+def basis_group_of(row: dict) -> str:
+    return denominator_basis(row.get("denominator"), row.get("metric")) or "unstated"
+
+
+def family_candidates(lib, keys: list[str]) -> list[dict]:
+    """Every stored row whose name and denominator put it in one of the families."""
+    keyset = set(keys)
+    want = {"sm", "rd", "ga", "cs", "opex"} & keyset
+    if not want:
+        return []
+    pairs = lib.conn.execute("SELECT DISTINCT metric, denominator, unit FROM benchmark_figures").fetchall()
+    good = [(p[0], p[1], p[2]) for p in pairs if expense_line_of(p[0], p[1], p[2]) in want]
+    out: list[dict] = []
+    for m, d, u in good:
+        for r in lib.conn.execute(
+                "SELECT * FROM benchmark_figures WHERE metric = ? AND denominator = ? AND unit = ?", (m, d, u)):
+            out.append(dict(r))
+    return out

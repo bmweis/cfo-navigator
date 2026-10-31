@@ -266,8 +266,14 @@ def detect(lib, question: str) -> dict:
             covered |= fg._names_for(idx, c)
         known_keys = {k for k in (_name_key(x) for x in list(covered) + terms + canon) if k}
         extra = []
+        # Expense families by rules ("S&M as a percent of revenue", "opex by function"): one
+        # term per function, so every spelling stored for it (and both bases) is looked up.
+        fam_terms = [t for t in fg.detect_expense_families(masked) if t not in terms]
         for n in fg.detect_stored_metric_names(lib, masked):
             if _lc_text(n) in covered or n in terms:
+                continue
+            # A stored name the family rule already reaches is covered by the family term.
+            if fam_terms and fg.expense_line_of(n, "percent of revenue"):
                 continue
             k = _name_key(n)
             # A variant of a metric already named ("Gross Margin %") is reached through that
@@ -276,6 +282,8 @@ def detect(lib, question: str) -> dict:
                 continue
             known_keys.add(k)
             extra.append(n)
+        # Family terms go last so they never crowd out another stored metric (headcount) at the cap.
+        extra += fam_terms
         room = MAX_SUBQUERIES - len(terms)
         extra = extra[:max(room, 0)]
         if extra:
@@ -448,6 +456,8 @@ def _row_line(r: dict) -> str:
     if r["data_period"]:
         parts.append(f"period {r['data_period']}")
     tag = f"match: {r['match']}"
+    if r.get("basis_group") in ("revenue", "arr"):
+        parts.insert(0, "basis group: " + fg.BASIS_LABELS[r["basis_group"]] + (" (OTHER BASIS)" if r.get("other_basis") else ""))
     if r["gaps"]:
         tag += " (" + "; ".join(r["gaps"]) + ")"
     return " | ".join(parts) + " | " + tag
@@ -538,7 +548,7 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
         res = fg.find_figures(lib, m, band=sub.band or None, segment=segment or None,
                               year=(sub.year if sub.year not in ("", "all") else None),
                               all_editions=(sub.year == "all" or over_time), limit=FIGURE_FETCH_LIMIT,
-                              include_illustrative=include_illustrative)
+                              include_illustrative=include_illustrative, basis_hint=sub.text)
         sub.illustrative_ids |= set(res.get("illustrative_ids", ()))
         sub.illustrative_left_out = len(sub.illustrative_ids)
         sub.notes += res["notes"]
@@ -555,7 +565,8 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
     # left a newer row of a later metric behind older rows of an earlier one, so a long
     # run of old rows could use up the character budget before it.
     sign = 1 if (over_time or sub.year == "all") else -1
-    rows.sort(key=lambda r: (fg._MATCH_RANK[r["match"]], fg._has_sample_size(r), sign * fg._year_num(r["report_year"])))
+    rows.sort(key=lambda r: (r.get("basis_rank", 0), fg._MATCH_RANK[r["match"]], fg._has_sample_size(r),
+                             sign * fg._year_num(r["report_year"]), r["source"]))
     # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
     # segment, statistic, basis or a related metric) are sent only when nothing closer
     # exists, at most RELATED_CAP, and the notes say so.
