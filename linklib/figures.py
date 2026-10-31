@@ -815,6 +815,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         r["basis_group"] = ""          # only set for an expense-family row
         r["other_basis"] = False
         r["basis_rank"] = 0
+        r["band_context"] = False      # True: band not stated / not placeable, sent as context
     if family_mode:
         rank_map = dict(_BASIS_RANK_DEFAULT)
         if basis_ask:
@@ -862,6 +863,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
 
     # Band: containing band, else the bands either side, per report and basis.
     unplaced = 0
+    context: list[dict] = []
     pb = parse_band(band) if band not in (None, "") else None
     if band not in (None, "") and pb is None:
         notes.append(f"The requested band '{band}' could not be read, so bands were not matched.")
@@ -874,6 +876,16 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
             placed = [(r, parse_band(r["band"])) for r in g]
             ok = [(r, b) for r, b in placed if b is not None and b["kind"] == pb["kind"]]
             unplaced += len(g) - len(ok)
+            for r, b in placed:
+                if b is None or b["kind"] != pb["kind"]:
+                    r["band_context"] = True
+                    shown = (r["band"] or "").strip() or "no band"
+                    seg = (r["segment"] or "").strip()
+                    _flag(r, "adjacent_band",
+                          f"band not stated or does not apply: the report prints '{shown}'"
+                          + (f" for {seg}" if seg and _lc(seg) != "all" else " (all company sizes)")
+                          + f", not the size you asked ('{band}')")
+                    context.append(r)
             inside = [r for r, b in ok if b["lo"] <= pb["lo"] and pb["hi"] <= b["hi"]
                       or _lc(r["band"]) == _lc(band)]
             if inside:
@@ -897,10 +909,12 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
             for r in pick:
                 _flag(r, "adjacent_band", f"band: report prints '{r['band']}', you asked for '{band}'")
             kept += pick
-        rows = kept
+        rows = kept + context
         if unplaced:
             notes.append(f"{unplaced} figure(s) have a band that cannot be placed against a size "
-                         "(for example 'All') and were left out of the band match.")
+                         "(for example 'All' or a financing segment). They are not the band you asked; "
+                         f"at most {ALL_SIZES_CAP} (newest edition per publisher) are returned below the "
+                         "exact and adjacent-band figures, labelled as context.")
 
     # Editions.
     if not all_editions and not (year is not None and str(year).strip()):
@@ -922,11 +936,16 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
                 notes.append(f"The newest {later[0]['report'] or fam[1]} on file ({later[0]['report_year']}) "
                              f"has no figure for this; the {y} edition is the newest that does.")
 
-    rows.sort(key=lambda r: (r["basis_rank"], _MATCH_RANK[r["match"]],
+    rows.sort(key=lambda r: (r["basis_rank"], _MATCH_RANK[r["match"]], r["band_context"],
                              _has_sample_size(r),   # a survey that states its sample before a guide that does not
                              -_year_num(r["report_year"]) if not all_editions else _year_num(r["report_year"]),
                              r["source"], r["report"], r["band_basis"],
                              (parse_band(r["band"]) or {"lo": 0})["lo"], r["statistic"]))
+    ctx_rows = [r for r in rows if r["band_context"]]
+    if len(ctx_rows) > ALL_SIZES_CAP:
+        drop = {id(r) for r in ctx_rows[ALL_SIZES_CAP:]}
+        rows = [r for r in rows if id(r) not in drop]
+        notes.append(f"{len(drop)} further all-sizes figure(s) were not sent (cap {ALL_SIZES_CAP}).")
     total = len(rows)
     truncated = total > limit
     if truncated:
@@ -1242,6 +1261,25 @@ FAMILY_LABELS = {"sm": "Sales and marketing expense", "rd": "Research and develo
                  "opex": "Total operating expense"}
 FUNCTION_FAMILIES = ("sm", "rd", "ga", "cs")
 BY_FUNCTION_LABEL = "Operating expenses by function"
+# A question that asks for "expense as a percent of revenue" and names no function means every
+# spend function and the total where a report prints it. One lookup term, so it takes one of the
+# four sub-query slots, not five.
+GENERIC_EXPENSE_LABEL = "Expense lines as a percent of revenue (all functions)"
+GENERIC_EXPENSE_KEYS = FUNCTION_FAMILIES + ("opex",)
+# Reports that print Sales and Marketing as two categories (never an S&M total). They belong to
+# an S&M request as two separate lines.
+SPLIT_SM_KEYS = ("sales", "mkt")
+_SPLIT_SM_WORDS = {"sales": "sales", "marketing": "mkt"}
+# When a size is asked, rows whose band cannot be placed against it (printed "All", "total
+# population", or a segment such as a financing source) are sent as labelled context, newest
+# edition per publisher, at most this many, after the exact and adjacent-band rows.
+ALL_SIZES_CAP = 4
+_EXPENSE_WORD = re.compile(r"\b(?:expenses?|spend(?:ing)?|opex)\b")
+# The generic phrase inside a whole question ("What are operating expenses as a percent of revenue?").
+_GENERIC_PHRASE = re.compile(
+    r"\b(?:operating\s+)?(?:expenses?|opex|spend(?:ing)?)\s+(?:as\s+an?\s+)?(?:%|percent(?:age)?|pct|ratios?)"
+    r"(?:\s+of\s+(?:(?:total|net|annual|gaap)\s+)*(?:revenue|arr))?|\bopex\s+ratios?\b|\bexpense\s+ratios?\b")
+_PCT_CUE = re.compile(r"%|percent|pct|\bof\s+(?:revenue|arr)\b|\bratios?\b")
 
 _FAMILY_FOLD = (
     (re.compile(r"customer\s+(?:success|support)"), " cs "),
@@ -1291,6 +1329,13 @@ def expense_line_of(name: str, denominator: str = "", unit: str = "") -> str:
     """The family key ("sm", "rd", "ga", "cs", "opex") of a stored row, or "" when the
     row is not a percent-form expense line. One function key per name."""
     funcs, rest = _family_tokens(name)
+    if not funcs:
+        # "Sales" and "Marketing" printed as separate categories: two lines, never an S&M total.
+        sm_words = {w for w in rest if w in _SPLIT_SM_WORDS}
+        if len(sm_words) != 1 or any(w not in _FAMILY_WORDS and w not in sm_words for w in rest):
+            return ""
+        funcs = [_SPLIT_SM_WORDS[next(iter(sm_words))]]
+        rest = [w for w in rest if w not in sm_words]
     if len(set(funcs)) != 1:
         return ""
     if any(w not in _FAMILY_WORDS for w in rest):
@@ -1312,12 +1357,21 @@ def expense_line_of(name: str, denominator: str = "", unit: str = "") -> str:
 def expense_family_request(text: str) -> list[str]:
     """Family keys a metric phrase asks for, or [] when it is not a family request. Every
     word must be a function, expense or denominator word, so "S&M efficiency" is not one."""
+    if text.strip() == GENERIC_EXPENSE_LABEL:
+        return list(GENERIC_EXPENSE_KEYS)
     funcs, rest = _family_tokens(text)
+    low = _lc(text)
     if not funcs:
+        # "expense as a percent of revenue", "spend as a percent of ARR": no function named.
+        if (rest and all(w in _FAMILY_WORDS or w in _REQUEST_EXTRA for w in rest)
+                and _EXPENSE_WORD.search(low) and _PCT_CUE.search(low)):
+            return list(GENERIC_EXPENSE_KEYS)
         return []
     if any(w not in _FAMILY_WORDS and w not in _REQUEST_EXTRA for w in rest):
         return []
-    low = _lc(text)
+    if set(funcs) == {"opex"} and _PCT_CUE.search(low) and not re.search(r"\btotal\b", low):
+        # "operating expenses as a percent of revenue" without "total": the spend functions too.
+        return list(GENERIC_EXPENSE_KEYS)
     if "opex" in funcs and len(set(funcs)) == 1 and re.search(r"\bby\s+(?:function|department)|functional", low):
         return list(FUNCTION_FAMILIES)
     if set(funcs) == {"opex"} and re.search(r"\bfunction", low):
@@ -1354,6 +1408,9 @@ def detect_expense_families(text: str) -> list[str]:
             or re.search(r"\bfunctional\s+(?:spend|opex|expenses?)", low):
         return [BY_FUNCTION_LABEL]
     funcs, _ = _family_tokens(text)
+    if not (set(funcs) - {"opex"}) and (expense_family_request(text) == list(GENERIC_EXPENSE_KEYS)
+                      or (_GENERIC_PHRASE.search(low) and not re.search(r"\btotal\s+(?:operating\s+)?(?:expenses?|opex)", low))):
+        return [GENERIC_EXPENSE_LABEL]
     if not funcs or not re.search(r"expense|spend|cost|opex|%|percent|budget|ratio|of\s+(?:revenue|arr)", low):
         return []
     out: list[str] = []
@@ -1371,6 +1428,8 @@ def family_candidates(lib, keys: list[str]) -> list[dict]:
     """Every stored row whose name and denominator put it in one of the families."""
     keyset = set(keys)
     want = {"sm", "rd", "ga", "cs", "opex"} & keyset
+    if "sm" in want:
+        want |= set(SPLIT_SM_KEYS)
     if not want:
         return []
     pairs = lib.conn.execute("SELECT DISTINCT metric, denominator, unit FROM benchmark_figures").fetchall()
