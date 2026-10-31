@@ -238,32 +238,40 @@ def test_history_cards_use_the_same_title_rule(buddy_html):
     assert src.count("flex:1 1 280px;min-width:0;") >= 2     # history card, history turn (past rows use .ask-pq-q)
 
 
-# --- problem 5: the emoji stays inside its pill -------------------------------------
+# --- problem 5 (replaced 2026-10): the Sources (N) rows share one structure ----------------
 
-def _pills_are_whole(pg, ul_sel):
-    """Every li is exactly as tall as its link: nothing (the emoji) sits above it."""
+def _rows_are_aligned(pg, ul_sel):
+    """Every row has [n], an icon and a label in the same three columns, so the label
+    (not the number) is what wraps: label left edges are identical across rows."""
     return pg.evaluate("""sel => [...document.querySelectorAll(sel + ' > li')].map(li => {
-        const a = li.querySelector('a');
-        return {li: li.getBoundingClientRect().height, a: a.getBoundingClientRect().height,
-                emojiInside: /^\\s*[^\\w\\[]/u.test(a.textContent)};
+        const r = c => li.querySelector(c).getBoundingClientRect();
+        return {n: r('.ask-src-n').left, ic: r('.ask-src-ic').left, body: r('.ask-src-body').left,
+                right: r('.ask-src-body').right, vw: window.innerWidth};
     })""", ul_sel)
 
 
-def test_past_question_source_emoji_is_inside_the_link(phone):
+def test_past_question_sources_are_a_collapsed_aligned_list(phone):
     pg, _ = phone
     _open(pg)
     pg.locator("#past-questions .ask-pq-sum").first.click()
-    rows = _pills_are_whole(pg, "#past-questions .ask-hist-answer ~ ul")
-    assert rows and all(r["emojiInside"] and r["li"] <= r["a"] + 2 for r in rows), rows
+    disc = pg.locator("#past-questions details.ask-src-disc").first
+    assert disc.evaluate("d => d.open") is False
+    disc.locator("summary").click()
+    rows = _rows_are_aligned(pg, "#past-questions details.ask-src-disc[open] > ul")
+    assert rows and len({round(r["body"]) for r in rows}) == 1 and len({round(r["ic"]) for r in rows}) == 1, rows
+    assert all(r["right"] <= r["vw"] for r in rows), rows
 
 
-def test_live_thread_source_pills_keep_the_emoji_inline(phone):
+def test_live_thread_sources_are_a_collapsed_aligned_list(phone):
     pg, _ = phone
     _open(pg)
     pg.locator(".ask-recent-item").first.tap()
     pg.wait_for_selector("#fu-q")
-    # A long citation title is what pushed the pill below the emoji.
-    pg.evaluate("""() => { const a = document.querySelector('#ask-thread .ask-src-list a');
-        a.lastChild.textContent = ' [1] ' + 'A very long source title that wraps on a phone '.repeat(3); }""")
-    rows = _pills_are_whole(pg, "#ask-thread .ask-src-list")
-    assert rows and all(r["emojiInside"] and r["li"] <= r["a"] + 2 for r in rows), rows
+    disc = pg.locator("#ask-thread details.ask-src-disc").first
+    assert disc.evaluate("d => d.open") is False
+    pg.evaluate("""() => { const a = document.querySelector('#ask-thread .ask-src-body a');
+        a.textContent = 'A very long source title that wraps on a phone '.repeat(3); }""")
+    disc.locator("summary").tap()
+    rows = _rows_are_aligned(pg, "#ask-thread details.ask-src-disc[open] > ul")
+    assert rows and len({round(r["body"]) for r in rows}) == 1 and all(r["right"] <= r["vw"] for r in rows), rows
+    assert pg.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")

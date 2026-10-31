@@ -2106,6 +2106,25 @@ details[open] > summary .disclosure-caret{transform:rotate(90deg);}
    worse than none) — JS flips it to flex once real overflow is detected. */
 .admin-scroll-hint{display:none;align-items:center;gap:10px;color:var(--muted);font-size:12.5px;margin:4px 0 14px;}
 .admin-scroll-hint svg{flex-shrink:0;}
+
+/* Sources (N) under an answer (2026-10): one collapsed disclosure, one source per row, the same
+   grid every row: [n], a fixed-width type icon, then the label, so a long label wraps under the
+   label and never under the number. Shared by the live page and every server-rendered answer. */
+.ask-src-disc{margin:16px 0 0;border-top:1px solid var(--line);padding-top:4px;}
+.ask-src-disc>summary{cursor:pointer;display:flex;align-items:center;gap:8px;min-height:44px;font-size:13px;font-weight:600;color:var(--navy);list-style:none;}
+.ask-src-disc>summary::-webkit-details-marker{display:none;}
+.ask-src-disc>summary::before{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:transform .15s;flex:none;margin:0 3px 0 2px;}
+.ask-src-disc[open]>summary::before{transform:rotate(45deg);}
+.ask-src-list{list-style:none;margin:0;padding:4px 0 2px;display:flex;flex-direction:column;gap:9px;}
+.ask-src-row{display:grid;grid-template-columns:2.4em 1.5em minmax(0,1fr);column-gap:6px;font-size:13px;line-height:1.45;scroll-margin-top:96px;border-radius:6px;}
+.ask-src-row:target,.ask-src-row.ask-src-hit{background:var(--seafoam-wash);}
+.ask-src-row:focus{outline:none;}
+.ask-src-n{font-weight:600;color:var(--ink-soft);font-variant-numeric:tabular-nums;}
+.ask-src-ic{text-align:center;}
+.ask-src-body{min-width:0;overflow-wrap:anywhere;color:var(--ink);}
+.ask-src-body a{color:var(--navy);font-weight:600;}
+.ask-src-own,.ask-src-open{margin-left:6px;font-size:11px;font-weight:500;color:var(--muted);white-space:nowrap;}
+.ask-src-open{font-weight:600;color:var(--ink-soft);background:var(--line);border-radius:999px;padding:1px 7px;}
 """
 
 # Admin table width floors (PR 14, 2026-09) — replaces 22 hand-picked
@@ -2439,6 +2458,22 @@ def _char_budget(limit: int, value: str | None, field_id: str, target: int | Non
     return attrs, counter
 
 
+_ASK_CITE_JS = """(function(){
+  document.addEventListener('click', function(e){
+    var a = e.target && e.target.closest ? e.target.closest('a[data-cite]') : null;
+    if (!a) return;
+    var el = document.getElementById(a.getAttribute('data-cite'));
+    if (!el) return;
+    e.preventDefault();
+    var d = el.closest('details');
+    if (d) d.open = true;
+    el.scrollIntoView({block: 'center'});
+    el.classList.add('ask-src-hit');
+    setTimeout(function(){ el.classList.remove('ask-src-hit'); }, 2500);
+    el.focus({preventScroll: true});
+  });
+})();"""
+
 _CHAR_BUDGET_JS = """(function(){
   function len(v){ return Array.from((v || '').replace(/\\r\\n/g, '\\n')).length; }
   function fmt(n){ return n.toLocaleString('en-US'); }
@@ -2575,6 +2610,8 @@ def _page(title: str, active: str, body: str, authed: bool = False,
     oss_love = f'<a href="/admin/open-source">{_love}</a>'
 
     char_budget_script = f"<script>{_CHAR_BUDGET_JS}</script>" if "data-char-limit=" in body else ""
+    if "data-cite=" in body or "srcListHtml" in body:
+        char_budget_script += f"<script>{_ASK_CITE_JS}</script>"
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_esc(f"BMW CFO · {_short_title(title)}")}</title>
@@ -24899,7 +24936,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fpa-intro-area-example .ask-q-bubble{{font-size:13px;padding:10px 14px;}}
 .fpa-intro-area-example .ask-answer{{padding:14px 16px;font-size:13.5px;line-height:1.6;}}
 .fpa-intro-area-example .ask-answer p{{margin:0 0 10px;}}
-.fpa-intro-area-example .ask-src-list{{margin-top:10px;padding-top:10px;}}
+.fpa-intro-area-example .ask-src-disc{{margin-top:10px;}}
 
 .ask-section{{margin:20px 0;}}
 .ask-section-label{{font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;}}
@@ -25038,12 +25075,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-answer sup.cite a{{color:var(--navy);font-size:11px;font-weight:600;text-decoration:none;padding:0 1px;}}
 .ask-answer sup.cite a:hover{{color:var(--accent);}}
 .ask-q-bubble{{background:var(--navy);color:#fff;border-radius:14px 14px 2px 14px;padding:12px 18px;font-size:14px;font-weight:500;margin:0 0 8px auto;max-width:80%;width:fit-content;}}
-.ask-src-list{{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);list-style:none;padding-left:0;display:flex;flex-wrap:wrap;gap:6px;}}
-.ask-src-list li{{font-size:12px;min-width:0;max-width:100%;}}
-.ask-src-list a, .ask-src-list span.ask-src-static{{display:inline-flex;align-items:flex-start;gap:5px;max-width:100%;background:var(--seafoam-wash);color:var(--navy);border-radius:6px;padding:4px 10px;font-weight:600;text-decoration:none;}}
-@media(hover:hover){{.ask-src-list a:hover{{background:var(--seafoam);text-decoration:none;}}}}
-.ask-src-own{{margin-left:4px;font-size:11px;color:var(--muted);font-weight:500;}}
-.ask-src-open{{margin-left:4px;font-size:11px;font-weight:600;color:var(--ink-soft);background:var(--line);border-radius:999px;padding:1px 7px;white-space:nowrap;}}
 .ask-src-caption{{margin:6px 0 0;font-size:11px;color:var(--muted);}}
 
 .ask-loading{{display:flex;align-items:center;gap:10px;padding:2px 0;}}
@@ -25191,6 +25222,9 @@ var convoId = null;    // the server-side conversation to continue; set from the
 // Set from each response just before mdToHtml runs, so markers are per-turn
 // scoped — each turn's [n] links resolve against that turn's own list.
 var CITES = [];
+var CITE_SCOPE = '';
+var citeScopeN = 0;
+function nextCiteScope() {{ citeScopeN += 1; return 'L' + citeScopeN; }}
 
 function updateUsage(usage) {{
   if (!usage) return;
@@ -25221,7 +25255,11 @@ function mdInline(s) {{
   s = s.replace(/\\[(\\d{{1,2}})\\](?!\\()/g, function(m, num) {{
     var i = parseInt(num, 10);
     if (CITES && i >= 1 && i <= CITES.length) {{
-      // A source with no link (a benchmark report with no landing page) is a plain marker.
+      // Sources (N): a marker jumps to its row in the answer's own disclosure and opens it.
+      if (CITE_SCOPE) {{
+        var rid = 'src-' + CITE_SCOPE + '-' + i;
+        return '<sup class="cite"><a href="#' + rid + '" data-cite="' + rid + '" title="' + escapeHtml(CITES[i-1].title) + '">[' + i + ']</a></sup>';
+      }}
       if (!CITES[i-1].url) return '<sup class="cite">[' + i + ']</sup>';
       return '<sup class="cite"><a href="' + encodeURI(CITES[i-1].url) + '" target="_blank" rel="noopener" title="' + escapeHtml(CITES[i-1].title) + '">[' + i + ']</a></sup>';
     }}
@@ -25393,15 +25431,25 @@ function costLineHtml(d) {{
 function srcListHtml(d) {{
   var icons = {{library: '&#128218;', feed: '&#128240;', web: '&#127760;'}};
   var cites = d.citations || [];
+  var scope = CITE_SCOPE || nextCiteScope();
+  // Twin of webapp/answer_render.py's sources_disclosure_html: same rows, same classes.
   var items = cites.map(function(c) {{
-    var ownTag = c.own_content ? ' <span class="ask-src-own">(own writing)</span>' : '';
+    var tags = '';
+    if (c.own_content) tags += '<span class="ask-src-own">(own writing)</span>';
     // Open web (2026-10): only an explicit trusted === false is tagged; a legacy
     // citation has no key and every legacy web source was a trusted one.
-    if (c.type === 'web' && c.trusted === false) ownTag += ' <span class="ask-src-open">Open web</span>';
-    // The emoji rides inside the pill so a long title can never drop below it.
-    // A benchmark report with no landing URL is cited by name, not as a link to this page.
-    if (!c.url) return '<li><span>' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span> ' : '') + '[' + c.n + '] ' + citeLabelHtml(c) + '</span> <span class="ask-src-open">no link on file</span></li>';
-    return '<li><a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">' + (icons[c.type] ? '<span aria-hidden="true">' + icons[c.type] + '</span>' : '') + '<span>[' + c.n + '] ' + citeLabelHtml(c) + '</span></a>' + ownTag + '</li>';
+    if (c.type === 'web' && c.trusted === false) tags += '<span class="ask-src-open">Open web</span>';
+    var body;
+    if (/^https?:\\/\\//i.test(c.url || '')) {{
+      body = '<a href="' + encodeURI(c.url) + '" target="_blank" rel="noopener">' + citeLabelHtml(c) + '</a>';
+    }} else {{
+      // A benchmark report with no landing URL is cited by name, not as a link to this page.
+      body = '<span>' + citeLabelHtml(c) + '</span>';
+      tags += '<span class="ask-src-open">no link on file</span>';
+    }}
+    return '<li id="src-' + scope + '-' + c.n + '" class="ask-src-row" tabindex="-1"><span class="ask-src-n">[' + c.n + ']</span>'
+      + '<span class="ask-src-ic" aria-hidden="true">' + (icons[c.type] || '') + '</span>'
+      + '<span class="ask-src-body">' + body + tags + '</span></li>';
   }});
   // Suggest-content nudge: always rendered, even with zero citations — that's
   // the case where Buddy came up empty-handed, exactly the moment worth
@@ -25412,7 +25460,7 @@ function srcListHtml(d) {{
   if (!items.length) return suggestLine;
   var exaCaption = cites.some(function(c) {{ return c.type === 'web' && c.provider === 'exa'; }})
     ? '<div class="ask-src-caption">Web search powered by Exa</div>' : '';
-  return '<ul class="ask-src-list">' + items.join('') + '</ul>' + exaCaption + suggestLine;
+  return '<details class="ask-src-disc"><summary>Sources (' + items.length + ')</summary><ul class="ask-src-list">' + items.join('') + '</ul></details>' + exaCaption + suggestLine;
 }}
 // Per-answer feedback: one tap records; tapping another option changes the
 // rating (the server upserts one row per turn per user). A negative rating
@@ -25711,6 +25759,7 @@ async function resumeConvoById(cid) {{
       // Same per-turn CITES scoping as the live path: each turn's [n]
       // markers resolve against that turn's own persisted citation snapshot.
       CITES = t.citations || [];
+      CITE_SCOPE = nextCiteScope();
       var turn = document.createElement('div');
       turn.style.marginTop = '18px';
       turn.innerHTML = '<div class="ask-q-bubble">' + escapeHtml(t.question) + '</div>' +
@@ -25842,6 +25891,7 @@ async function doAsk(followUp, skipSimilar) {{
   // Draw a finished turn (the POST response, or the stored copy the poll fetched).
   function renderResult(d) {{
     CITES = d.citations || [];
+    CITE_SCOPE = nextCiteScope();
     answerEl.innerHTML = mdToHtml(d.answer) + cutoffHtml(d) + goDeeperHtml(d) + costLineHtml(d) + srcListHtml(d);
     if (d.turn_id) answerEl.insertAdjacentHTML('beforeend', fbRowHtml(d.turn_id));
     updateUsage(d.usage);
@@ -33466,7 +33516,9 @@ def _render_cited_answer(answer: str, citations_json: str,
     # renderer (webapp/answer_render.py); [n] markers resolve against this
     # turn's own persisted citation snapshot, a literal [2026] stays text.
     from webapp.answer_render import render_answer_markdown
-    answer_html = render_answer_markdown(text, cites)
+    from webapp.answer_render import new_scope
+    scope = new_scope()
+    answer_html = render_answer_markdown(text, cites, scope)
     cutoff = _answer_cutoff_notice(stop_reason)
     if cutoff:
         answer_html += (f'<p class="ask-cutoff" style="margin:8px 0 0;font-size:13px;'
@@ -33477,51 +33529,8 @@ def _render_cited_answer(answer: str, citations_json: str,
         # Only ever passed for the asker's own turn, never for another user's.
         answer_html += f'<p class="ask-cost-line" style="margin:8px 0 0;font-size:13px;color:var(--muted);">{_esc(cost_line)}</p>'
 
-    if not cites:
-        return answer_html, ""
-    items = []
-    for c in cites:
-        # Library citations carry the articles.id; feed/web are transient,
-        # so their persisted title/url snapshot is the whole record.
-        archive_ref = ""
-        if c.get("article_id") is not None:
-            try:
-                archive_ref = (f'<span style="color:var(--muted);"> &middot; '
-                               f'archive #{int(c["article_id"])}</span>')
-            except (TypeError, ValueError):
-                archive_ref = ""
-        # Published-content ingestion (2026-09): same citation-list-only
-        # label as the client-side srcListHtml renderer — see that
-        # function's own comment for why this never became an inline
-        # prose mention.
-        own_tag = (' <span style="color:var(--muted);font-size:11px;">(own writing)</span>'
-                   if c.get("own_content") else "")
-        # Open web (2026-10): a web citation from outside the trusted list
-        # carries trusted=False. Only an explicit False tags; a legacy
-        # citation has no key and every legacy web source was a trusted one.
-        if c.get("type") == "web" and c.get("trusted") is False:
-            own_tag += (' <span class="ask-src-open" style="margin-left:4px;font-size:11px;'
-                        'font-weight:600;color:var(--ink-soft);background:var(--line);'
-                        'border-radius:999px;padding:1px 7px;white-space:nowrap;">'
-                        'Open web</span>')
-        if not c.get("url"):
-            # A benchmark report with no landing URL is cited by name only.
-            items.append(f'<li><span style="display:inline-flex;gap:5px;align-items:flex-start;max-width:100%;">'
-                         f'<span aria-hidden="true">{_ASK_SOURCE_ICONS.get(c.get("type"), "")}</span>'
-                         f'<span>[{_esc(c.get("n") if c.get("n") is not None else "")}] '
-                         f'{_citation_label_html(c)}</span></span> '
-                         f'<span style="color:var(--muted);font-size:11px;">no link on file</span></li>')
-            continue
-        items.append(
-            f'<li><a href="{_esc(c.get("url") or "")}" target="_blank" rel="noopener" '
-            f'style="display:inline-flex;gap:5px;align-items:flex-start;max-width:100%;">'
-            f'<span aria-hidden="true">{_ASK_SOURCE_ICONS.get(c.get("type"), "")}</span>'
-            f'<span>[{_esc(c.get("n") if c.get("n") is not None else "")}] '
-            f'{_citation_label_html(c)}</span></a>{archive_ref}{own_tag}</li>'
-        )
-    sources_html = ('<ul style="margin:8px 0 0;padding-left:18px;list-style:none;font-size:13px;'
-                    f'display:flex;flex-direction:column;gap:4px;">{"".join(items)}</ul>')
-    return answer_html, sources_html
+    from webapp.answer_render import sources_disclosure_html
+    return answer_html, sources_disclosure_html(cites, scope)
 
 
 def _lint_flags_html(r: dict) -> str:

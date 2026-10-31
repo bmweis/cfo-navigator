@@ -283,6 +283,11 @@ def detect(lib, question: str) -> dict:
             known_keys.add(k)
             extra.append(n)
         # Family terms go last so they never crowd out another stored metric (headcount) at the cap.
+        # "expense as a percent of revenue" already reaches every spend function through its own
+        # registry term or stored name; the generic family term would only repeat that lookup.
+        if fg.GENERIC_EXPENSE_LABEL in fam_terms and any(
+                set(fg.expense_family_request(t)) >= set(fg.GENERIC_EXPENSE_KEYS) for t in terms + extra):
+            fam_terms.remove(fg.GENERIC_EXPENSE_LABEL)
         extra += fam_terms
         room = MAX_SUBQUERIES - len(terms)
         extra = extra[:max(room, 0)]
@@ -565,7 +570,8 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
     # left a newer row of a later metric behind older rows of an earlier one, so a long
     # run of old rows could use up the character budget before it.
     sign = 1 if (over_time or sub.year == "all") else -1
-    rows.sort(key=lambda r: (r.get("basis_rank", 0), fg._MATCH_RANK[r["match"]], fg._has_sample_size(r),
+    rows.sort(key=lambda r: (r.get("basis_rank", 0), fg._MATCH_RANK[r["match"]], r.get("band_context", False),
+                             fg._has_sample_size(r),
                              sign * fg._year_num(r["report_year"]), r["source"]))
     # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
     # segment, statistic, basis or a related metric) are sent only when nothing closer

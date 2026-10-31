@@ -22,6 +22,7 @@ drift in what they accept, and a parity test runs both on the same fixtures.
 from __future__ import annotations
 
 import html
+import itertools
 import re
 
 _HEADING = re.compile(r"^(#{1,4})\s+(.*)$")
@@ -34,7 +35,16 @@ def _esc(s: str) -> str:
     return html.escape(s, quote=True)
 
 
-def _inline(s: str, cites: list[dict]) -> str:
+_SCOPE_COUNTER = itertools.count(1)
+
+
+def new_scope() -> str:
+    """A fresh id prefix for one answer, so [n] markers and source rows of different
+    answers on one page never share an id."""
+    return f"s{next(_SCOPE_COUNTER)}"
+
+
+def _inline(s: str, cites: list[dict], scope: str = "") -> str:
     s = html.escape(s, quote=False)
     s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
     s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
@@ -47,6 +57,12 @@ def _inline(s: str, cites: list[dict]) -> str:
         if 1 <= i <= len(cites):
             c = cites[i - 1]
             url = str(c.get("url") or "")
+            if scope:
+                # Sources list (2026-10): a marker jumps to its row in the answer's own
+                # "Sources (N)" disclosure and opens it. The row carries the link out.
+                rid = f"src-{scope}-{i}"
+                return (f'<sup class="cite"><a href="#{rid}" data-cite="{rid}" '
+                        f'title="{_esc(c.get("title") or "")}">[{i}]</a></sup>')
             if re.match(r"https?://", url, re.I):
                 return (f'<sup class="cite"><a href="{_esc(url)}" target="_blank" '
                         f'rel="noopener" title="{_esc(c.get("title") or "")}">[{i}]</a></sup>')
@@ -66,7 +82,7 @@ def _table_cells(t: str) -> list[str]:
     return [c.strip().replace("\x00", "|") for c in body.split("|")]
 
 
-def _try_table(lines: list[str], i: int, cites: list[dict]) -> tuple[str, int] | None:
+def _try_table(lines: list[str], i: int, cites: list[dict], scope: str = "") -> tuple[str, int] | None:
     """A markdown table starting at lines[i], or None. A table is a header row,
     a separator row (`|---|---|`) with the same number of cells, then body rows
     with the same number of cells. Anything else (no separator, ragged rows)
@@ -91,15 +107,15 @@ def _try_table(lines: list[str], i: int, cites: list[dict]) -> tuple[str, int] |
         body.append(row)
         j += 1
     out = ['<div class="table-frame ask-table" style="overflow-x:auto;overflow-y:hidden;"><table><thead><tr>']
-    out += [f"<th>{_inline(c, cites)}</th>" for c in heads]
+    out += [f"<th>{_inline(c, cites, scope)}</th>" for c in heads]
     out.append("</tr></thead><tbody>")
     for row in body:
-        out.append("<tr>" + "".join(f"<td>{_inline(c, cites)}</td>" for c in row) + "</tr>")
+        out.append("<tr>" + "".join(f"<td>{_inline(c, cites, scope)}</td>" for c in row) + "</tr>")
     out.append("</tbody></table></div>")
     return "".join(out), j
 
 
-def render_answer_markdown(text: str, cites: list[dict] | None = None) -> str:
+def render_answer_markdown(text: str, cites: list[dict] | None = None, scope: str = "") -> str:
     cites = cites or []
     out: list[str] = []
     para: list[str] = []
@@ -121,7 +137,7 @@ def render_answer_markdown(text: str, cites: list[dict] | None = None) -> str:
     i = 0
     while i < len(lines):
         t = lines[i].strip()
-        tbl = _try_table(lines, i, cites) if t.startswith("|") else None
+        tbl = _try_table(lines, i, cites, scope) if t.startswith("|") else None
         if tbl:
             flush_para(); close_list()
             out.append(tbl[0])
@@ -135,22 +151,22 @@ def render_answer_markdown(text: str, cites: list[dict] | None = None) -> str:
         elif h:
             flush_para(); close_list()
             lvl = min(len(h.group(1)) + 2, 6)
-            out.append(f"<h{lvl}>{_inline(h.group(2), cites)}</h{lvl}>")
+            out.append(f"<h{lvl}>{_inline(h.group(2), cites, scope)}</h{lvl}>")
         elif ol:
             flush_para()
             if list_type != "ol":
                 close_list(); out.append("<ol>"); list_type = "ol"
-            out.append(f"<li>{_inline(ol.group(1), cites)}</li>")
+            out.append(f"<li>{_inline(ol.group(1), cites, scope)}</li>")
         elif ul:
             flush_para()
             if list_type != "ul":
                 close_list(); out.append("<ul>"); list_type = "ul"
-            out.append(f"<li>{_inline(ul.group(1), cites)}</li>")
+            out.append(f"<li>{_inline(ul.group(1), cites, scope)}</li>")
         elif t == "":
             flush_para(); close_list()
         else:
             close_list()
-            para.append(_inline(t, cites))
+            para.append(_inline(t, cites, scope))
     flush_para(); close_list()
     return "".join(out)
 
@@ -205,3 +221,46 @@ def go_deeper_html(cites: list[dict] | None) -> str:
             parts.append(it["html"])
     return ('<p class="ask-godeeper" style="margin:8px 0 0;font-size:13px;color:var(--ink-soft);">'
             "Go deeper: " + ", ".join(parts) + "</p>")
+
+
+
+# --- "Sources (N)" disclosure (2026-10) ----------------------------------------
+# One list under every answer, collapsed, one source per row with the same structure:
+# [n], a fixed-width type icon, then the label with a hanging indent. The JS twin is
+# srcListHtml() on the live page; webapp/app.py holds the CSS (.ask-src-*).
+SOURCE_ICONS = {"library": "&#128218;", "feed": "&#128240;", "web": "&#127760;"}
+
+
+def sources_disclosure_html(cites: list[dict] | None, scope: str) -> str:
+    from linklib.citation_label import label_html
+    cites = [c for c in (cites or []) if isinstance(c, dict)]
+    if not cites:
+        return ""
+    rows = []
+    for c in cites:
+        n = c.get("n")
+        n = str(n) if n is not None else ""
+        label = label_html(c) or _esc(c.get("url") or "")
+        url = str(c.get("url") or "")
+        tags = ""
+        try:
+            if c.get("article_id") is not None:
+                tags += f'<span class="ask-src-own">archive #{int(c["article_id"])}</span>'
+        except (TypeError, ValueError):
+            pass
+        if c.get("own_content"):
+            tags += '<span class="ask-src-own">(own writing)</span>'
+        if c.get("type") == "web" and c.get("trusted") is False:
+            tags += '<span class="ask-src-open">Open web</span>'
+        if re.match(r"https?://", url, re.I):
+            body = f'<a href="{_esc(url)}" target="_blank" rel="noopener">{label}</a>'
+        else:
+            body = f'<span>{label}</span>'
+            tags += '<span class="ask-src-open">no link on file</span>'
+        rows.append(
+            f'<li id="src-{scope}-{_esc(n)}" class="ask-src-row" tabindex="-1">'
+            f'<span class="ask-src-n">[{_esc(n)}]</span>'
+            f'<span class="ask-src-ic" aria-hidden="true">{SOURCE_ICONS.get(c.get("type"), "")}</span>'
+            f'<span class="ask-src-body">{body}{tags}</span></li>')
+    return (f'<details class="ask-src-disc"><summary>Sources ({len(cites)})</summary>'
+            f'<ul class="ask-src-list">{"".join(rows)}</ul></details>')

@@ -42,11 +42,13 @@ def render():
 
 def test_markers_become_links_and_source_list_renders(render):
     a_html, src_html = render(CITED_ANSWER, json.dumps(CITATIONS))
-    assert '<a href="https://ex.com/a"' in a_html
+    # Markers jump to their row in the answer's own Sources disclosure (2026-10).
+    assert 'data-cite="src-' in a_html and 'href="#src-' in a_html
     assert '>[1]</a>' in a_html and '>[2]</a>' in a_html and '>[3]</a>' in a_html
     assert 'sup class="cite"' in a_html
-    # Source list: numbered to match, typed icons, library entry traceable.
-    assert "[1] Saved piece" in src_html and "https://ex.com/b" in src_html
+    # Source list: collapsed disclosure, numbered to match, typed icons, library entry traceable.
+    assert "<summary>Sources (3)</summary>" in src_html and "<details class=\"ask-src-disc\">" in src_html
+    assert "[1]</span>" in src_html and "Saved piece" in src_html and "https://ex.com/b" in src_html
     assert "archive #42" in src_html
     assert "archive #" not in src_html.split("ex.com/b")[1]  # feed/web carry no id
 
@@ -82,8 +84,10 @@ def test_malformed_snapshots_never_raise(render, bad):
 
 
 def test_citation_without_url_stays_literal(render):
-    a_html, _ = render("Answer [1].", json.dumps([{"n": 1, "title": "T", "type": "web"}]))
-    assert "<a" not in a_html and "[1]" in a_html
+    a_html, src_html = render("Answer [1].", json.dumps([{"n": 1, "title": "T", "type": "web"}]))
+    # The marker still jumps to its row; the row says there is no link on file.
+    assert 'data-cite="src-' in a_html and "[1]" in a_html
+    assert "no link on file" in src_html and "<a href" not in src_html
 
 
 def test_long_answer_renders_in_full_with_markers_intact(render):
@@ -93,8 +97,8 @@ def test_long_answer_renders_in_full_with_markers_intact(render):
     a_html, _ = render(text, json.dumps(CITATIONS))
     assert "&hellip;" not in a_html
     assert a_html.count("word ") == 3000
-    assert a_html.endswith("closing claim " + '<sup class="cite"><a href="https://ex.com/c" target="_blank" '
-                           'rel="noopener" title="Web hit">[3]</a></sup>.</p>')
+    assert a_html.endswith('title="Web hit">[3]</a></sup>.</p>')
+    assert "closing claim <sup class=\"cite\"><a href=\"#src-" in a_html
 
 
 def test_render_cited_answer_has_no_truncate_parameter(render):
@@ -157,10 +161,11 @@ def test_surface_renders_linked_markers_and_source_list(env, path, who):
     pw = "adminpass" if who == "admin" else "supersecret"
     html = _login(env, who, pw).get(path).text
     # Cited turn: markers are links against the turn's own snapshot…
-    assert '<a href="https://ex.com/a"' in html
+    assert 'data-cite="src-' in html
     assert '>[1]</a>' in html
-    # …with the numbered source list underneath.
-    assert "[2] Feed item" in html
+    # …with the collapsed, numbered source list underneath.
+    assert "<summary>Sources (" in html and "Feed item" in html and "[2]</span>" in html
+    assert '<details class="ask-src-disc" open' not in html
     # Legacy '[]' turn on the same page: literal marker, no broken link.
     assert "Legacy answer citing [1] before snapshots." in html
 

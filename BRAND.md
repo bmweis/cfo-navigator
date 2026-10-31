@@ -79,7 +79,7 @@ measured on the `#F5F4EF` canvas.
 
 Seafoam uses that fit none of the above, noted so they are not mistaken for admin-only: the
 "Reviewed" status pill, the selected state of `.ask-tag` source chips, and the
-`.ask-src-list` link hover. Seafoam beside navy: an admin-only outline next to a navy ghost
+`.ask-src-list` link hover (inside the collapsed "Sources (N)" disclosure). Seafoam beside navy: an admin-only outline next to a navy ghost
 button is told apart by colour and by the tier rule; if that ever reads as the same colour
 on a real screen, the fix is a dashed border, not a fill.
 

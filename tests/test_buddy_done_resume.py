@@ -138,9 +138,10 @@ def test_history_page_links_own_conversations_to_resume(own_html):
 def test_own_past_question_row_has_resume_and_another_members_does_not(own_html):
     h = own_html.get("/tools/fpa-buddy").text
     own = h[h.index("My own question about runway"):]
-    own = own[:own.index("</details>")]
+    # A row now holds a nested Sources <details>, so cut at the next row, not the first </details>.
+    own = own.split('<details class="ask-pq-row"')[0]
     other = h[h.index("Other member question about headcount"):]
-    other = other[:other.index("</details>")]
+    other = other.split('<details class="ask-pq-row"')[0].split("<script")[0]
     assert 'data-cid="mine-c1"' in own and ">Resume<" in own
     assert "Resume" not in other and "data-cid" not in other
 
@@ -234,7 +235,7 @@ def test_resume_button_opens_the_thread_and_hides_recent(view):
 def test_own_past_question_row_resumes_only_from_the_button(view):
     pg, site, w = view
     row = pg.locator("details.ask-pq-row", has_text="My own question about runway")
-    row.locator("summary").click()                                       # a row tap stays expand
+    row.locator("summary.ask-pq-sum").click()                                       # a row tap stays expand
     assert row.evaluate("e => e.open") and pg.locator("#fu").count() == 0
     btn = row.locator(".ask-ctl[data-cid]")   # Resume; Make private is the other footer button
     assert btn.inner_text().strip() == "Resume" and abs(btn.bounding_box()["height"] - 28) < 0.6

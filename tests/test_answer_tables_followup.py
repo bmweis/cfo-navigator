@@ -119,7 +119,7 @@ def test_server_twin_matches_live_js_for_tables(text, tmp_path):
     j = src.index("// Below-answer list")
     js = src[i:j].replace("{{", "{").replace("}}", "}").replace("\\\\", "\\")
     script = tmp_path / "md.js"
-    script.write_text("var CITES=" + json.dumps(LIVE_CITES) + ";\n" + js +
+    script.write_text("var CITES=" + json.dumps(LIVE_CITES) + ";\nvar CITE_SCOPE='';\n" + js +
                       "\nprocess.stdout.write(mdToHtml(require('fs').readFileSync(0,'utf8')));")
     live = subprocess.run([NODE, str(script)], input=text, capture_output=True, text=True, check=True).stdout
     assert render_answer_markdown(text, LIVE_CITES) == live

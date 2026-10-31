@@ -139,9 +139,10 @@ NODE = shutil.which("node")
 
 
 @pytest.mark.skipif(not NODE, reason="node not available")
+@pytest.mark.parametrize("scope", ["", "t"])
 @pytest.mark.parametrize("text", [STORED, OPUS_STYLE, "Plain para.\nsecond line\n\n* a\n* b\n\n***\n\n`code` and __strong__ _em_",
     "See [the memo](https://evil.example/x?a=b) and <b>raw</b> then [1] and [2026]."])
-def test_server_twin_matches_live_js(text, tmp_path):
+def test_server_twin_matches_live_js(text, scope, tmp_path):
     """The live page's browser renderer and the server twin emit the same blocks.
 
     Markdown links are inert on both sides (the live page used to linkify
@@ -154,8 +155,8 @@ def test_server_twin_matches_live_js(text, tmp_path):
     js = src[i:j].replace("{{", "{").replace("}}", "}").replace("\\\\", "\\")
     cites = [{"url": c["url"], "title": c["title"]} for c in CITES]
     script = tmp_path / "md.js"
-    script.write_text("var CITES=" + json.dumps(cites) + ";\n" + js +
+    script.write_text("var CITES=" + json.dumps(cites) + ";\nvar CITE_SCOPE=" + json.dumps(scope) + ";\n" + js +
                       "\nprocess.stdout.write(mdToHtml(require('fs').readFileSync(0,'utf8')));")
     live = subprocess.run([NODE, str(script)], input=text, capture_output=True,
                           text=True, check=True).stdout
-    assert render_answer_markdown(text, CITES) == live
+    assert render_answer_markdown(text, CITES, scope) == live

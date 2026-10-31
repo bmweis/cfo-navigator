@@ -37,7 +37,8 @@ def _run(pg, body):
     pg.click("#ask-btn")
     pg.wait_for_selector("#ask-thread .ask-answer", timeout=8000)
     pg.wait_for_timeout(500)
-    return pg.inner_text("#ask-thread .ask-answer"), errors
+    # text_content, not inner_text: the sources list is a collapsed disclosure (hidden text is skipped).
+    return pg.text_content("#ask-thread .ask-answer"), errors
 
 
 def test_empty_url_figures_citations_render(phone):
@@ -63,9 +64,11 @@ def test_marker_for_a_source_with_no_link_is_plain_text(phone):
     pg.fill("#ask-q", Q)
     pg.click("#ask-btn")
     pg.wait_for_selector("#ask-thread .ask-answer sup.cite", timeout=8000)
-    # [1] and [2] have no link; [3] does. Before: all three were anchors, two with href="".
+    # Markers jump to their row in the Sources list (never href=""); only [3] has an outbound link.
     anchors = pg.eval_on_selector_all("#ask-thread .ask-answer sup.cite a", "els => els.map(e => e.getAttribute('href'))")
-    assert anchors == ["https://example.test/d"]
+    assert len(anchors) == 3 and all(a.startswith("#src-") for a in anchors)
+    out = pg.eval_on_selector_all("#ask-thread .ask-src-list a", "els => els.map(e => e.getAttribute('href'))")
+    assert out == ["https://example.test/d"]
 
 
 def test_network_failure_logs_stage_and_offers_recovery_note(phone):
