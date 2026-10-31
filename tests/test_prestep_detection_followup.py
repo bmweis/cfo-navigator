@@ -122,7 +122,10 @@ def test_less_close_rows_are_not_sent_when_a_closer_one_exists(lib):
     assert any("less-close" in n for n in sub.notes)
 
 
-def test_with_no_close_row_at_most_the_cap_is_sent_and_the_note_says_so(lib):
+def test_a_segment_only_another_metric_uses_is_dropped_with_a_note(lib):
+    """Was a cap test that kept the segment and sent different-segment rows. Since PR 756 (A3) the
+    segment is dropped per metric when no row for THAT metric prints it, with a note; each row still
+    prints its own segment, so nothing is passed off as the asked one."""
     load_report(lib, "far", [
         frow(report="Far Report 2099", year="2099", source="Far Co", band="$20M-$50M", segment="Consumer",
              metric="Net revenue retention", value=str(100 + i), statistic=f"stat{i}") for i in range(40)])
@@ -131,9 +134,9 @@ def test_with_no_close_row_at_most_the_cap_is_sent_and_the_note_says_so(lib):
              metric="Burn multiple", value="1.3")])
     sub = bp.Sub(intent="benchmark", text="q", metrics=["Net revenue retention"], band="$25M", segment="Enterprise")
     bp.lookup(lib, sub, "standard", {r["report_slug"]: r for r in lib.list_benchmark_reports()})
-    assert 0 < sub.rows <= bp.RELATED_CAP
-    assert not (set(sub.match_mix) & set(bp.CLOSE_MATCHES))
-    assert any("no exact or adjacent-band match" in n for n in sub.notes)
+    assert sub.segment_dropped == "Enterprise"
+    assert any("Segment not used by the data: Enterprise" in n for n in sub.notes)
+    assert sub.rows > 0 and "Consumer" in "\n".join(d["body"] for d in sub.docs)
 
 
 def test_a_newer_bracketing_row_is_not_crowded_out_by_older_rows(lib):

@@ -337,6 +337,10 @@ SPLIT_SYSTEM = (
     "- band: the company size or range as the user wrote it (for example \"$25M ARR\"); empty if none.\n"
     "- segment: a segment the user stated that narrows the peer group (for example \"Enterprise\" or \"Fintech\"); "
     "empty if none. Never \"SaaS\", \"B2B\", \"software\" or \"company\": every report is a SaaS report.\n"
+    "- A metric the user named stays that metric. Never replace headcount, total employees or FTEs with a "
+    "ratio such as \"ARR per Head\"; add a per-employee ratio only when the user asked for one or for productivity.\n"
+    "- Never repeat a part: one part per metric, band and segment. A question about change over time is that "
+    "same part with year \"all\", not a second part.\n"
     "- year: \"all\" only if the part asks about change over time; a four-digit year only if the user named one; otherwise empty.\n"
     "- text: that part restated as a standalone search question.\n"
     "- rest_of_question: whatever the parts do not cover, or empty.\n"
@@ -550,7 +554,17 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
     if sub.segment and not segment:
         sub.segment_dropped = sub.segment
     for m in names:
-        res = fg.find_figures(lib, m, band=sub.band or None, segment=segment or None,
+        seg_m = segment
+        if seg_m:
+            # The segment must be used by THIS metric's stored rows, not just by some other metric's.
+            probe = fg.find_figures(lib, m, band=sub.band or None, all_editions=True, limit=FIGURE_FETCH_LIMIT,
+                                    include_illustrative=include_illustrative, basis_hint=sub.text)
+            if not any(_norm(r["segment"]) == _norm(seg_m) for r in probe["rows"]):
+                seg_m = ""
+        if sub.segment and not seg_m:
+            sub.segment_dropped = sub.segment
+            sub.notes.append(f"Segment not used by the data: {sub.segment}. The figures below are not narrowed to it.")
+        res = fg.find_figures(lib, m, band=sub.band or None, segment=seg_m or None,
                               year=(sub.year if sub.year not in ("", "all") else None),
                               all_editions=(sub.year == "all" or over_time), limit=FIGURE_FETCH_LIMIT,
                               include_illustrative=include_illustrative, basis_hint=sub.text)
@@ -634,6 +648,62 @@ PRESTEP_RULES = (
 )
 
 
+_PER_HEAD = re.compile(r"\bper\s+(?:head|employee|fte|person|capita)\b|\b(?:arr|revenue)\s*/\s*(?:head|employee|fte)\b"
+                       r"|\bproductivity\b", re.I)
+_HEADCOUNT = re.compile(r"\b(?:headcount|head count|employees?|ftes?|staff)\b", re.I)
+
+
+def _norm(v: str) -> str:
+    return " ".join(str(v or "").lower().split())
+
+
+def _guard_split(lib, subs: list[Sub], question: str, sig: dict) -> list[Sub]:
+    """Three rules the splitter's output must obey, applied before any lookup.
+    A2: a headcount metric the user named is never replaced by a per-employee ratio
+    the user did not ask for. A4: parts that resolve to the same lookup (same metrics,
+    band and segment) are one part; a change-over-time duplicate makes the survivor
+    year "all". The slot this frees goes to any detected metric no part covers."""
+    asked_ratio = bool(_PER_HEAD.search(question))
+    head_terms = [t for t in sig["terms"] if _HEADCOUNT.search(t) and not _PER_HEAD.search(t)]
+    if head_terms and not asked_ratio:
+        for s in subs:
+            if s.intent != "other" and _PER_HEAD.search(" ".join(s.metrics + [s.text])):
+                s.metrics = [head_terms[0]]
+                s.text = head_terms[0] + (f" at {s.band}" if s.band else "")
+    merged: list[Sub] = []
+    for s in subs:
+        key = (s.intent, frozenset(_norm(m) for m in s.metrics), _norm(s.band), _norm(s.segment))
+        twin = None
+        if s.intent != "other" and s.metrics:
+            twin = next((m for m in merged if (m.intent, frozenset(_norm(x) for x in m.metrics),
+                                                _norm(m.band), _norm(m.segment)) == key), None)
+        if twin is None:
+            merged.append(s)
+        elif s.year == "all" and twin.year != "all":
+            twin.year = "all"
+            twin.text = s.text or twin.text
+    subs = merged
+    if len(subs) < MAX_SUBQUERIES:
+        # Covered by canonical metric, so the splitter's "NRR" covers the detected "net revenue retention".
+        covered: set = set()
+        for s in subs:
+            if s.intent != "other":
+                for m in s.metrics:
+                    covered |= {r["canonical"] for r in fg.resolve_metric(lib, m)}
+                covered |= {d["canonical"] for d in fg.detect_metrics(lib, s.text)}
+        term_canon = {d["term"]: d["canonical"] for d in fg.detect_metrics(lib, question)}
+        missing = [t for t in sig["terms"] if term_canon.get(t) not in covered]
+        lookups = [s for s in subs if s.intent != "other"]
+        if missing and lookups:
+            ref = lookups[0]
+            others = [x for x in subs if x.intent == "other"]
+            new = Sub(intent="benchmark", text=" ".join(missing[:2]), metrics=missing[:2], band=ref.band,
+                      segment=ref.segment, year="all" if sig["over_time"] else "")
+            subs = lookups + [new] + others
+            subs = subs[:MAX_SUBQUERIES]
+    return subs
+
+
 def _reserve_other_slot(subs: list[Sub], rest: str) -> list[Sub]:
     """Cap benchmark/definition parts at MAX_BENCHMARK_PARTS and keep the last slot for
     one "other" part (the rest of the question). Parts beyond the cap are not dropped:
@@ -701,7 +771,7 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
                 ps.split_ran = True
                 ps.requested_subs = len(res.subs)
                 ps.rest_of_question = res.rest
-                subs = res.subs
+                subs = _guard_split(lib, res.subs, question, sig)
                 # The split call's parts are what get retrieved; the broader half of the
                 # question is retrieved only if the splitter made it a part. When it left it
                 # in rest_of_question alone, no article was ever searched for it (the
