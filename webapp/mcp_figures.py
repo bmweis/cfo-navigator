@@ -47,7 +47,10 @@ def register_figures_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         list of how it differs from the request. A size between printed bands
         returns the bands either side, flagged. Default is the newest edition
         per publisher; `all_editions=True` returns every edition, oldest first.
-        `notes` says what was left out. Rows from a worked example company
+        `notes` says what was left out. For a function's spend (S&M, R&D, G&A, customer
+        success, opex by function) the percent-of-revenue and percent-of-ARR forms come back
+        together: each row has `basis_group` and `other_basis`, `groups` lists them, the asked
+        basis is first, and nothing is converted or averaged. Rows from a worked example company
         ("illustrative", "example", "hypothetical", "sample company") are left out
         unless `include_illustrative=True`; the count is in `illustrative_left_out`. Each row has `link` (the report's
         landing URL) or `link_note` "no link on file". Admin role only."""

@@ -167,7 +167,9 @@ def test_headcount_and_expense_lines_reach_the_stored_names(lib):
     sig = bp.detect(lib, ORG_Q)
     names = set(sig["terms"])
     assert "Total employees (full and part-time)" in names
-    assert "S&M % of Revenue" in names and "R&D % of Revenue" in names
+    # Since the opex-family change the expense lines are reached by family terms, which find
+    # "S&M % of Revenue" and every other spelling stored for the function.
+    assert "Sales and marketing expense" in names and "Research and development expense" in names
     assert sig["via_fts"]
 
 
