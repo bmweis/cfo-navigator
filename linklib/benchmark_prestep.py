@@ -55,8 +55,16 @@ SPLIT_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 FIGURES_CHARS = {"quick": 4000, "standard": 9000, "deep": 20000}
 CARD_CHARS = {"quick": 3000, "standard": 6000, "deep": 12000}
 FIGURE_FETCH_LIMIT = 150
+# What one part sends, and what the whole turn sends (Part B, 2026-11). 150 rows per part cost about
+# 15,000 input tokens; the rows beyond the cap are the oldest and least close, and the admin row says so.
+PART_ROWS_CAP = 40
+TURN_ROWS_CAP = 80
 CLOSE_MATCHES = ("exact", "adjacent_band")
 RELATED_CAP = 8
+WINDOW_NOTE_PREFIX = "Older editions outside the recent window"
+# When every row is only a related metric (a different metric from the one asked), send a few as
+# pointers, not a table of them.
+RELATED_METRIC_CAP = 3
 CARD_SUFFIX = " (workbook definition)"
 # First line of every figures document. The document title is "<Source>, <Report> (<year>)",
 # so this line is what tells the model (and the tests) it is holding stored report figures.
@@ -78,8 +86,14 @@ _BENCH_CUE = re.compile(
     r"\b(benchmark\w*|median|percentile|quartile|peers?|typical|average|compare[ds]?|comparison|"
     r"industry|norms?)\b", re.I)
 _OVER_TIME = re.compile(
-    r"\b(trend|over time|year[- ]over[- ]year|yoy|historical|history|has .{0,30} (changed|improved|declined)|"
-    r"changed? (since|from)|compared (to|with) (last|prior|previous) year|evolv|over the (last|past) \w+ years)\b", re.I)
+    r"\b(trend|over time|year[- ]over[- ]year|yoy|historical|historically|history|has .{0,30} (changed|improved|declined)|"
+    r"changed? (since|from)|compared (to|with) (last|prior|previous) year|evolv|over the (last|past) \w+ years|"
+    r"since (?:fy ?)?(?:19|20)\d{2}|all editions|every edition)\b", re.I)
+# How far back an over-time question goes. Default is a recent window; these widen it.
+_SINCE = re.compile(r"\bsince\s+(?:fy\s?)?((?:19|20)\d{2})\b", re.I)
+_FULL_HISTORY = re.compile(
+    r"\b(historically|full history|entire history|all editions|every edition|all years|going back|as far back|"
+    r"decades?|over the (?:last|past) (?:[6-9]|\d{2,}|ten|twelve|fifteen|twenty) years)\b", re.I)
 _DEFINITION = re.compile(
     r"\b(define|definition|formula|calculate[ds]?|calculation|computed?|stand for|how is .{0,40} (measured|derived))\b", re.I)
 
@@ -115,6 +129,12 @@ class Sub:
     illustrative_left_out: int = 0
     illustrative_ids: set = field(default_factory=set)
     segment_dropped: str = ""
+    # Over-time lookups: "" = the recent window, "full" = every edition (historically, all editions),
+    # a year = editions from that year on ("since 2015").
+    history: str = ""
+    candidates: list = field(default_factory=list, repr=False)   # rows found, before the caps
+    capped_rows: int = 0                 # candidates left out by the row cap (oldest, least close first)
+    fetch_cut: int = 0                   # rows the per-metric fetch limit cut (oldest first)
 
 
 @dataclass
@@ -156,7 +176,9 @@ class Prestep:
             "rest_of_question": self.rest_of_question, "match_mix": mix,
             "subs": [{"intent": s.intent, "text": s.text[:200], "metrics": s.metrics, "band": s.band, "segment": s.segment,
                       "year": s.year, "figure_rows": s.rows, "cards": s.cards,
-                      "library_hits": s.library_hits, "figure_rows_left_out": s.truncated_rows,
+                      "library_hits": s.library_hits, "figure_rows_left_out": s.truncated_rows + s.capped_rows + s.fetch_cut,
+                      "rows_capped": s.capped_rows + s.fetch_cut, "history": s.history,
+                      "editions_left_out": next((n for n in s.notes if n.startswith(WINDOW_NOTE_PREFIX)), ""),
                       "illustrative_left_out": s.illustrative_left_out, "segment_dropped": s.segment_dropped,
                       "match_mix": s.match_mix} for s in self.subs],
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
@@ -307,6 +329,10 @@ def detect(lib, question: str) -> dict:
     mixed = (questions >= 2 or words > 40 or len(rest_words) >= 6
              or (len(rest_words) >= 3 and bool(re.search(r"\b(and|also|plus|then|as well as)\b", left))))
     over_time = bool(_OVER_TIME.search(question or ""))
+    history = ""
+    if over_time:
+        since = _SINCE.search(question or "")
+        history = since.group(1) if since else ("full" if _FULL_HISTORY.search(question or "") else "")
     definition = bool(_DEFINITION.search(question or ""))
     reasons = []
     registry_terms = {d["term"] for d in found}
@@ -318,7 +344,7 @@ def detect(lib, question: str) -> dict:
     if canon and mixed:
         reasons.append("a benchmark ask inside a broader question")
     return {"metrics": canon, "terms": terms, "via_fts": via_fts, "found": found, "bands": bands, "over_time": over_time,
-            "definition": definition, "mixed": mixed, "rest_words": len(rest_words), "split_reasons": reasons,
+            "history": history, "definition": definition, "mixed": mixed, "rest_words": len(rest_words), "split_reasons": reasons,
             "n_metrics": n_metrics,
             "needs_split": bool(canon) and bool(reasons)}
 
@@ -542,9 +568,72 @@ def _card_docs(lib, metrics: list[str], budget: int) -> list[dict]:
     return out
 
 
+def _window_args(sub: Sub) -> dict:
+    """find_figures arguments for an over-time lookup: the recent window by default, every
+    edition for "historically" / "all editions", editions from a year for "since 2015"."""
+    if sub.history == "full":
+        return {}
+    if sub.history.isdigit():
+        return {"from_year": int(sub.history)}
+    return {"recent_window": True}
+
+
+def pick_rows(rows: list[dict], cap: int) -> list[dict]:
+    """At most `cap` rows from rows already sorted best first (basis group, match, band,
+    sample, newest year). Before the rest is filled, the best row of every publisher and of
+    every basis group is kept, so a cap never drops a publisher or one basis entirely. The
+    result keeps the sorted order."""
+    if len(rows) <= cap:
+        return rows
+    chosen: list[int] = []
+    seen_src: set = set()
+    seen_basis: set = set()
+    for i, r in enumerate(rows):
+        src, basis = _norm(r["source"]), r.get("basis_group") or ""
+        if src not in seen_src or (basis and basis not in seen_basis):
+            seen_src.add(src)
+            if basis:
+                seen_basis.add(basis)
+            chosen.append(i)
+    chosen = chosen[:cap]
+    for i in range(len(rows)):
+        if len(chosen) >= cap:
+            break
+        if i not in chosen:
+            chosen.append(i)
+    return [rows[i] for i in sorted(chosen)]
+
+
+def allocate_caps(subs: list[Sub]) -> dict[int, int]:
+    """Row cap per part: each part up to PART_ROWS_CAP, all parts together up to TURN_ROWS_CAP.
+    A part that needs less than its share leaves the rest to the others."""
+    need = {id(s): min(len(s.candidates), PART_ROWS_CAP) for s in subs}
+    caps: dict[int, int] = {}
+    left, pending = TURN_ROWS_CAP, [s for s in subs if need[id(s)]]
+    while pending:
+        share = left // len(pending)
+        small = [s for s in pending if need[id(s)] <= share]
+        if not small:
+            for s in pending:
+                caps[id(s)] = share
+            break
+        for s in small:
+            caps[id(s)] = need[id(s)]
+            left -= need[id(s)]
+            pending.remove(s)
+    return caps
+
+
 def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
-           include_illustrative: bool = False) -> None:
-    """Fill sub.docs, sub.notes and counts. Reads only."""
+           include_illustrative: bool = False, row_cap: int | None = None) -> None:
+    """Gather and build one part on its own (a single lookup). plan_turn gathers every part
+    first, shares the turn's row cap between them, then builds."""
+    gather(lib, sub, over_time=over_time, include_illustrative=include_illustrative)
+    build(lib, sub, tier, reports, row_cap if row_cap is not None else PART_ROWS_CAP)
+
+
+def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool = False) -> None:
+    """Find the rows for one part (sub.candidates, best first) and the notes. Reads only."""
     names = list(sub.metrics)
     rows: list[dict] = []
     seen_keys: set = set()
@@ -564,10 +653,13 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
         if sub.segment and not seg_m:
             sub.segment_dropped = sub.segment
             sub.notes.append(f"Segment not used by the data: {sub.segment}. The figures below are not narrowed to it.")
+        all_ed = sub.year == "all" or over_time
         res = fg.find_figures(lib, m, band=sub.band or None, segment=seg_m or None,
                               year=(sub.year if sub.year not in ("", "all") else None),
-                              all_editions=(sub.year == "all" or over_time), limit=FIGURE_FETCH_LIMIT,
-                              include_illustrative=include_illustrative, basis_hint=sub.text)
+                              all_editions=all_ed, limit=FIGURE_FETCH_LIMIT,
+                              include_illustrative=include_illustrative, basis_hint=sub.text,
+                              **(_window_args(sub) if all_ed else {}))
+        sub.fetch_cut += max(res["total_matching"] - res["returned"], 0)
         sub.illustrative_ids |= set(res.get("illustrative_ids", ()))
         sub.illustrative_left_out = len(sub.illustrative_ids)
         sub.notes += res["notes"]
@@ -581,14 +673,12 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
             if key not in seen_keys:
                 seen_keys.add(key)
                 rows.append(r)
-    # Closest match first, then newest edition first across ALL the sub-query's metrics
-    # (oldest first when the question is about change over time). Sorting only on match
-    # left a newer row of a later metric behind older rows of an earlier one, so a long
-    # run of old rows could use up the character budget before it.
-    sign = 1 if (over_time or sub.year == "all") else -1
+    # Closest match first, then newest edition first across ALL the sub-query's metrics. Always
+    # newest first, change over time included: oldest first let a long run of old editions use up
+    # the cap and the character budget before the newest ones (the 2025 rows never reached the model).
     rows.sort(key=lambda r: (r.get("basis_rank", 0), fg._MATCH_RANK[r["match"]], r.get("band_context", False),
                              fg._has_sample_size(r),
-                             sign * fg._year_num(r["report_year"]), r["source"]))
+                             -fg._year_num(r["report_year"]), r["source"]))
     # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
     # segment, statistic, basis or a related metric) are sent only when nothing closer
     # exists, at most RELATED_CAP, and the notes say so.
@@ -600,9 +690,21 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
     elif rows and not close:
         sub.notes.append("There is no exact or adjacent-band match for this. The figures below are the closest stored "
                          "ones, each labelled with how it differs. Say plainly that there is no exact match.")
-        if len(rows) > RELATED_CAP:
-            sub.notes.append(f"{len(rows) - RELATED_CAP} further less-close figures were not sent.")
-            rows = rows[:RELATED_CAP]
+        cap = RELATED_METRIC_CAP if all(r["match"] == "related_metric" for r in rows) else RELATED_CAP
+        if len(rows) > cap:
+            sub.notes.append(f"{len(rows) - cap} further less-close figures were not sent.")
+            rows = rows[:cap]
+    sub.candidates = rows
+
+
+def build(lib, sub: Sub, tier: str, reports: dict, row_cap: int) -> None:
+    """Apply the row cap, build the figure documents and the definition cards. Reads only."""
+    names = list(sub.metrics)
+    rows = pick_rows(sub.candidates, row_cap)
+    sub.capped_rows = len(sub.candidates) - len(rows)
+    if sub.capped_rows:
+        sub.notes.append(f"{sub.capped_rows} further matching figures were not sent (the oldest and least close go first). "
+                         "Ask a narrower question for them.")
     sub.rows = len(rows)
     for r in rows:
         sub.match_mix[r["match"]] = sub.match_mix.get(r["match"], 0) + 1
@@ -804,9 +906,13 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
                         s.metrics = [d["term"] for d in fg.detect_metrics(lib, s.text)][:2]
                     if sig["over_time"] and not s.year:
                         s.year = "all" if s.intent == "benchmark" else s.year
-    for s in ps.subs:
-        if s.intent != "other" or s.metrics:
-            lookup(lib, s, tier, reports, over_time=sig["over_time"] and not ps.split_ran)
+    todo = [s for s in ps.subs if s.intent != "other" or s.metrics]
+    for s in todo:
+        s.history = sig.get("history", "")
+        gather(lib, s, over_time=sig["over_time"] and not ps.split_ran)
+    caps = allocate_caps(todo)
+    for s in todo:
+        build(lib, s, tier, reports, caps.get(id(s), PART_ROWS_CAP))
     # The text block sent before the question: lookup notes, the plan, the notice.
     lines: list[str] = []
     seen_notes: set[str] = set()

@@ -663,6 +663,51 @@ def _year_num(y) -> int:
     return int(m.group()) if m else -1
 
 
+# The recent window for an over-time question ("how has it changed over the past few years").
+# Per publisher and report family: the newest edition on file always, plus earlier editions up to
+# EDITION_WINDOW_COUNT in all, none more than EDITION_WINDOW_YEARS before the newest edition on
+# file for the metric. "since 2015" replaces the year cutoff and the count; "historically" and
+# "all editions" turn the window off (find_figures(all_editions=True) alone).
+EDITION_WINDOW_COUNT = 4
+EDITION_WINDOW_YEARS = 5
+
+
+def apply_edition_window(rows: list[dict], from_year: int | None = None) -> tuple[list[dict], str]:
+    """(rows inside the window, plain note naming the editions left out). A row whose
+    year cannot be read is kept (it sorts last)."""
+    years = [_year_num(r["report_year"]) for r in rows if _year_num(r["report_year"]) > 0]
+    if not years:
+        return rows, ""
+    cutoff = from_year if from_year else max(years) - EDITION_WINDOW_YEARS
+    by_family: dict[tuple, list[int]] = {}
+    for r in rows:
+        y = _year_num(r["report_year"])
+        if y > 0:
+            by_family.setdefault(_family(r), [])
+            if y not in by_family[_family(r)]:
+                by_family[_family(r)].append(y)
+    keep_years: dict[tuple, set] = {}
+    for fam, ys in by_family.items():
+        ys = sorted(ys, reverse=True)
+        keep = {ys[0]} | {y for y in ys[1:] if y >= cutoff}
+        if not from_year:
+            keep = set(sorted(keep, reverse=True)[:EDITION_WINDOW_COUNT])
+        keep_years[fam] = keep
+    kept, dropped = [], set()
+    for r in rows:
+        y = _year_num(r["report_year"])
+        if y <= 0 or y in keep_years.get(_family(r), ()):
+            kept.append(r)
+        else:
+            dropped.add((r["report"], r["report_year"]))
+    note = ""
+    if dropped:
+        note = ("Older editions outside the recent window were left out: "
+                + "; ".join(f"{n} ({y})" for n, y in sorted(dropped, key=lambda t: (-_year_num(t[1]), t[0])))
+                + ". Ask \"since <year>\" or \"historically\" for them.")
+    return kept, note
+
+
 # --- find_figures --------------------------------------------------------------
 
 _FTS_STOP = {"the", "of", "and", "for", "a", "an", "in", "to", "per", "by", "rate", "ratio", "metric"}
@@ -706,7 +751,8 @@ def _flag(row: dict, match: str, gap: str) -> None:
 def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year=None,
                  basis=None, denominator=None, all_editions: bool = False,
                  limit: int = DEFAULT_LIMIT, include_illustrative: bool = False,
-                 basis_hint: str = "") -> dict:
+                 basis_hint: str = "", recent_window: bool = False,
+                 from_year: int | None = None) -> dict:
     """Stored figures for a metric, exact matches first, every gap disclosed.
 
     Returns {rows, resolution, notes, total_matching, returned, truncated,
@@ -718,7 +764,9 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
     rest dropped; when none agree, the report's rows are kept and flagged.
     A requested band returns the containing band, or else the bands either
     side. The newest edition per publisher and report family is used unless
-    all_editions=True or `year` is given.
+    all_editions=True or `year` is given. all_editions returns every edition, NEWEST first (a
+    cap cuts the oldest); `recent_window=True` limits that to the recent window
+    (apply_edition_window) and `from_year` to editions from that year on.
 
     Expense families (S&M, R&D, G&A, customer success, total opex): rows are found by rules
     on the stored name and denominator and returned in basis groups (revenue, ARR, basis not
@@ -755,7 +803,14 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
                 seen_ids.add(r["id"])
                 cand.append((dict(r), canonical))
     if not resolution:
-        for r in lib.conn.execute("SELECT * FROM benchmark_figures WHERE lower(trim(metric)) = ?", (_lc(metric),)):
+        # A stored name of the same family ("Gross Margin" and "Gross Margin - Total") is the same metric.
+        names = {_lc(metric)}
+        fam = name_key(metric)
+        if fam:
+            names |= {r[0] for r in lib.conn.execute("SELECT DISTINCT lower(trim(metric)) FROM benchmark_figures")
+                      if r[0] and name_key(r[0]) == fam}
+        marks = ",".join("?" for _ in names)
+        for r in lib.conn.execute(f"SELECT * FROM benchmark_figures WHERE lower(trim(metric)) IN ({marks})", tuple(names)):
             seen_ids.add(r["id"])
             cand.append((dict(r), ""))
     # Expense families: "S&M expense", "Sales and marketing" and "S&M % of Revenue" are one
@@ -936,9 +991,15 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
                 notes.append(f"The newest {later[0]['report'] or fam[1]} on file ({later[0]['report_year']}) "
                              f"has no figure for this; the {y} edition is the newest that does.")
 
+    elif all_editions and (recent_window or from_year):
+        rows, window_note = apply_edition_window(rows, from_year)
+        if window_note:
+            notes.append(window_note)
+
+    # Newest edition first, always: when a cap cuts rows it cuts the oldest.
     rows.sort(key=lambda r: (r["basis_rank"], _MATCH_RANK[r["match"]], r["band_context"],
                              _has_sample_size(r),   # a survey that states its sample before a guide that does not
-                             -_year_num(r["report_year"]) if not all_editions else _year_num(r["report_year"]),
+                             -_year_num(r["report_year"]),
                              r["source"], r["report"], r["band_basis"],
                              (parse_band(r["band"]) or {"lo": 0})["lo"], r["statistic"]))
     ctx_rows = [r for r in rows if r["band_context"]]
@@ -949,7 +1010,9 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
     total = len(rows)
     truncated = total > limit
     if truncated:
-        notes.append(f"{total} figures match; showing the first {limit}. Narrow the request (band, segment, statistic, year).")
+        notes.append(f"{total} figures match; showing the first {limit}"
+                     + (" (newest first; the oldest are left out)" if all_editions else "")
+                     + ". Narrow the request (band, segment, statistic, year).")
         if family_mode and len(groups_out) > 1:
             # Keep both bases in view: each group gets an equal share of the cap first.
             share = max(limit // len(groups_out), 1)
@@ -1146,15 +1209,18 @@ _GENERIC_NAME_WORDS = {"annual", "revenue", "arr", "year", "spend", "spending", 
                        "size", "stage", "growth", "cost", "costs", "amount"}
 _PAREN = re.compile(r"\([^)]*\)")
 _OPTIONAL_NAME_WORDS = {"total", "annual"}
+_FAMILY_DROP_WORDS = frozenset({"total"})
 # "S&M % of Revenue": the denominator is part of the name but a question asking for S&M
 # spend at some revenue size rarely repeats it (and the caller masks the size phrase).
 _DENOM_TAIL = re.compile(r"(?:\bas\s+an?\s+)?(?:%|percent(?:age)?)\s+of\s+(?:(?:total|net|annual)\s+)*(?:revenue|arr)\s*$")
 
 
 def name_key(name: str) -> frozenset:
-    """The significant words of a metric name with any parenthetical and symbols removed:
-    "Gross Margin", "Gross Margin %" and "Gross Margin % (LTM)" share one key."""
-    return frozenset(_sig_tokens(_PAREN.sub(" ", name or "")))
+    """The significant words of a metric name with any parenthetical and symbols removed, and
+    without "total": "Gross Margin", "Gross Margin %", "Gross Margin % (LTM)" and "Gross Margin -
+    Total" share one key (a family). "Gross Margin - Subscription" is a different one. "Annual" is
+    kept: "Annual R&D Spend" is a size field, not a variant of "R&D Spend"."""
+    return frozenset(_sig_tokens(_PAREN.sub(" ", name or ""))) - _FAMILY_DROP_WORDS
 
 
 def _min_span(seq: list[str], need: list[str]) -> int:

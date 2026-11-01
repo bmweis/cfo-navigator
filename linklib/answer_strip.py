@@ -19,9 +19,19 @@ MIN_WORDS_LEFT = 40
 # for the false positives each one has on invented text.
 PATTERNS = (
     ("causal", re.compile(r"\b(?:driven by|due to|because of|as a result of|reflects|reflecting)\b", re.I)),
-    ("forecast or advice", re.compile(r"\b(?:expect|you should|would likely|will likely|likely to)\b", re.I)),
-    ("characterization", re.compile(r"\b(?:striking|dramatic|dramatically|remarkable|notably)\b", re.I)),
+    ("forecast or advice", re.compile(
+        r"\b(?:expect|you should|would likely|will likely|likely to|will (?:sit|be|run|see)|confirm whether)\b", re.I)),
+    ("characterization", re.compile(
+        r"\b(?:striking|dramatic|dramatically|remarkable|notably|is the floor for|attractive to investors)\b", re.I)),
 )
+# A flagged uncited sentence that carries a figure and a "because of" / "due to": a cause stated
+# with numbers and no source. Still removed (or cut back to its figure clause), recorded under this
+# name so the admin report shows how often it happens.
+UNCITED_CLAIM = "uncited claim with figures"
+_CAUSE_WITH_FIGURE = re.compile(r"\b(?:because of|due to)\b", re.I)
+_DIGIT = re.compile(r"\d")
+# Where a sentence can be cut back to an earlier clause: an em dash, a semicolon or a comma.
+_SEP = re.compile(r"—|;|,(?=\s)")
 
 _MARKER = re.compile(r"\[\d{1,2}\]")
 _SENT = re.compile(r"(?<=[.!?])(?:\[\d{1,2}\])*\s+(?=[A-Z\"'(\[$0-9])")
@@ -35,13 +45,40 @@ def _first_pattern(sentence: str) -> str:
     return ""
 
 
+def _first_hit(sentence: str) -> int:
+    """Start of the earliest pattern match in the sentence, or -1."""
+    starts = [m.start() for _, rx in PATTERNS if (m := rx.search(sentence))]
+    return min(starts) if starts else -1
+
+
+def split_clause(sentence: str) -> tuple[str, str] | None:
+    """(kept, removed_clause) when the flagged words sit in a later clause and an earlier clause
+    carries a figure: the sentence is cut back to that clause and closed with a period. None when
+    there is no such clause (the whole sentence then goes, as before). The removed clause runs from
+    the separator before the flagged words to the end of the sentence."""
+    pos = _first_hit(sentence)
+    if pos < 0:
+        return None
+    seps = [m for m in _SEP.finditer(sentence) if m.start() < pos]
+    if not seps:
+        return None
+    cut = seps[-1].start()
+    prefix = sentence[:cut].rstrip()
+    clause = sentence[cut:].lstrip("—;, ").strip()
+    if (not clause or not _DIGIT.search(prefix) or len(prefix.split()) < 4 or _first_pattern(prefix)
+            or _MARKER.search(prefix)):
+        return None
+    return (prefix if prefix[-1] in ".!?" else prefix + "."), clause
+
+
 def _words(text: str) -> int:
     return len(re.findall(r"\S+", text))
 
 
 def strip_answer(text: str) -> tuple[str, list[dict]]:
     """(clean text, record). Each record item: {sentence, pattern, action}, action
-    "removed" or "kept_short" (answer too short to strip; text returned unchanged)."""
+    "removed", "clause_removed" (only the flagged clause went; the figure clause before it
+    stays, also in `kept`) or "kept_short" (answer too short to strip; text returned unchanged)."""
     if not text:
         return text or "", []
     out_lines: list[str] = []
@@ -58,7 +95,14 @@ def strip_answer(text: str) -> tuple[str, list[dict]]:
         for sent in _SENT.split(body):
             pat = _first_pattern(sent)
             if pat and not _MARKER.search(sent):
-                record.append({"sentence": sent.strip(), "pattern": pat, "action": "removed"})
+                if pat == "causal" and _DIGIT.search(sent) and _CAUSE_WITH_FIGURE.search(sent):
+                    pat = UNCITED_CLAIM
+                cut = split_clause(sent)
+                if cut:
+                    record.append({"sentence": cut[1], "pattern": pat, "action": "clause_removed", "kept": cut[0]})
+                    kept.append(cut[0])
+                else:
+                    record.append({"sentence": sent.strip(), "pattern": pat, "action": "removed"})
             else:
                 kept.append(sent)
         if kept:

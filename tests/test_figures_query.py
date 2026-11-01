@@ -163,7 +163,8 @@ def test_default_is_newest_edition_with_a_note(std):
 
 def test_all_editions_orders_by_year(std):
     r = fg.find_figures(std, "Net revenue retention", band="$15M", basis="ARR", statistic="median", all_editions=True)
-    assert [x["report_year"] for x in _by(r["rows"], source="Example Benchmarks")] == ["2098", "2099"]
+    # Newest first: a cap that cuts rows cuts the oldest (2026-11).
+    assert [x["report_year"] for x in _by(r["rows"], source="Example Benchmarks")] == ["2099", "2098"]
 
 
 def test_year_filter(std):
