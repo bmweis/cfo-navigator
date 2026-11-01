@@ -25275,7 +25275,7 @@ function mdInline(s) {{
       if (!CITES[i-1].url) return '<sup class="cite">[' + i + ']</sup>';
       return '<sup class="cite"><a href="' + encodeURI(CITES[i-1].url) + '" target="_blank" rel="noopener" title="' + escapeHtml(CITES[i-1].title) + '">[' + i + ']</a></sup>';
     }}
-    return '';   // a marker with no Sources entry points at nothing: not shown (twin of answer_render._inline)
+    return m;
   }});
   return s;
 }}

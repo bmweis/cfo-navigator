@@ -80,7 +80,7 @@ ANSWER_RULES = (
     "- Citation markers in a table go inside a cell, in a Source cell or at the end of a cell's text, or in a sentence after the "
     "table. Never after a row's closing pipe. Good: \"| >$100M | 72% | FY2025 [1] |\". Bad: \"| >$100M | 72% | FY2025 |[1]\".\n"
     "- Cite every row of a table the same way: a marker in each row's Source cell, or one sentence after the table naming "
-    "its source. Never one marker on the last row only, which reads as if only that row is sourced. Never type a [n] "
+    "its source. Never one marker on the last row only, which reads as if only that row is sourced. Never type a citation "
     "number yourself; markers are placed from the documents you cite, and a number you type points at nothing. Good: "
     "every row ends in a Source cell with its citation. Bad: a table whose last row alone carries \"[1]\".\n"
     "- Order table rows newest data period first within a metric, then the more recent publisher, and follow the "

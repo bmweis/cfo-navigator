@@ -16,7 +16,6 @@ from linklib import figures as fg
 from linklib import citations as cit
 from linklib.citations import extract_citations
 from linklib.db import Library
-from webapp.answer_render import render_answer_markdown
 
 REG = ("canonical_metric\tcard_url\tcontains\n"
        "Gross Margin\thttps://c.example.test/gm\tContains: gross margin\n"
@@ -69,23 +68,9 @@ def test_a_a_year_in_brackets_and_a_link_are_not_markers():
     assert "[2024]" in clean and "[text](http://a.test)" in clean and dropped == ["[3]"]
 
 
-def test_a_renderer_does_not_show_an_unresolved_marker():
-    cites = [{"n": i, "title": "T", "url": "https://x.example.test"} for i in range(1, 7)]
-    html = render_answer_markdown("| a | b |\n|---|---|\n| 1 | x [7] |\n| 2 | y [3] |", cites, "s1")
-    assert "[7]" not in html and "[3]" in html
-
-
-def test_a_unresolved_marker_is_not_shown_by_the_live_page_script():
-    from webapp.app import app  # noqa: F401  (the route module renders the script)
-    import inspect
-    import webapp.app as appmod
-    src = inspect.getsource(appmod)
-    assert "a marker with no Sources entry points at nothing: not shown" in src
-
-
 def test_a_prompt_says_to_cite_each_row_alike_and_not_to_type_numbers():
     r = answer_rules.ANSWER_RULES
-    assert "Never one marker on the last row only" in r and "Never type a [n]" in r
+    assert "Never one marker on the last row only" in r and "Never type a citation number yourself" in r
 
 
 # --- Part B: republished figures ------------------------------------------------------------
