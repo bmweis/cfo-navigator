@@ -1661,6 +1661,12 @@ CREATE TABLE IF NOT EXISTS benchmark_reports (
     -- Set in the admin UI; a reload never touches it.
     cited_source TEXT NOT NULL DEFAULT '',
     cited_source_metric TEXT NOT NULL DEFAULT '',
+    -- Admin edits of the name fields (the per-report edit page). source/report/report_year above
+    -- are what the CSV said and are rewritten by every reload; these are never touched by a reload,
+    -- and a non-empty value wins everywhere a report is named (Library.effective_report).
+    source_override TEXT NOT NULL DEFAULT '',
+    report_override TEXT NOT NULL DEFAULT '',
+    year_override TEXT NOT NULL DEFAULT '',
     row_count   INTEGER NOT NULL DEFAULT 0,
     sha256      TEXT NOT NULL DEFAULT '',
     loaded_at   TEXT NOT NULL,
@@ -2000,6 +2006,9 @@ class Library:
             "ALTER TABLE benchmark_reports ADD COLUMN landing_url_manual TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE benchmark_reports ADD COLUMN cited_source TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE benchmark_reports ADD COLUMN cited_source_metric TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE benchmark_reports ADD COLUMN source_override TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE benchmark_reports ADD COLUMN report_override TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE benchmark_reports ADD COLUMN year_override TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE metric_registry ADD COLUMN shift_threshold REAL",
             "ALTER TABLE metric_registry ADD COLUMN shift_kind TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
@@ -8264,12 +8273,73 @@ class Library:
             "SELECT canonical_metric, shift_threshold, shift_kind FROM metric_registry "
             "WHERE shift_threshold IS NOT NULL AND shift_kind != ''")}
 
+    @staticmethod
+    def effective_report(r: dict) -> dict:
+        """A benchmark_reports row with source/report/report_year set to what the admin edited, if
+        anything, else what the CSV said. The CSV's own values stay under *_loaded."""
+        d = dict(r)
+        for key, ov in (("source", "source_override"), ("report", "report_override"), ("report_year", "year_override")):
+            d[key + "_loaded"] = d.get(key, "")
+            if (d.get(ov) or "").strip():
+                d[key] = d[ov].strip()
+        return d
+
     def list_benchmark_reports(self) -> list[dict]:
+        """Every report with its effective source/report/report_year (see effective_report)."""
         rows = self.conn.execute(
             """SELECT r.*, (SELECT COUNT(*) FROM benchmark_figures f
                             WHERE f.report_slug = r.report_slug) AS stored_rows
                FROM benchmark_reports r ORDER BY r.report_slug""").fetchall()
-        return [dict(r) for r in rows]
+        return [self.effective_report(dict(r)) for r in rows]
+
+    def get_benchmark_report(self, report_slug: str) -> dict | None:
+        for r in self.list_benchmark_reports():
+            if r["report_slug"] == report_slug:
+                return r
+        return None
+
+    def save_benchmark_report_edit(self, report_slug: str, *, source: str, report: str, report_year: str,
+                                   landing_url: str, cited_source: str, cited_source_metric: str) -> list[str] | None:
+        """Save the per-report edit page in one transaction. source/report/report_year are the values
+        the admin sees; each is stored as an override only when it differs from what the CSV said, so
+        clearing a box or typing the original back returns to the CSV value. Returns the labels of the
+        fields that changed, or None for an unknown report. Raises ValueError (nothing written) for a
+        bad value."""
+        cur = self.get_benchmark_report(report_slug)
+        if cur is None:
+            return None
+        clean = lambda v: " ".join((v or "").split())
+        source, report, report_year = clean(source), clean(report), clean(report_year)
+        if not report:
+            raise ValueError("The report title can't be empty.")
+        if len(source) > 200 or len(report) > 300:
+            raise ValueError("The source or report title is too long.")
+        if report_year and not re.match(r"^\d{4}$", report_year):
+            raise ValueError("The year must be four digits, for example 2025.")
+        url = (landing_url or "").strip()
+        if url and not re.match(r"^https?://[^\s]+$", url, re.I):
+            raise ValueError("The landing URL must start with http:// or https:// and have no spaces.")
+        cited_source, cited_source_metric = clean(cited_source), clean(cited_source_metric)
+        if len(cited_source) > 200 or len(cited_source_metric) > 120:
+            raise ValueError("The cited source or metric text is too long.")
+        if cited_source_metric and not cited_source:
+            raise ValueError("\u201cOnly for metrics containing\u201d needs a \u201cRepublished from\u201d value.")
+        ov = lambda new, loaded: "" if new == clean(loaded) else new
+        new_vals = {"source_override": ov(source, cur["source_loaded"]),
+                    "report_override": ov(report, cur["report_loaded"]),
+                    "year_override": ov(report_year, cur["report_year_loaded"]),
+                    "landing_url_manual": url, "cited_source": cited_source,
+                    "cited_source_metric": cited_source_metric}
+        labels = {"source_override": "Source", "report_override": "Report title", "year_override": "Year",
+                  "landing_url_manual": "Landing URL", "cited_source": "Republished from",
+                  "cited_source_metric": "Only for metrics containing"}
+        changed = [labels[k] for k, v in new_vals.items() if (cur.get(k) or "") != v]
+        if changed:
+            sets = ", ".join(f"{k} = ?" for k in new_vals)
+            self.conn.execute(f"UPDATE benchmark_reports SET {sets} WHERE report_slug = ?",
+                              (*new_vals.values(), report_slug))
+            self.conn.commit()
+        return changed
 
     def figures_summary(self) -> dict:
         one = lambda sql: self.conn.execute(sql).fetchone()[0]
