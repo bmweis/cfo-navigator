@@ -92,17 +92,20 @@ def test_b_fy2025_ranks_before_fy2024_inside_one_report(lib):
     assert [r["value"] for r in bp.pick_rows(sub.candidates, 1)] == ["81"]
 
 
-def test_b_the_floor_row_is_the_exact_band_median_of_the_newest_edition(lib):
+def test_b_the_floor_takes_the_newest_edition_not_an_older_edition_that_ranks_first(lib):
+    """Each publisher has an older in-window edition with an exact-band median and a newest edition whose
+    band is only adjacent. The old floor took the first row per publisher in sorted order, which was the
+    older edition's exact row; the floor now takes the best-ranked row of the NEWEST edition."""
     for i in range(6):
-        rows = _rows(f"Pub {i}", f"Pub {i} 2025", 2025, stats=("p25", "median", "p75"), dp="FY2024")
-        rows += _rows(f"Pub {i}", f"Pub {i} 2025", 2025, stats=("p25", "median"), dp="FY2025", band="$30M-$50M")
-        rows += _rows(f"Pub {i}", f"Pub {i} 2020", 2020, stats=("median",), dp="FY2019")
-        load_report(lib, f"p{i}", rows)
+        load_report(lib, f"p{i}-25", _rows(f"Pub {i}", f"Pub {i} 2025", 2025, stats=("p25", "median"),
+                                           dp="FY2025", band="$30M-$50M"))
+        load_report(lib, f"p{i}-23", _rows(f"Pub {i}", f"Pub {i} 2023", 2023, stats=("median", "p25"), dp="FY2022"))
     sub = bp.Sub(intent="benchmark", text="x", metrics=[M], band="$25M")
     bp.gather(lib, sub, over_time=True)
+    assert sub.candidates[0]["report_year"] == "2023"          # the older edition's exact row ranks first
     picked = bp.pick_rows(sub.candidates, 6)
     assert len(picked) == 6 and len({r["source"] for r in picked}) == 6
-    assert all(r["statistic"] == "median" and r["band"] == "$20M-$30M" and r["report_year"] == "2025" for r in picked)
+    assert all(r["report_year"] == "2025" and r["statistic"] == "median" for r in picked)
 
 
 def test_b_when_the_floor_alone_exceeds_the_cap_older_editions_are_cut_first(lib):
