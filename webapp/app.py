@@ -26743,7 +26743,7 @@ _LIBRARY_TOOLS = [
     ("/admin/reader/tag-management", "Tag cleanup and style", "Merge, rename, or remove existing tags, and edit the guide that steers how new ones get chosen."),
     ("/admin/reader/enrich",       "Enrich archive",      "Uses Claude to draft a summary and tags for each saved article. This is where new tags get created."),
     ("/admin/reader/digests",      "Benchmark digests",   "Load digests of third-party benchmark reports into the Archive from a text bundle, so FP&amp;A Buddy can answer from them. Nothing is fetched and no AI runs; each digest is stored as written and skipped by every automatic rewrite."),
-    ("/admin/reader/figures",      "Benchmark figures",   "Load the figures extracted from benchmark reports (a zip of CSVs with a manifest), stored exactly as written, plus the metric registry. Checked against the manifest; changes no FP&amp;A Buddy answer yet."),
+    ("/admin/reader/figures",      "Benchmark figures",   "Load the figures extracted from benchmark reports (a zip of CSVs with a manifest), stored exactly as written, plus the metric registry. Checked against the manifest. Each report has an edit page for its name, year, landing URL and republished-from source."),
     ("/admin/reader/bulk-delete",   "Bulk delete articles", "Permanently remove a specific list of articles you've already decided aren't needed&mdash;paste their URLs into the CSV template, mark <code>confirm_delete</code>, and re-upload. For a known list, not a scan&mdash;different from the &lt;60-word Purge tool under Reader content backfill. A single article can also be removed straight from its Reader toolbar."),
 ]
 
@@ -38086,6 +38086,24 @@ async def admin_digests_load(request: Request):
 
 _FIGURES_FORM_MAX_BYTES = 80 * 1024 * 1024   # the base64 copy the preview carries to the load
 _FIGURES_TH = _DIGEST_TH
+# Phones: the report list becomes labelled cards (the /admin/library-backup pattern), so no column
+# sits off-screen. The sitewide block already removes the td top border for table.bk-stack.
+_FIGURES_STACK_CSS = """<style>
+@media(max-width:700px){
+  .fg-reports{min-width:0 !important;}
+  .fg-reports thead{display:none;}
+  .fg-reports, .fg-reports tbody, .fg-reports tr, .fg-reports td{display:block;width:100%;}
+  .fg-reports tr{border-bottom:1px solid var(--line);padding:10px 12px;}
+  .fg-reports tr:last-child{border-bottom:0;}
+  .fg-reports td{border-bottom:none !important;padding:3px 0 3px 112px !important;text-indent:-112px;white-space:normal !important;overflow-wrap:anywhere;min-width:0 !important;}
+  .fg-reports td>*{text-indent:0;}
+  .fg-reports td[data-label]::before{content:attr(data-label);font-weight:600;display:inline-block;width:112px;text-indent:0;color:var(--ink-soft);}
+  .fg-reports td[data-label="Report"]{padding-left:0 !important;text-indent:0;font-size:15px;}
+  .fg-reports td[data-label="Report"]::before{display:none;}
+  .fg-reports td[data-label="Actions"]{padding-left:0 !important;text-indent:0;padding-top:8px !important;}
+  .fg-reports td[data-label="Actions"]::before{display:none;}
+}
+</style>"""
 
 
 def _figures_upload_bytes(form, name: str) -> bytes:
@@ -38106,64 +38124,56 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
     _how = {"manual": "set here", "landing_url": "stored landing URL", "article": "from the linked digest",
             "digest_slug": "from the digest with this slug", "none": ""}
 
+    def _short_url(u: str) -> str:
+        from urllib.parse import urlsplit
+        sp = urlsplit(u)
+        text = (sp.netloc + sp.path).rstrip("/")
+        return text if len(text) <= 36 else text[:33] + "..."
+
     def _landing_cell(r) -> str:
         land = landings.get(r["report_slug"], {"url": "", "how": "none"})
-        if land["url"]:
-            shown = (f'<a href="{_esc(land["url"])}" target="_blank" rel="noopener" '
-                     f'>{_esc(land["url"])}</a>'
-                     f'<span style="display:block;font-size:12px;color:var(--muted);">{_how[land["how"]]}</span>')
-        else:
-            shown = ('<span style="color:var(--alert);font-weight:600;">Not set</span>'
-                     '<span style="display:block;font-size:12px;color:var(--muted);">'
-                     'Cited by name, with &ldquo;no link on file&rdquo;.</span>')
-        manual = _esc(r.get("landing_url_manual") or "")
-        form = (f'<form method="post" action="/admin/reader/figures/landing" '
-                f'style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">'
-                f'<input type="hidden" name="report_slug" value="{_esc(r["report_slug"])}">'
-                f'<label for="landing-{_esc(r["report_slug"])}" style="position:absolute;left:-9999px;">Landing URL for {_esc(r["report_slug"])}</label>'
-                f'<input type="url" id="landing-{_esc(r["report_slug"])}" name="landing_url" value="{manual}" '
-                f'placeholder="https://" style="flex:1 1 220px;min-width:0;max-width:100%;font-size:13px;padding:6px 8px;">'
-                f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save</button></form>')
-        cs = _esc(r.get("cited_source") or "")
-        cm = _esc(r.get("cited_source_metric") or "")
-        slug = _esc(r["report_slug"])
-        cited = (f'<form method="post" action="/admin/reader/figures/cited-source" '
-                 f'style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">'
-                 f'<input type="hidden" name="report_slug" value="{slug}">'
-                 f'<label for="cited-{slug}" style="position:absolute;left:-9999px;">Cited source for {slug}</label>'
-                 f'<input type="text" id="cited-{slug}" name="cited_source" value="{cs}" maxlength="200" '
-                 f'placeholder="Republished from (for example, High Alpha 2025 SaaS Benchmarks)" '
-                 f'style="flex:1 1 220px;min-width:0;max-width:100%;font-size:13px;padding:6px 8px;">'
-                 f'<label for="citedm-{slug}" style="position:absolute;left:-9999px;">Metric family for {slug}</label>'
-                 f'<input type="text" id="citedm-{slug}" name="cited_source_metric" value="{cm}" maxlength="120" '
-                 f'placeholder="Only for metrics containing (optional)" '
-                 f'style="flex:1 1 160px;min-width:0;max-width:100%;font-size:13px;padding:6px 8px;">'
-                 f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save source</button></form>')
-        return shown + form + cited
+        if not land["url"]:
+            return '<span style="color:var(--alert);font-weight:600;">Not set</span>'
+        return (f'<a href="{_esc(land["url"])}" target="_blank" rel="noopener">{_esc(_short_url(land["url"]))}</a>'
+                f'<span style="display:block;font-size:12px;color:var(--muted);">{_how[land["how"]]}</span>')
 
+    def _republished_cell(r) -> str:
+        cs = (r.get("cited_source") or "").strip()
+        if not cs:
+            return "&mdash;"
+        fam = (r.get("cited_source_metric") or "").strip()
+        return _esc(cs) + (f', metrics containing {_esc(fam)}' if fam else "")
+
+    _td = "padding:10px 12px;font-size:13px;vertical-align:top;"
     report_rows = "".join(
-        f'<tr><td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc(r["report_slug"])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc(r["report"])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc(r["report_year"])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;'
+        f'<tr><td data-label="Report" style="{_td}white-space:nowrap;"><strong>{_esc(r["report"])}</strong>'
+        f'<span style="display:block;font-size:12px;color:var(--muted);">{_esc(r["report_slug"])}</span></td>'
+        f'<td data-label="Source" style="{_td}white-space:nowrap;">{_esc(r["source"]) or "&mdash;"}</td>'
+        f'<td data-label="Year" style="{_td}white-space:nowrap;">{_esc(r["report_year"]) or "&mdash;"}</td>'
+        f'<td data-label="Rows stored" style="{_td}white-space:nowrap;'
         + ("color:var(--alert);font-weight:600;" if r["stored_rows"] != r["row_count"] else "")
         + f'">{r["stored_rows"]:,} of {r["row_count"]:,}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc((r["loaded_at"] or "")[:10])}</td>'
-        f'<td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_landing_cell(r)}</td></tr>'
+        f'<td data-label="Loaded" style="{_td}white-space:nowrap;">{_esc((r["loaded_at"] or "")[:10])}</td>'
+        f'<td data-label="Landing URL" style="{_td}overflow-wrap:anywhere;">{_landing_cell(r)}</td>'
+        f'<td data-label="Republished from" style="{_td}overflow-wrap:anywhere;">{_republished_cell(r)}</td>'
+        f'<td data-label="Actions" style="{_td}white-space:nowrap;"><a href="/admin/reader/figures/{_esc(r["report_slug"])}/edit" '
+        f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;text-decoration:none;">Edit</a></td></tr>'
         for r in reports)
     linked = sum(1 for v in landings.values() if v["url"])
     link_summary = (f'<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;">{linked:,} of {len(landings):,} reports '
                     f'have a landing URL. FP&amp;A Buddy links each figure to it; a report without one is cited by name with &ldquo;no link on file&rdquo;.</p>'
                     if landings else "")
-    reports_table = (f"""{link_summary}<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
-<table style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
+    reports_table = (f"""{_FIGURES_STACK_CSS}{link_summary}<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
+<table class="bk-stack fg-reports" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_NAME}px;">Report slug</th>
   <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_REPORT_TITLE}px;">Report</th>
+  <th style="{_FIGURES_TH}">Source</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_COUNT}px;">Year</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Rows stored</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_DATE}px;">Loaded</th>
-  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_MESSAGE}px;">Landing URL and cited source</th>
+  <th style="{_FIGURES_TH}min-width:180px;">Landing URL</th>
+  <th style="{_FIGURES_TH}min-width:170px;">Republished from</th>
+  {_actions_th(_FIGURES_TH)}
 </tr></thead>
 <tbody>{report_rows}</tbody>
 </table>
@@ -38199,7 +38209,7 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Benchmark figures</h1>
-<p style="color:var(--muted);margin:0 0 18px;max-width:70ch;">Stores every figure extracted from a benchmark report, exactly as written, so FP&amp;A Buddy can later look a number up instead of reading it out of digest text. Loading figures changes no Buddy answer yet.</p>
+<p style="color:var(--muted);margin:0 0 18px;max-width:70ch;">Stores every figure extracted from a benchmark report, exactly as written, so FP&amp;A Buddy can later look a number up instead of reading it out of digest text. FP&amp;A Buddy looks benchmark numbers up here and cites the report.</p>
 {msg}
 <form method="post" action="/admin/reader/figures/preview" enctype="multipart/form-data"
       style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;max-width:900px;">
@@ -38230,7 +38240,7 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
     <span style="font-size:12.5px;color:var(--muted);">Preview writes nothing.</span>
   </div>
 </form>
-<p style="font-size:13px;color:var(--muted);margin:0 0 8px;max-width:900px;">Two tab-separated columns, <code>report_slug</code> and <code>landing_url</code> (a header line is optional). The URL goes in the same place as the Save box in the table above. A value already set, which may have been typed by hand, is kept unless you tick &ldquo;Replace existing values&rdquo;. A short link (for example bit.ly) is allowed but flagged.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 8px;max-width:900px;">Two tab-separated columns, <code>report_slug</code> and <code>landing_url</code> (a header line is optional). The URL goes in the same place as the Landing URL field on a report&rsquo;s edit page. A value already set, which may have been typed by hand, is kept unless you tick &ldquo;Replace existing values&rdquo;. A short link (for example bit.ly) is allowed but flagged.</p>
 
 <h2 style="font-size:16px;margin:28px 0 10px;">Metric registry</h2>
 <form method="post" action="/admin/reader/figures/registry" enctype="multipart/form-data"
@@ -38567,61 +38577,117 @@ async def admin_figures_landing_load(request: Request):
     return _figures_page(notice=_esc(note))
 
 
-@app.post("/admin/reader/figures/landing", response_class=HTMLResponse)
-async def admin_figures_landing(request: Request):
-    """Sets or clears one report's admin-typed landing URL (Phase B, B0)."""
+def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = "", notice: str = "",
+                       status: int = 200) -> HTMLResponse:
+    """The per-report edit page (/admin/reader/figures/<slug>/edit). `values` re-fills the form after a
+    refused save; otherwise the stored, effective values are shown."""
+    from linklib import figures as _fg
+    lib = _lib()
+    try:
+        rep = lib.get_benchmark_report(slug)
+        landings = _fg.resolve_landings(lib) if rep else {}
+    finally:
+        lib.close()
+    if rep is None:
+        return HTMLResponse(_page("Report not found\u2014Admin", "Admin",
+                                  '<div class="page page-standard"><p><a href="/admin/reader/figures">&larr; Benchmark figures</a></p>'
+                                  '<h1>Report not found</h1><p>That report is not loaded.</p></div>', authed=True), status_code=404)
+    v = values or {"source": rep["source"], "report": rep["report"], "report_year": rep["report_year"],
+                   "landing_url": rep["landing_url_manual"], "cited_source": rep["cited_source"],
+                   "cited_source_metric": rep["cited_source_metric"]}
+    msg = (_digest_notice(_esc(error)) if error else "") + (_digest_notice(_esc(notice), "info") if notice else "")
+    land = landings.get(slug, {"url": "", "how": "none"})
+    how = {"manual": "set here", "landing_url": "the stored landing URL", "article": "the linked digest",
+           "digest_slug": "the digest with this slug", "none": ""}[land["how"]]
+    if land["url"] and not rep["landing_url_manual"]:
+        land_help = f'Nothing typed here. Buddy currently links to {_esc(land["url"])} (from {how}). Type a URL to use a different one.'
+    elif land["url"]:
+        land_help = "Buddy links each figure from this report to this address."
+    else:
+        land_help = "Nothing is set, so Buddy cites this report by name with &ldquo;no link on file&rdquo;."
+    lab = "display:block;font-size:13px;font-weight:600;margin:18px 0 4px;"
+    hp = "margin:4px 0 0;font-size:12.5px;color:var(--muted);max-width:70ch;"
+    inp = "width:100%;box-sizing:border-box;min-width:0;font-size:15px;padding:9px 10px;"
+
+    def _loaded(key: str, label: str) -> str:
+        if rep[key] != rep[key + "_loaded"]:
+            return f' The file said &ldquo;{_esc(rep[key + "_loaded"])}&rdquo;; clearing the box goes back to that.'
+        return ""
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/reader/figures" style="font-size:13px;color:var(--muted);">&larr; Benchmark figures</a></p>
+<h1>{_esc(rep["report"])}</h1>
+<div style="max-width:900px;margin:0 auto;">
+{msg}
+<form method="post" action="/admin/reader/figures/{_esc(slug)}/edit" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px 20px 22px;">
+  <label for="rf-source" style="{lab}">Source</label>
+  <input type="text" id="rf-source" name="source" value="{_esc(v["source"])}" maxlength="200" style="{inp}">
+  <p style="{hp}">The publisher, as Buddy names it in an answer.{_loaded("source", "Source")}</p>
+  <label for="rf-report" style="{lab}">Report title</label>
+  <input type="text" id="rf-report" name="report" value="{_esc(v["report"])}" maxlength="300" required style="{inp}">
+  <p style="{hp}">Used in citations and in the Sources list.{_loaded("report", "Report title")}</p>
+  <label for="rf-year" style="{lab}">Year</label>
+  <input type="text" id="rf-year" name="report_year" value="{_esc(v["report_year"])}" maxlength="4" inputmode="numeric" style="{inp}max-width:160px;">
+  <p style="{hp}">Four digits. Buddy uses it to pick the newest edition and to build the recent window.{_loaded("report_year", "Year")}</p>
+  <label for="rf-landing" style="{lab}">Landing URL</label>
+  <input type="url" id="rf-landing" name="landing_url" value="{_esc(v["landing_url"])}" placeholder="https://" style="{inp}">
+  <p style="{hp}">{land_help}</p>
+  <label for="rf-cited" style="{lab}">Republished from</label>
+  <input type="text" id="rf-cited" name="cited_source" value="{_esc(v["cited_source"])}" maxlength="200" style="{inp}">
+  <p style="{hp}">Only if this report reprints another report&rsquo;s figures. For example: High Alpha 2025 SaaS Benchmarks. Leave blank otherwise.</p>
+  <label for="rf-citedm" style="{lab}">Only for metrics containing</label>
+  <input type="text" id="rf-citedm" name="cited_source_metric" value="{_esc(v["cited_source_metric"])}" maxlength="120" style="{inp}">
+  <p style="{hp}">Optional. If only some of this report&rsquo;s metrics are reprinted, type a word from their names, for example headcount. Blank means every metric.</p>
+  <p style="{lab}">Slug</p>
+  <p style="margin:0;font-size:15px;"><code>{_esc(slug)}</code></p>
+  <p style="{hp}">Can&rsquo;t be edited. The stored figures, the digest link and the next zip load all find this report by its slug.</p>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:22px;">
+    <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Save</button>
+    <a href="/admin/reader/figures" class="btn btn-ghost" style="font-size:14px;padding:9px 20px;text-decoration:none;">Cancel</a>
+  </div>
+</form>
+<p style="font-size:12.5px;color:var(--muted);margin:14px 0 0;">Source, title and year edits are kept when the figures zip is loaded again; the stored figures are never rewritten.</p>
+</div>
+</div>"""
+    return HTMLResponse(_page(f"{rep['report']}\u2014Admin", "Admin", body, authed=True), status_code=status)
+
+
+@app.get("/admin/reader/figures/{report_slug}/edit", response_class=HTMLResponse)
+async def admin_figures_edit(request: Request, report_slug: str):
+    gate = _digest_gate(request, post=False)
+    if gate is not None:
+        return gate
+    return await run_in_threadpool(lambda: _figures_edit_page(report_slug))
+
+
+@app.post("/admin/reader/figures/{report_slug}/edit", response_class=HTMLResponse)
+async def admin_figures_edit_save(request: Request, report_slug: str):
+    """Saves one report's source, title, year, landing URL and republished-from fields in one go.
+    Name fields are stored as overrides the zip loader never touches (Library.save_benchmark_report_edit)."""
     _digest_gate(request, post=True)
     form = await request.form()
-    slug = str(form.get("report_slug") or "").strip()
-    url = str(form.get("landing_url") or "").strip()
+    vals = {k: str(form.get(k) or "") for k in
+            ("source", "report", "report_year", "landing_url", "cited_source", "cited_source_metric")}
 
     def _work():
         lib = _lib()
         try:
             try:
-                ok = lib.set_report_landing_manual(slug, url)
+                changed = lib.save_benchmark_report_edit(report_slug, **vals)
             except ValueError as e:
-                return str(e), False
-            if ok:
+                return str(e), None
+            if changed:
                 _log_archive_audit(lib, request, "edit", None,
-                                   detail=f"benchmark report landing URL {'set' if url else 'cleared'}: {slug}")
-            return ("" if ok else "That report is not loaded."), ok
+                                   detail=f"benchmark report edited ({', '.join(changed)}): {report_slug}")
+            return "", changed
         finally:
             lib.close()
-    msg, ok = await run_in_threadpool(_work)
-    if not ok:
-        return _figures_page(error=msg, status=400)
-    return _figures_page(notice=_esc(f"Landing URL {'saved' if url else 'cleared'} for {slug}."))
-
-
-@app.post("/admin/reader/figures/cited-source", response_class=HTMLResponse)
-async def admin_figures_cited_source(request: Request):
-    """Sets or clears the original source a republishing report cites (optionally for one metric family).
-    Saved with its side effects: the audit log row, and the stored figures are untouched."""
-    _digest_gate(request, post=True)
-    form = await request.form()
-    slug = str(form.get("report_slug") or "").strip()
-    cited = str(form.get("cited_source") or "").strip()
-    fam = str(form.get("cited_source_metric") or "").strip()
-
-    def _work():
-        lib = _lib()
-        try:
-            try:
-                ok = lib.set_report_cited_source(slug, cited, fam)
-            except ValueError as e:
-                return str(e), False
-            if ok:
-                _log_archive_audit(lib, request, "edit", None,
-                                   detail=f"benchmark report cited source {'set to ' + cited if cited else 'cleared'}"
-                                          f"{' for ' + fam if fam else ''}: {slug}")
-            return ("" if ok else "That report is not loaded."), ok
-        finally:
-            lib.close()
-    msg, ok = await run_in_threadpool(_work)
-    if not ok:
-        return _figures_page(error=msg, status=400)
-    return _figures_page(notice=_esc(f"Cited source {'saved' if cited else 'cleared'} for {slug}."))
+    err, changed = await run_in_threadpool(_work)
+    if err:
+        return await run_in_threadpool(lambda: _figures_edit_page(report_slug, values=vals, error=err, status=400))
+    if changed is None:
+        return await run_in_threadpool(lambda: _figures_edit_page(report_slug))
+    note = ("Saved. Changed: " + ", ".join(changed) + ".") if changed else "Nothing changed."
+    return await run_in_threadpool(lambda: _figures_edit_page(report_slug, notice=note))
 
 
 @app.post("/admin/reader/figures/shift-threshold", response_class=HTMLResponse)

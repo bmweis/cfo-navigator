@@ -313,9 +313,11 @@ def test_admin_page_shows_landing_cell_and_saves_it(tmp_path, monkeypatch):
     assert c.post("/login", data={"username": "admin", "password": "pw"}, follow_redirects=False).status_code in (200, 302, 303)
     html = c.get("/admin/reader/figures").text
     assert "Landing URL" in html and "Not set" in html and "0 of 1 reports" in html
-    r = c.post("/admin/reader/figures/landing", data={"report_slug": "eb-2099", "landing_url": "https://r.example.test/x"})
-    assert r.status_code == 200 and "https://r.example.test/x" in r.text and "1 of 1 reports" in r.text
-    bad = c.post("/admin/reader/figures/landing", data={"report_slug": "eb-2099", "landing_url": "ftp://x"})
+    form = {"source": "Example Benchmarks", "report": "Report", "report_year": "2099", "cited_source": "", "cited_source_metric": ""}
+    r = c.post("/admin/reader/figures/eb-2099/edit", data={**form, "landing_url": "https://r.example.test/x"})
+    assert r.status_code == 200 and "https://r.example.test/x" in r.text
+    assert "1 of 1 reports" in c.get("/admin/reader/figures").text
+    bad = c.post("/admin/reader/figures/eb-2099/edit", data={**form, "landing_url": "ftp://x"})
     assert bad.status_code == 400 and "http" in bad.text
 
 
