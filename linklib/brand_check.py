@@ -686,6 +686,62 @@ def _plain_header_text(html: str) -> str:
     return re.sub(r"<[^>]+>|\{[^}]*\}", "", html).strip()
 
 
+# One select caret, one size (BRAND.md section 5). Every <select> gets its arrow from the single
+# sitewide `select{...}` rule in webapp/app.py's _CSS. A reason is required for each entry; empty today.
+SELECT_CARET_ALLOWLIST: dict[str, str] = {}
+
+_SEL_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+_SEL_RULE_RE = re.compile(r"([^{};]+)\{([^{}]*)\}")
+_SEL_WORD_RE = re.compile(r"(?<![\w-])select(?![\w-])", re.I)
+_SEL_CARET_PROP_RE = re.compile(r"appearance\s*:|background-image\s*:|background(?:-image)?\s*:[^;]*url\(", re.I)
+_SEL_TAG_RE = re.compile(r"<select\b[^>]*>", re.I)
+_SEL_STYLE_RE = re.compile(r'style\s*=\s*"([^"]*)"|style\s*=\s*\'([^\']*)\'', re.I)
+
+
+def select_caret_problems(src: str) -> list[str]:
+    """Anything that gives a `<select>` its own arrow instead of the shared one.
+
+    **Flagged:** (1) a CSS rule whose selector names `select` and whose body sets `appearance`,
+    `background-image` or a `url(...)` background, other than the one shared rule (selector exactly
+    `select` or `select:disabled`, body using `--select-caret-img`); (2) an inline `<select ... style=...>`
+    carrying any of those properties; (3) the shared rule or the `--select-caret-size` token missing.
+    Entries in `SELECT_CARET_ALLOWLIST` (keyed by the selector or `inline:<name>`) are skipped.
+
+    **Not caught:** a select built by JavaScript from pieces that never put the style and the tag in one
+    string, a rule assembled by string concatenation, and controls that are not `<select>` elements.
+    """
+    problems: list[str] = []
+    # f-string literals double their braces; fold them so CSS inside an f-string scans like plain CSS.
+    text = src.replace("{{", "{").replace("}}", "}")
+    css = _SEL_CSS_COMMENT_RE.sub("", text)
+    shared_ok = False
+    for m in _SEL_RULE_RE.finditer(css):
+        # A selector never contains a tag; drop HTML lines that run into the rule from the text above it.
+        sel = " ".join(l.strip() for l in m.group(1).split("\n") if l.strip() and "<" not in l).strip()
+        body = m.group(2)
+        if not _SEL_WORD_RE.search(sel) or not _SEL_CARET_PROP_RE.search(body):
+            continue
+        if sel in ("select", "select:disabled") and "--select-caret-img" in body:
+            if sel == "select":
+                shared_ok = True
+            continue
+        if sel in SELECT_CARET_ALLOWLIST:
+            continue
+        line = css[:m.start()].count("\n") + 1
+        problems.append(f"rule '...{sel[-50:]}' draws its own select arrow (near line {line})")
+    if not shared_ok:
+        problems.append("the shared `select{...}` caret rule is missing")
+    if "--select-caret-size:" not in css:
+        problems.append("the --select-caret-size token is missing")
+    for m in _SEL_TAG_RE.finditer(text):
+        for sm in _SEL_STYLE_RE.finditer(m.group(0)):
+            style = sm.group(1) or sm.group(2) or ""
+            if _SEL_CARET_PROP_RE.search(style) and "inline:select" not in SELECT_CARET_ALLOWLIST:
+                line = text[:m.start()].count("\n") + 1
+                problems.append(f"inline <select> style draws its own arrow (line {line})")
+    return problems
+
+
 def actions_header_problems(src: str) -> list[str]:
     """Table headers that break the "Actions" rule.
 

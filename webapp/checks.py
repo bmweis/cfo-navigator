@@ -721,6 +721,13 @@ def run_all() -> list[dict]:
         "detail": "; ".join(ah[:6]) if ah
                   else "Every table header is named, and every button column in view of the scan is headed Actions."})
 
+    sc = _tasks.cached_static_check("select_caret", lambda: brand_check.select_caret_problems(src))
+    results.append({
+        "name": "Select caret is the shared style", "where": "Live + CI", "ok": not sc,
+        "what": "Every dropdown draws its arrow from the one shared rule and size token; no select styles its own.",
+        "detail": "; ".join(sc[:6]) if sc
+                  else "No select rule or inline style draws its own arrow."})
+
     from webapp.app import _CSS as _app_css
     # Cached (2026-09): both halves are pure functions of on-disk source —
     # table_override_problems specifically is ~6.3s of run_all()'s ~15s
