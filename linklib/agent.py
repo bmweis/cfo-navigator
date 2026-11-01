@@ -1054,6 +1054,11 @@ def answer_question(
             fresh = [h for h in hits if h.get("id") not in taken]
             if sub.intent == "definition":
                 fresh.sort(key=lambda h: h.get("published_at") or "", reverse=True)   # newest definition first
+            # A part that already holds stored figures needs fewer articles than one that does not (the
+            # "rest of the question" part has no figures, so its articles are its only source).
+            allow = _bp.hit_allowance(sub, settings["max_library"])
+            sub.hits_left_out = max(len(fresh) - allow, 0)
+            fresh = fresh[:allow]
             taken.update(h.get("id") for h in fresh)
             sub.library_hits = len(fresh)
             b, sd = _build_source_documents(fresh, [], None, source_chars=source_chars, global_chars=global_chars)

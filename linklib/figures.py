@@ -829,6 +829,13 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
             # rule too: a dollar-amount "S&M expense" is not a percent-of-revenue figure.
             cand = [(r, c) for r, c in cand
                     if c or expense_line_of(r["metric"], r["denominator"], r["unit"])]
+    if metric in SHAPE_LABELS:
+        for r in shape_candidates(lib, metric):
+            if r["id"] not in seen_ids:
+                seen_ids.add(r["id"])
+                cand.append((r, ""))
+        # Cost of revenue comes in revenue and ARR forms: grouped by basis like the expense families.
+        family_mode = family_mode or metric == COGS_FAMILY_LABEL
     basis_ask = asked_basis(f"{metric} {basis_hint}", denominator) if family_mode else ""
     if not cand:
         for r in _fts_metric_rows(lib, metric):
@@ -882,7 +889,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
             if basis_ask and g not in (basis_ask, "unstated"):
                 r["other_basis"] = True
                 r["gaps"].append(f"other basis: this figure is stated {BASIS_LABELS[g]}; you asked {BASIS_LABELS[basis_ask]}")
-            elif g == "unstated":
+            elif g == "unstated" and not is_gross_margin_row(r):
                 r["gaps"].append("basis not stated: the report does not say whether this is a percent of revenue or of ARR")
         present = sorted({r["basis_group"] for r in rows}, key=lambda g: rank_map[g])
         groups_out = [{"basis": g, "label": BASIS_LABELS[g], "asked": g == basis_ask,
@@ -1484,6 +1491,100 @@ def detect_expense_families(text: str) -> list[str]:
         if f in FAMILY_LABELS and f != "opex" and FAMILY_LABELS[f] not in out:
             out.append(FAMILY_LABELS[f])
     return out
+
+
+# --- org structure and spend profile shapes (2026-11) ------------------------------
+#
+# "Org structure" means total FTE plus headcount by function. "Spend profile" means operating
+# expenses by function plus cost of revenue (COGS) and gross margin. Each is one lookup term
+# (a label, not a stored name) so the four-part cap holds; the rows are found by RULES on the
+# stored name, like the expense families, never by a hand-filled list. Cost of revenue is
+# returned as printed. Gross margin is its own row. Neither is ever computed from the other.
+
+HEADCOUNT_FAMILY_LABEL = "Headcount by function"
+COGS_FAMILY_LABEL = "Cost of revenue and gross margin"
+SHAPE_LABELS = (HEADCOUNT_FAMILY_LABEL, COGS_FAMILY_LABEL)
+
+_ORG_PHRASE = re.compile(
+    r"\borg(?:aniz[a-z]*)?\s+(?:structure|chart)\b|\bteam\s+structure\b|\bheadcount\s+mix\b"
+    r"|\bheadcount\s+by\s+(?:function|department|team)\b")
+_SPEND_PHRASE = re.compile(
+    r"\bspend\s+profile\b|\bcost\s+structure\b|\bexpense\s+profile\b|\bopex\s+and\s+cogs\b|\bcogs\s+and\s+opex\b")
+
+_HC_FUNCTION_WORDS = {_stem(w) for w in (
+    "engineering", "eng", "rd", "product", "sales", "sm", "marketing", "customer", "success", "support", "cs",
+    "ga", "finance", "operations", "other", "people", "hr", "services", "professional", "implementation", "admin")}
+_HC_WORDS = {_stem(w) for w in (
+    "employees", "total", "percent", "pct", "percentage", "count", "number", "mix", "function", "functions",
+    "department", "departments", "team", "teams", "full", "time", "part", "share")}
+_COGS_PHRASE = re.compile(r"\bcogs\b|cost\s+of\s+(?:revenue|goods\s+sold|sales|subscription|services?)|\bhosting\b|\bcost\s+of\s+revenues?\b")
+_GM_PHRASE = re.compile(r"gross\s+(?:profit\s+)?margin")
+_COGS_WORDS = {_stem(w) for w in (
+    "subscription", "services", "service", "professional", "support", "customer", "hosting", "percent", "pct",
+    "percentage", "revenue", "arr", "total", "gaap", "cost", "costs", "cogs", "goods", "sold", "sales",
+    "recurring", "expense", "expenses", "margin", "gross", "profit", "infrastructure", "cloud")}
+
+
+def detect_shape_terms(text: str) -> list[str]:
+    """Lookup terms for the question shapes: "org structure" adds Headcount by function; "spend
+    profile" adds operating expenses by function and cost of revenue. Headcount first. Rules only.
+    Bare "spend" is not a trigger: a function's spend already has its own family rule."""
+    low = _lc(text)
+    out: list[str] = []
+    if _ORG_PHRASE.search(low):
+        out.append(HEADCOUNT_FAMILY_LABEL)
+    if _SPEND_PHRASE.search(low):
+        out += [BY_FUNCTION_LABEL, COGS_FAMILY_LABEL]
+    return out
+
+
+def headcount_family_row(name: str) -> bool:
+    """True for a stored name that is a headcount count or mix: total employees, or a function's
+    headcount or share of headcount. A ratio (ARR per FTE), a growth or attrition measure, or
+    anything with a word outside the whitelist is not."""
+    toks = _sig_tokens(_PAREN.sub(" ", name or ""))
+    if _stem("employees") not in toks:
+        return False
+    return all(t in _HC_WORDS or t in _HC_FUNCTION_WORDS for t in toks)
+
+
+def cogs_family_row(name: str, denominator: str = "", unit: str = "") -> str:
+    """"cogs", "gross_margin" or "" for a stored row: a cost-of-revenue line (total, subscription,
+    services, hosting) or gross margin, in a percent form."""
+    low = _lc(_PAREN.sub(" ", name or ""))
+    kind = "gross_margin" if _GM_PHRASE.search(low) else ("cogs" if _COGS_PHRASE.search(low) else "")
+    if not kind:
+        return ""
+    toks = _sig_tokens(low)
+    if any(t not in _COGS_WORDS for t in toks):
+        return ""
+    if not (_PCT_NAME.search(low) or denominator_basis(denominator, name) or _PCT_NAME.search(_lc(unit))):
+        return ""
+    d = _lc(denominator)
+    if d and not denominator_basis(d) and not _PCT_NAME.search(d):
+        return ""
+    return kind
+
+
+def shape_candidates(lib, label: str) -> list[dict]:
+    """Every stored row that belongs to a shape label."""
+    pairs = lib.conn.execute("SELECT DISTINCT metric, denominator, unit FROM benchmark_figures").fetchall()
+    if label == HEADCOUNT_FAMILY_LABEL:
+        good = [(p[0], p[1], p[2]) for p in pairs if headcount_family_row(p[0])]
+    elif label == COGS_FAMILY_LABEL:
+        good = [(p[0], p[1], p[2]) for p in pairs if cogs_family_row(p[0], p[1], p[2])]
+    else:
+        return []
+    out: list[dict] = []
+    for m, d, u in good:
+        for r in lib.conn.execute(
+                "SELECT * FROM benchmark_figures WHERE metric = ? AND denominator = ? AND unit = ?", (m, d, u)):
+            out.append(dict(r))
+    return out
+
+
+def is_gross_margin_row(row: dict) -> bool:
+    return bool(_GM_PHRASE.search(_lc(row.get("metric") or "")))
 
 
 def basis_group_of(row: dict) -> str:
