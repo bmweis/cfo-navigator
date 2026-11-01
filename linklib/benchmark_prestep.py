@@ -138,6 +138,8 @@ class Sub:
     candidates: list = field(default_factory=list, repr=False)   # rows found, before the caps
     capped_rows: int = 0                 # candidates left out by the row cap (oldest, least close first)
     fetch_cut: int = 0                   # rows the per-metric fetch limit cut (oldest first)
+    also_stored: list = field(default_factory=list, repr=False)  # stored rows gather() chose not to send (less close)
+    documents: list = field(default_factory=list)                # [{"title", "rows"}] one per figures document sent
 
 
 @dataclass
@@ -183,6 +185,7 @@ class Prestep:
                       "rows_capped": s.capped_rows + s.fetch_cut, "history": s.history,
                       "editions_left_out": next((n for n in s.notes if n.startswith(WINDOW_NOTE_PREFIX)), ""),
                       "illustrative_left_out": s.illustrative_left_out, "segment_dropped": s.segment_dropped,
+                      "documents": s.documents,
                       "match_mix": s.match_mix} for s in self.subs],
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
             "remaining_usd": None if self.remaining_usd is None else round(self.remaining_usd, 4),
@@ -522,17 +525,38 @@ def _row_line(r: dict) -> str:
     return " | ".join(parts) + " | " + tag
 
 
-def _figure_docs(rows: list[dict], budget: int, reports: dict) -> tuple[list[dict], int]:
+def _row_identity(r: dict) -> tuple:
+    return (r["report_slug"], _norm(r["source"]), _norm(r["report"]), _norm(r["report_year"]))
+
+
+def _doc_title(r: dict) -> str:
+    """"<Source>, <Report> (<year>)", built only from the row's own fields."""
+    who = (r["source"] or "").strip()
+    title = ", ".join(x for x in (who, r["report"]) if x) or r["report"]
+    if r["report_year"]:
+        title += f" ({r['report_year']})"
+    return title
+
+
+def _figure_docs(rows: list[dict], budget: int, reports: dict, included: set | None = None) -> tuple[list[dict], int]:
     """One Citations-API document per report, rows in match order, inside a
     character budget. Returns (docs, rows_left_out). Left-out rows are named in
-    the last document, never dropped silently."""
-    by_report: dict[str, list[dict]] = {}
+    the last document, never dropped silently. `included` (if given) receives the
+    figure_key of every row that made it into a document.
+
+    A document's title comes only from its own rows: rows are grouped by report_slug AND the
+    source, report and year each row prints. A file whose rows print a different publisher than
+    the file's first row (the loader notes "source differs across rows") therefore gets a
+    document of its own, titled by what those rows print, and no link (the link belongs to the
+    report record, which is a different report): such rows are cited by name."""
+    by_report: dict[tuple, list[dict]] = {}
     for r in rows:
-        by_report.setdefault(r["report_slug"], []).append(r)
+        by_report.setdefault(_row_identity(r), []).append(r)
     docs: list[dict] = []
     used = 0
     left_out = 0
-    for slug, grp in by_report.items():
+    for ident, grp in by_report.items():
+        slug = ident[0]
         head = grp[0]
         lines = [FIGURES_HEADER, f"Metric: {', '.join(sorted({g['metric'] for g in grp}))}"]
         kept = 0
@@ -541,6 +565,8 @@ def _figure_docs(rows: list[dict], budget: int, reports: dict) -> tuple[list[dic
             if used + sum(len(x) for x in lines) + len(line) > budget and kept:
                 break
             lines.append(line)
+            if included is not None:
+                included.add((g["report_slug"], g["figure_key"]))
             kept += 1
         left_out += len(grp) - kept
         if len(grp) > kept:
@@ -548,22 +574,26 @@ def _figure_docs(rows: list[dict], budget: int, reports: dict) -> tuple[list[dic
         rep = reports.get(slug, {})
         # Titled "<Source>, <Report> (<year>)" so the model names the publisher in its own
         # sentences. The citation carries `figures` (the Go deeper line keys off it, not the title).
-        who = (head["source"] or "").strip()
-        title = ", ".join(x for x in (who, head["report"]) if x) or head["report"]
-        if head["report_year"]:
-            title += f" ({head['report_year']})"
-        if not head["link"]:
+        title = _doc_title(head)
+        link = head["link"]
+        # The rows print a different publisher or report than the report record they are stored under.
+        # The record's link would send the reader to the wrong report, so it is not used.
+        if rep and (_norm(rep.get("source")) != ident[1] or _norm(rep.get("report")) != ident[2]):
+            link = ""
+            lines.insert(1, f"These rows print {title} but are stored with {rep.get('source', '')}, {rep.get('report', '')}. "
+                            "Cite the publisher and report these rows print.")
+        if not link:
             lines.insert(1, "No link on file for this report. Cite it by name.")
         body = "\n".join(lines)
         used += len(body)
-        sent = {"title": title, "url": head["link"], "type": "library", "figures": True,
+        sent = {"title": title, "url": link, "type": "library", "figures": True,
                 "label": make_label(source=head["source"], title=head["report"], year=head["report_year"],
-                                    url=head["link"], kind="report")}
-        if rep.get("article_id"):
+                                    url=link, kind="report")}
+        if rep.get("article_id") and link:
             sent["article_id"] = rep["article_id"]
-        docs.append({"title": title, "body": body, "sent": sent})
+        docs.append({"title": title, "body": body, "sent": sent, "rows": kept})
         if used >= budget:
-            rest = [g for s2, g2 in list(by_report.items())[len(docs):] for g in g2]
+            rest = [g for k2, g2 in list(by_report.items())[len(docs):] for g in g2]
             left_out += len(rest)
             break
     return docs, left_out
@@ -615,9 +645,22 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
     if len(rows) <= cap:
         return rows
     chosen: list[int] = []
+    # Total headcount first: one row per publisher edition (newest first), the median-ranked, all-segments
+    # row of it, so a part full of function-mix rows never crowds the total out. At most half the cap.
+    best: dict[tuple, int] = {}
+    for i, r in enumerate(rows):
+        if fg.is_total_fte_row(r):
+            ed = (_norm(r["source"]), _norm(r["report"]), _norm(r["report_year"]))
+            if ed not in best or (_norm(r["segment"]) in ("all", "") and _norm(rows[best[ed]]["segment"]) not in ("all", "")):
+                best[ed] = i
+    reserved = sorted(best.values(), key=lambda i: (-fg._year_num(rows[i]["report_year"]), i))[:max(cap // 2, 1)]
+    chosen += reserved
     seen_src: set = set()
     seen_basis: set = set()
     for i, r in enumerate(rows):
+        if i in chosen:
+            seen_src.add(_norm(r["source"]))
+            continue
         src, basis = _norm(r["source"]), r.get("basis_group") or ""
         if src not in seen_src or (basis and basis not in seen_basis):
             seen_src.add(src)
@@ -721,14 +764,16 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
     # Closest match first, then newest edition first across ALL the sub-query's metrics. Always
     # newest first, change over time included: oldest first let a long run of old editions use up
     # the cap and the character budget before the newest ones (the 2025 rows never reached the model).
+    wants = fg.statistic_wants(sub.text)
     rows.sort(key=lambda r: (r.get("basis_rank", 0), fg._MATCH_RANK[r["match"]], r.get("band_context", False),
-                             fg._has_sample_size(r),
+                             fg._has_sample_size(r), fg.statistic_rank(r["statistic"], wants),
                              -fg._year_num(r["report_year"]), r["source"]))
     # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
     # segment, statistic, basis or a related metric) are sent only when nothing closer
     # exists, at most RELATED_CAP, and the notes say so.
     close = [r for r in rows if r["match"] in CLOSE_MATCHES]
     if close and len(close) < len(rows):
+        sub.also_stored += [r for r in rows if r["match"] not in CLOSE_MATCHES]
         sub.notes.append(f"{len(rows) - len(close)} less-close stored figures (another segment, statistic, "
                          "basis or a related metric) were not sent because closer matches exist.")
         rows = close
@@ -738,9 +783,60 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
         cap = RELATED_METRIC_CAP if all(r["match"] == "related_metric" for r in rows) else RELATED_CAP
         if len(rows) > cap:
             sub.notes.append(f"{len(rows) - cap} further less-close figures were not sent.")
+            sub.also_stored += rows[cap:]
             rows = rows[:cap]
     sub.candidates = rows
 
+
+
+# --- line-item status: shown, left out, or not printed -----------------------------------
+
+STATUS_CAP = 16
+
+
+def _item_key(r: dict) -> tuple:
+    """The line item a row is: an expense function (S&M, R&D, ...) or the metric's name family."""
+    line = fg.expense_line_of(r["metric"], r["denominator"], r["unit"])
+    return ("line", line) if line else ("name", fg.name_key(r["metric"]) or frozenset({_norm(r["metric"])}))
+
+
+def status_notes(candidates: list[dict], also_stored: list[dict], sent: set) -> list[str]:
+    """For each report and line item in a part, one of three states, so the answer's table cells
+    can say the true thing: shown (a row was sent), left out (stored rows exist but were cut by the
+    row cap, the document length or the less-close filter) or not printed (no stored row for that
+    report, line item and size). Only the left-out and not-printed cells are listed; a part where
+    every cell is shown adds nothing."""
+    reports: dict[str, str] = {}
+    items: dict[tuple, str] = {}
+    stored: dict[tuple, int] = {}
+    shown: dict[tuple, int] = {}
+    for r in list(candidates) + list(also_stored):
+        slug = r["report_slug"]
+        reports.setdefault(slug, _doc_title(r))
+        k = _item_key(r)
+        items.setdefault(k, r["metric"])
+        stored[(slug, k)] = stored.get((slug, k), 0) + 1
+        if (slug, r["figure_key"]) in sent:
+            shown[(slug, k)] = shown.get((slug, k), 0) + 1
+    if len(items) < 2 and len(reports) < 2:
+        return []
+    cells = []
+    for slug, title in reports.items():
+        for k, label in items.items():
+            n, sh = stored.get((slug, k), 0), shown.get((slug, k), 0)
+            if sh:
+                continue
+            if n:
+                cells.append(f"{label} / {title}: left out ({n} more row{'s' if n != 1 else ''} stored, not sent). "
+                             "Write \"left out\" and cite the report. Never write \"not printed\".")
+            else:
+                cells.append(f"{label} / {title}: not printed (no stored row at this size).")
+    if not cells:
+        return []
+    more = len(cells) - STATUS_CAP
+    cells = cells[:STATUS_CAP] + ([f"({more} more cells in the same state, not listed.)"] if more > 0 else [])
+    return ["Line-item status by report. A table cell or sentence follows this exactly; every line item and report not listed "
+            "here was shown above:"] + ["  " + c for c in cells]
 
 def build(lib, sub: Sub, tier: str, reports: dict, row_cap: int) -> None:
     """Apply the row cap, build the figure documents and the definition cards. Reads only."""
@@ -754,9 +850,12 @@ def build(lib, sub: Sub, tier: str, reports: dict, row_cap: int) -> None:
     for r in rows:
         sub.match_mix[r["match"]] = sub.match_mix.get(r["match"], 0) + 1
     if rows:
-        docs, left = _figure_docs(rows, FIGURES_CHARS.get(tier, 9000), reports)
+        included: set = set()
+        docs, left = _figure_docs(rows, FIGURES_CHARS.get(tier, 9000), reports, included)
         sub.docs += docs
+        sub.documents = [{"title": d["title"], "rows": d.get("rows", 0)} for d in docs]
         sub.truncated_rows = left
+        sub.notes += status_notes(sub.candidates, sub.also_stored, included)
         if left:
             sub.notes.append(f"{left} matching figures were left out for length; ask a narrower question for them.")
     if sub.intent == "definition":

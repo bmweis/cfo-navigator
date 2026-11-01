@@ -1421,7 +1421,7 @@ Like color, voice has two kinds of rules:
 
 - **Mechanical** (deterministic) — banned buzzwords (*delve, robust, seamless, synergy, transformative,
   game-changer*), filler (*"at the end of the day", "in order to", "needless to say", "there are many
-  factors to consider"*), and performative openers/closers (*"thrilled to", "Onward!", "excited for
+  factors to consider", "rule of thumb"*), and performative openers/closers (*"thrilled to", "Onward!", "excited for
   what's next"*). The rules live in `linklib/voice_review.py` (`BANNED_WORDS` / `FILLER_PHRASES` /
   `PERFORMATIVE`) as the single source of truth, **permanently** — decided and closed (2026-09
   voice-enforcement PR): a DB-editable copy of these lists is what would let `voice_review.py`

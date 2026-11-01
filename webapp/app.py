@@ -33637,7 +33637,11 @@ def _prestep_report_html(r: dict) -> str:
         f', {s.get("cards", 0)} cards, {s.get("library_hits", 0)} articles'
         f'{", " + str(s["figure_rows_left_out"]) + " left out (oldest and least close first)" if s.get("figure_rows_left_out") else ""}'
         f'{" · history: " + _esc(s["history"]) if s.get("history") else ""}'
-        f'{" · " + _esc(s["editions_left_out"]) if s.get("editions_left_out") else ""}</li>'
+        f'{" · " + _esc(s["editions_left_out"]) if s.get("editions_left_out") else ""}'
+        + ("<ul style=\"margin:2px 0 0;padding-left:16px;\">" + "".join(
+            f'<li>document: {_esc(x.get("title", ""))}: {int(x.get("rows", 0))} row{"" if int(x.get("rows", 0)) == 1 else "s"}</li>'
+            for x in s.get("documents") or []) + "</ul>" if s.get("documents") else "")
+        + '</li>'
         for s in d.get("subs") or [])
     extras = ""
     if d.get("notice"):

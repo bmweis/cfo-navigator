@@ -44,6 +44,8 @@ FILLER_PHRASES = [
     # to catch a rubric promising a rejection the mechanical lists don't
     # enforce. See that function's docstring.
     "there are many factors to consider",
+    # Added 2026-11 (Brian's word choice): the word is "heuristic".
+    "rule of thumb",
 ]
 PERFORMATIVE = [
     "i'm excited to share", "i am excited to share", "thrilled to",
