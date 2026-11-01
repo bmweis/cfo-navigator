@@ -663,11 +663,27 @@ def _year_num(y) -> int:
     return int(m.group()) if m else -1
 
 
+def mark_period_gap(rows: list[dict]) -> None:
+    """Set r["period_gap"]: how many years the row's data period is behind the newest data period
+    of the SAME report (0 = newest, or unreadable). Within a report the newest period ranks first
+    ("FY2025" before "FY2024"); across reports every report's newest period ties."""
+    newest: dict[str, int] = {}
+    for r in rows:
+        y = _year_num(r.get("data_period"))
+        if y > 0:
+            newest[r["report_slug"]] = max(newest.get(r["report_slug"], -1), y)
+    for r in rows:
+        y = _year_num(r.get("data_period"))
+        r["period_gap"] = (newest[r["report_slug"]] - y) if (y > 0 and r["report_slug"] in newest) else 0
+
+
 # The recent window for an over-time question ("how has it changed over the past few years").
-# Per publisher and report family: the newest edition on file always, plus earlier editions up to
-# EDITION_WINDOW_COUNT in all, none more than EDITION_WINDOW_YEARS before the newest edition on
-# file for the metric. "since 2015" replaces the year cutoff and the count; "historically" and
-# "all editions" turn the window off (find_figures(all_editions=True) alone).
+# One cutoff for the metric: editions more than EDITION_WINDOW_YEARS before the newest edition on
+# file (any publisher) are left out for EVERY publisher, including one whose only edition is old; at
+# most EDITION_WINDOW_COUNT editions are kept per publisher and report family, newest first.
+# "since 2015" replaces the year cutoff and the count; "historically" and "all editions" turn the
+# window off (find_figures(all_editions=True) alone). Left-out editions are named in the note.
+# If the cutoff would leave nothing, the newest edition of each family is kept and the note says so.
 EDITION_WINDOW_COUNT = 4
 EDITION_WINDOW_YEARS = 5
 
@@ -688,11 +704,17 @@ def apply_edition_window(rows: list[dict], from_year: int | None = None) -> tupl
                 by_family[_family(r)].append(y)
     keep_years: dict[tuple, set] = {}
     for fam, ys in by_family.items():
-        ys = sorted(ys, reverse=True)
-        keep = {ys[0]} | {y for y in ys[1:] if y >= cutoff}
+        keep = {y for y in ys if y >= cutoff}
         if not from_year:
             keep = set(sorted(keep, reverse=True)[:EDITION_WINDOW_COUNT])
         keep_years[fam] = keep
+    fallback = ""
+    if not any(keep_years.values()):
+        # Nothing is inside the window: use the newest edition on file for each family, and say so.
+        keep_years = {fam: {max(ys)} for fam, ys in by_family.items()}
+        fallback = ("No edition on file falls inside the recent window"
+                    + (f" (since {from_year})" if from_year else "")
+                    + "; the newest edition on file is used instead. Say so plainly.")
     kept, dropped = [], set()
     for r in rows:
         y = _year_num(r["report_year"])
@@ -700,11 +722,12 @@ def apply_edition_window(rows: list[dict], from_year: int | None = None) -> tupl
             kept.append(r)
         else:
             dropped.add((r["report"], r["report_year"]))
-    note = ""
+    note = fallback
     if dropped:
-        note = ("Older editions outside the recent window were left out: "
-                + "; ".join(f"{n} ({y})" for n, y in sorted(dropped, key=lambda t: (-_year_num(t[1]), t[0])))
-                + ". Ask \"since <year>\" or \"historically\" for them.")
+        note += (" " if note else "") + (
+            "Older editions outside the recent window were left out: "
+            + "; ".join(f"{n} ({y})" for n, y in sorted(dropped, key=lambda t: (-_year_num(t[1]), t[0])))
+            + ". Ask \"since <year>\" or \"historically\" for them.")
     return kept, note
 
 
@@ -1085,8 +1108,10 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
 
     # Newest edition first, always: when a cap cuts rows it cuts the oldest.
     wants = statistic_wants(f"{metric} {basis_hint}")
+    mark_period_gap(rows)
     rows.sort(key=lambda r: (r["basis_rank"], _MATCH_RANK[r["match"]], r["band_context"],
                              _has_sample_size(r),   # a survey that states its sample before a guide that does not
+                             r["period_gap"],       # within a report, the newest data period first (FY2025 before FY2024)
                              statistic_rank(r["statistic"], wants),   # median first, extremes last (a cap cuts the last)
                              -_year_num(r["report_year"]),
                              r["source"], r["report"], r["band_basis"],

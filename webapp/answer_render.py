@@ -73,6 +73,21 @@ def _inline(s: str, cites: list[dict], scope: str = "") -> str:
 
 
 _TABLE_ROW = re.compile(r"^\|.*\|$")
+# A citation marker written after a row's closing pipe ("| 72% | FY2025 |[1]") would make the row
+# plain text. The marker is moved into the row's last cell, so the row stays a row.
+_MARKER_AFTER_ROW = re.compile(r"^(\|.*?)\s*\|\s*((?:\[\d{1,2}\]\s*)+)$")
+# A line holding only invisible characters is a blank line, never an empty paragraph.
+_INVISIBLE = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff\u00a0]")
+
+
+def move_row_markers(line: str) -> str:
+    t = line.strip()
+    if not t.startswith("|"):
+        return line
+    m = _MARKER_AFTER_ROW.match(t)
+    if not m:
+        return line
+    return f"{m.group(1)} {m.group(2).strip()} |"
 _TABLE_SEP_CELL = re.compile(r"^:?-{1,}:?$")
 
 
@@ -135,10 +150,10 @@ def render_answer_markdown(text: str, cites: list[dict] | None = None, scope: st
             out.append("<p>" + "<br>".join(para) + "</p>")
             para = []
 
-    lines = (text or "").split("\n")
+    lines = [move_row_markers(x) for x in (text or "").split("\n")]
     i = 0
     while i < len(lines):
-        t = lines[i].strip()
+        t = _INVISIBLE.sub("", lines[i]).strip() if not lines[i].strip().startswith("|") else lines[i].strip()
         tbl = _try_table(lines, i, cites, scope) if t.startswith("|") else None
         if tbl:
             flush_para(); close_list()

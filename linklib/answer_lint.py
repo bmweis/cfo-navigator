@@ -76,9 +76,16 @@ def _numbers_near(words: list[str], start: int, end: int) -> bool:
     return any(_NUMBER.search(w) for w in words[lo:start] + words[end:hi])
 
 
+_ROW_MARKER_AFTER_PIPE = re.compile(r"^\s*\|.*\|\s*(?:\[\d{1,2}\]\s*)+$")
+
+
 def lint_answer(text: str) -> list[dict]:
     """[{phrase, snippet}] for each likely breach; [] for a clean answer."""
     flags: list[dict] = []
+    # A citation marker after a table row's closing pipe breaks the row in a renderer that does not repair it.
+    for line in (text or "").split("\n"):
+        if _ROW_MARKER_AFTER_PIPE.match(line):
+            flags.append({"phrase": "marker after table row", "snippet": line.strip()[:200]})
     for sent in _SENTENCE.split(text or ""):
         sent = sent.strip()
         if not sent:
