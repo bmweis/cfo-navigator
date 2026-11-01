@@ -46,7 +46,7 @@ def register_figures_tools(mcp: FastMCP, lib_factory: Callable[[], Library]) -> 
         different_definition or related_metric) and `gaps`, the plain-words
         list of how it differs from the request. A size between printed bands
         returns the bands either side, flagged. Default is the newest edition
-        per publisher; `all_editions=True` returns every edition, oldest first.
+        per publisher; `all_editions=True` returns every edition, newest first (a cap cuts the oldest). `recent_window=True` limits that to the newest edition per publisher plus up to three earlier ones within five years; `from_year` limits it to editions from that year.
         `notes` says what was left out. For a function's spend (S&M, R&D, G&A, customer
         success, opex by function) the percent-of-revenue and percent-of-ARR forms come back
         together: each row has `basis_group` and `other_basis`, `groups` lists them, the asked

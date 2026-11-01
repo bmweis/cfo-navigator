@@ -69,7 +69,7 @@ from starlette.concurrency import run_in_threadpool
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 
-from linklib import compare, gates, homepage_status as _hs, tool_labels
+from linklib import compare, display_time as _display_time, gates, homepage_status as _hs, tool_labels
 from linklib.citations import citation_problem
 from linklib.db import DuplicateURLError, Library, normalize_url
 from linklib.voice_mechanics import norm_for_compare
@@ -33572,12 +33572,16 @@ def _stripped_html(r: dict) -> str:
         return ""
     if not items:
         return ""
-    removed = [i for i in items if i.get("action") == "removed"]
+    removed = [i for i in items if i.get("action") in ("removed", "clause_removed")]
+    clauses = sum(1 for i in removed if i.get("action") == "clause_removed")
     kept = len(items) - len(removed)
-    head = (f"{len(removed)} sentence{'s' if len(removed) != 1 else ''} removed" if removed else
+    head = (f"{len(removed)} sentence{'s' if len(removed) != 1 else ''} removed"
+            + (f" ({clauses} cut back to its figure clause)" if clauses else "") if removed else
             f"{kept} flagged sentence{'s' if kept != 1 else ''} kept (answer too short to strip)")
-    lis = "".join(f'<li><b>{_esc(i.get("pattern", ""))}</b> ({_esc(i.get("action", ""))}): {_esc(i.get("sentence", ""))}</li>'
-                  for i in items)
+    lis = "".join(
+        f'<li><b>{_esc(i.get("pattern", ""))}</b> ({_esc(i.get("action", ""))}): {_esc(i.get("sentence", ""))}'
+        + (f' <span style="color:var(--muted);">Kept: {_esc(i.get("kept", ""))}</span>' if i.get("kept") else "") + '</li>'
+        for i in items)
     return (f'<details style="margin-top:4px;font-size:12px;color:var(--ink-soft);"><summary style="cursor:pointer;">'
             f'{head}</summary><ul style="margin:6px 0 0;padding-left:18px;">{lis}</ul></details>')
 
@@ -33631,7 +33635,9 @@ def _prestep_report_html(r: dict) -> str:
         f': {s.get("figure_rows", 0)} figure rows'
         f'{" (" + _esc(", ".join(f"{k} {v}" for k, v in sorted((s.get("match_mix") or {}).items()))) + ")" if s.get("match_mix") else ""}'
         f', {s.get("cards", 0)} cards, {s.get("library_hits", 0)} articles'
-        f'{", " + str(s["figure_rows_left_out"]) + " left out for length" if s.get("figure_rows_left_out") else ""}</li>'
+        f'{", " + str(s["figure_rows_left_out"]) + " left out (oldest and least close first)" if s.get("figure_rows_left_out") else ""}'
+        f'{" · history: " + _esc(s["history"]) if s.get("history") else ""}'
+        f'{" · " + _esc(s["editions_left_out"]) if s.get("editions_left_out") else ""}</li>'
         for s in d.get("subs") or [])
     extras = ""
     if d.get("notice"):
@@ -33667,7 +33673,8 @@ def admin_ask_report(request: Request, user: str = ""):
         month_cost = lib.ask_cost_total(user_id=filter_user_id, since=month_start)
         users = lib.list_users()
         strip_turns = lib.conn.execute(
-            "SELECT COUNT(*) FROM ask_questions WHERE stripped_json LIKE '%\"removed\"%'").fetchone()[0]
+            "SELECT COUNT(*) FROM ask_questions WHERE stripped_json LIKE '%removed\"%'").fetchone()[0]
+        tz_name = _display_time.zone_for(lib.get_setting(_display_time.SETTING_KEY))[1]
     finally:
         lib.close()
 
@@ -33696,7 +33703,7 @@ def admin_ask_report(request: Request, user: str = ""):
         dur = (f'<div style="font-size:11px;font-weight:400;color:{"var(--alert)" if _ms >= 60000 else "var(--muted)"};white-space:nowrap;">'
                f'{_ms / 1000:.1f}s</div>') if _ms else ""
         return f"""<tr class="turn-row"{attrs}>
-  <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])}</td>
+  <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(_display_time.local_stamp(r["created_at"], tz_name))}</td>
   <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(r))}</td>
   <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}{failed}{lookup}</td>
   <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
@@ -33716,7 +33723,7 @@ def admin_ask_report(request: Request, user: str = ""):
                          for t in turns if t.get("model")})
         q = (first.get("question") or "")[:160]
         return f"""<tr onclick="toggleConvo('{_esc(gid)}')" style="cursor:pointer;">
-  <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])}</td>
+  <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(_display_time.local_stamp(first["created_at"], tz_name))}</td>
   <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(first))}</td>
   <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(first.get("question") or "") > 160 else ''}
     <span id="chip-{_esc(gid)}" style="margin-left:8px;font-size:11px;font-weight:700;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:2px 10px;white-space:nowrap;"><span class="disclosure-caret" style="font-size:10px;">&#9654;</span> {len(turns)} turns</span></td>
@@ -33770,11 +33777,18 @@ def admin_ask_report(request: Request, user: str = ""):
   </select>
   <a href="/admin/fpa-buddy/report/export.csv{('?user=' + quote(user)) if user else ''}" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;margin-left:auto;">Download CSV &darr;</a>
 </form>
+<form method="post" action="/admin/fpa-buddy/report/timezone" style="display:flex;gap:10px;align-items:center;margin:0 0 14px;flex-wrap:wrap;">
+  <label for="tz-name" style="font-size:13px;color:var(--muted);">Times shown in:</label>
+  <input id="tz-name" name="timezone" value="{_esc(tz_name)}" list="tz-list" style="padding:6px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;min-width:200px;">
+  <datalist id="tz-list"><option value="America/New_York"><option value="America/Chicago"><option value="America/Denver"><option value="America/Los_Angeles"><option value="UTC"></datalist>
+  <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Save zone</button>
+  <span style="font-size:12px;color:var(--muted);">Display only. Stored times stay in UTC.</span>
+</form>
 
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
   <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
     <thead><tr style="background:var(--bg);">
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date and time</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_VENDOR}px;">Asker</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Question</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Settings</th>
@@ -33842,6 +33856,7 @@ def admin_ask_report_export(request: Request, user: str = ""):
             u = lib.get_user(user)
             filter_user_id = u["id"] if u else -1
         rows = lib.list_ask_questions(user_id=filter_user_id, limit=1_000_000)
+        tz_name = _display_time.zone_for(lib.get_setting(_display_time.SETTING_KEY))[1]
     finally:
         lib.close()
 
@@ -33879,7 +33894,7 @@ def admin_ask_report_export(request: Request, user: str = ""):
     writer.writerow(["date", "asker", "conversation_id", "turn", "question", "answer", "model", "effort",
                      "use_library", "use_feed", "use_web", "input_tokens", "output_tokens",
                      "cache_creation_tokens", "cache_read_tokens", "cost_usd", "rewrite_cost_usd",
-                     "citations", "web_scope"])
+                     "citations", "web_scope", "local_time"])
     for r in rows:
         asker = r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
         writer.writerow([
@@ -33890,12 +33905,29 @@ def admin_ask_report_export(request: Request, user: str = ""):
             f'{r["cost_usd"]:.6f}', f'{float(r.get("rewrite_cost_usd") or 0):.6f}',
             _csv_safe(_citations_text(r)),
             r.get("web_scope") or "",
+            _display_time.local_stamp(r["created_at"], tz_name),
         ])
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return Response(
         content=buf.getvalue(), media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="ask-report-{stamp}.csv"'},
     )
+
+
+@app.post("/admin/fpa-buddy/report/timezone")
+def admin_ask_report_timezone(request: Request, timezone: str = Form("")):
+    """Set the zone the report (and its CSV's local_time column) shows times in. Display only."""
+    if not _is_authed(request):
+        return _login_redirect(request)
+    name = (timezone or "").strip()
+    if not _display_time.is_valid_zone(name):
+        raise HTTPException(400, f"'{name}' is not a time zone name (for example America/New_York).")
+    lib = _lib()
+    try:
+        lib.set_setting(_display_time.SETTING_KEY, name)
+    finally:
+        lib.close()
+    return RedirectResponse("/admin/fpa-buddy/report", status_code=303)
 
 
 # Categorical palette for the overhead-spend stacked-bar chart, drawn from

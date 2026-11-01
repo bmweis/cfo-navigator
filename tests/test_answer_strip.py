@@ -91,7 +91,9 @@ EXAMPLE = _with_pad(
 
 def test_the_phone_check_examples_are_all_removed():
     clean, rec = strip_answer(EXAMPLE)
-    assert clean == PAD and len(rec) == 4
+    # 2026-11: the second sentence has a figure clause before the flagged one, so only the cause goes.
+    assert clean == PAD + "\n\nThat's a 30-point compression in three years." and len(rec) == 4
+    assert [r["action"] for r in rec].count("clause_removed") == 1
     assert {r["pattern"] for r in rec} == {"characterization", "causal", "forecast or advice"}
 
 
@@ -123,7 +125,7 @@ def test_the_record_is_written_and_stored_text_equals_the_poll_text(lib, monkeyp
     monkeypatch.setattr(agent, "_get_client", lambda: _Client(EXAMPLE))
     uid = lib.create_user("asker", "supersecret", role="user")
     out = orch.run_ask(lib, uid, "How are costs structured?", request_id="req-0123456789abcdef")
-    assert out["answer"] == PAD and "striking" not in out["answer"]
+    assert out["answer"] == PAD + "\n\nThat's a 30-point compression in three years." and "striking" not in out["answer"]
     row = dict(lib.conn.execute("SELECT * FROM ask_questions").fetchone())
     assert row["answer"] == out["answer"]
     rec = json.loads(row["stripped_json"])

@@ -17,6 +17,14 @@ import re
 WINDOW_WORDS = 12
 TRIGGERS = ("driven by", "reflects", "reflecting", "likely", "almost certainly", "good threshold", "should")
 ALWAYS = ("practical read",)
+# An inference bolted on after a figure, flagged even in a sentence that carries an [n]: the
+# citation covers the number, not the conclusion drawn from it. Flag only, never stripped.
+INFERENCE = (
+    ("meaning", re.compile(r"(?:—|,)\s*meaning\b", re.I)),
+    ("which means", re.compile(r"\bwhich means\b", re.I)),
+    ("attractive to investors", re.compile(r"\battractive to investors\b", re.I)),
+    ("is the floor for", re.compile(r"\bis the floor for\b", re.I)),
+)
 
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 _MARKER = re.compile(r"\[\d+\]")
@@ -41,6 +49,9 @@ def lint_answer(text: str) -> list[dict]:
         joined = " ".join(low_words)
         for phrase in ALWAYS:
             if phrase in joined:
+                flags.append({"phrase": phrase, "snippet": sent[:200]})
+        for phrase, rx in INFERENCE:
+            if rx.search(sent):
                 flags.append({"phrase": phrase, "snippet": sent[:200]})
         if _MARKER.search(sent):
             continue
