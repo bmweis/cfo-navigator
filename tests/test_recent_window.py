@@ -77,12 +77,14 @@ def test_historically_returns_every_edition(lib):
     assert _years(res["rows"]) == list(YEARS)
 
 
-def test_a_publisher_whose_newest_edition_is_old_is_not_dropped(lib):
+def test_a_publisher_whose_only_editions_are_old_is_left_out_of_the_window(lib):
+    """One window for every publisher (PR 761): a publisher whose newest edition is 2012 is outside a
+    window that starts at 2020, and the note names it."""
     for y in (2010, 2012):
         load_report(lib, f"ol-{y}", _edition_rows("Old Publisher Co", y))
     res = fg.find_figures(lib, METRIC, band="$25M", all_editions=True, recent_window=True, limit=500)
-    old = [r for r in res["rows"] if r["source"] == "Old Publisher Co"]
-    assert {int(r["report_year"]) for r in old} == {2012}          # its newest edition stays, labelled with its year
+    assert not [r for r in res["rows"] if r["source"] == "Old Publisher Co"]
+    assert any("Old Publisher Co 2012" in n for n in res["notes"])
 
 
 @pytest.mark.parametrize("question,history", [

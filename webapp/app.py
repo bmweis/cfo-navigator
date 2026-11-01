@@ -25311,13 +25311,23 @@ function tryTable(lines, i) {{
   }});
   return {{html: out + '</tbody></table></div>', next: j}};
 }}
+// A citation marker after a row's closing pipe ("| 72% |[1]") is moved into the last cell (twin of
+// answer_render.move_row_markers), so the row stays a row.
+function moveRowMarkers(line) {{
+  var t = line.trim();
+  if (t.charAt(0) !== '|') return line;
+  var m = t.match(/^(\\|.*?)\\s*\\|\\s*((?:\\[\\d{{1,2}}\\]\\s*)+)$/);
+  if (!m) return line;
+  return m[1] + ' ' + m[2].trim() + ' |';
+}}
 function mdToHtml(raw) {{
-  var lines = (raw || '').split('\\n');
+  var lines = (raw || '').split('\\n').map(moveRowMarkers);
   var html = [], para = [], listType = null;
   function closeList() {{ if (listType) {{ html.push('</' + listType + '>'); listType = null; }} }}
   function flushPara() {{ if (para.length) {{ html.push('<p>' + para.join('<br>') + '</p>'); para = []; }} }}
   for (var li = 0; li < lines.length; li++) {{
     var t = lines[li].trim();
+    if (t.charAt(0) !== '|') t = t.replace(/[\\u200b\\u200c\\u200d\\u2060\\ufeff\\u00a0]/g, '').trim();
     if (t.charAt(0) === '|') {{
       var tb = tryTable(lines, li);
       if (tb) {{ flushPara(); closeList(); html.push(tb.html); li = tb.next - 1; continue; }}

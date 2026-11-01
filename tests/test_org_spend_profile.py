@@ -180,7 +180,8 @@ def test_e_the_literal_question_makes_headcount_opex_and_cost_of_revenue_parts(l
 
 def _cogs_body(ps):
     sub = next(s for s in ps.subs if fg.COGS_FAMILY_LABEL in s.metrics)
-    return "\n".join(d["body"] for d in sub.docs), sub
+    # Figures documents are merged across parts (one per report) and ride on one part, so read the turn's documents.
+    return "\n".join(d["body"] for x in ps.subs for d in x.docs), sub
 
 
 def test_e_cogs_printed_is_returned_as_printed(lib):

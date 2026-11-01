@@ -139,7 +139,9 @@ class Sub:
     capped_rows: int = 0                 # candidates left out by the row cap (oldest, least close first)
     fetch_cut: int = 0                   # rows the per-metric fetch limit cut (oldest first)
     also_stored: list = field(default_factory=list, repr=False)  # stored rows gather() chose not to send (less close)
-    documents: list = field(default_factory=list)                # [{"title", "rows"}] one per figures document sent
+    documents: list = field(default_factory=list)                # [{"title", "rows"}] this part's rows in each merged document
+    picked: list = field(default_factory=list, repr=False)       # rows chosen by the cap (before the documents are built)
+    left_out_by_report: dict = field(default_factory=dict)       # {report title: stored rows not sent}
 
 
 @dataclass
@@ -165,6 +167,8 @@ class Prestep:
     # What the pre-step did this turn, always recorded: "ran", "skipped: <reason>" or
     # "error: <class>". An empty record is not allowed.
     outcome: str = ""
+    figure_documents: list = field(default_factory=list)     # merged documents: [{"title","rows","parts"}]
+    left_out_detail: dict = field(default_factory=dict)      # {report title: stored rows not sent}, whole turn
 
     def log(self) -> dict:
         if not self.active and not self.split_fallback:
@@ -187,6 +191,8 @@ class Prestep:
                       "illustrative_left_out": s.illustrative_left_out, "segment_dropped": s.segment_dropped,
                       "documents": s.documents,
                       "match_mix": s.match_mix} for s in self.subs],
+            "documents": self.figure_documents,
+            "left_out_detail": dict(sorted(self.left_out_detail.items(), key=lambda kv: -kv[1])),
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
             "remaining_usd": None if self.remaining_usd is None else round(self.remaining_usd, 4),
         }
@@ -653,20 +659,32 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
             ed = (_norm(r["source"]), _norm(r["report"]), _norm(r["report_year"]))
             if ed not in best or (_norm(r["segment"]) in ("all", "") and _norm(rows[best[ed]]["segment"]) not in ("all", "")):
                 best[ed] = i
-    reserved = sorted(best.values(), key=lambda i: (-fg._year_num(rows[i]["report_year"]), i))[:max(cap // 2, 1)]
+    reserved = sorted(best.values(), key=lambda i: (-fg._year_num(rows[i].get("report_year")), i))[:max(cap // 2, 1)]
     chosen += reserved
+    # The publisher floor: the best-ranked row (rows are sorted best first, newest data period first) of each
+    # publisher's NEWEST edition inside the rows given. Older editions of a publisher never take a floor slot.
+    newest_ed: dict[str, int] = {}
+    for r in rows:
+        src = _norm(r["source"])
+        newest_ed[src] = max(newest_ed.get(src, -1), fg._year_num(r.get("report_year")))
+    floor: list[int] = []
     seen_src: set = set()
     seen_basis: set = set()
     for i, r in enumerate(rows):
-        if i in chosen:
-            seen_src.add(_norm(r["source"]))
-            continue
         src, basis = _norm(r["source"]), r.get("basis_group") or ""
+        if i in chosen:
+            seen_src.add(src)
+            continue
+        if fg._year_num(r.get("report_year")) != newest_ed[src]:
+            continue
         if src not in seen_src or (basis and basis not in seen_basis):
             seen_src.add(src)
             if basis:
                 seen_basis.add(basis)
-            chosen.append(i)
+            floor.append(i)
+    # If the floor alone would overfill the cap, newer editions keep their slot and older ones are cut first.
+    floor.sort(key=lambda i: (-fg._year_num(rows[i].get("report_year")), i))
+    chosen += floor[:max(cap - len(chosen), 0)]
     per_basis: dict[str, int] = {}
     for i in chosen:
         b = rows[i].get("basis_group") or ""
@@ -765,9 +783,10 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
     # newest first, change over time included: oldest first let a long run of old editions use up
     # the cap and the character budget before the newest ones (the 2025 rows never reached the model).
     wants = fg.statistic_wants(sub.text)
+    fg.mark_period_gap(rows)
     rows.sort(key=lambda r: (r.get("basis_rank", 0), fg._MATCH_RANK[r["match"]], r.get("band_context", False),
-                             fg._has_sample_size(r), fg.statistic_rank(r["statistic"], wants),
-                             -fg._year_num(r["report_year"]), r["source"]))
+                             fg._has_sample_size(r), r.get("period_gap", 0), fg.statistic_rank(r["statistic"], wants),
+                             -fg._year_num(r.get("report_year")), r["source"]))
     # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
     # segment, statistic, basis or a related metric) are sent only when nothing closer
     # exists, at most RELATED_CAP, and the notes say so.
@@ -805,7 +824,8 @@ def status_notes(candidates: list[dict], also_stored: list[dict], sent: set) -> 
     can say the true thing: shown (a row was sent), left out (stored rows exist but were cut by the
     row cap, the document length or the less-close filter) or not printed (no stored row for that
     report, line item and size). Only the left-out and not-printed cells are listed; a part where
-    every cell is shown adds nothing."""
+    every cell is shown adds nothing. A cell says only "left out" or "not printed": counts and the
+    detail are never written inside a table (the one closing line carries them, see left_out_line)."""
     reports: dict[str, str] = {}
     items: dict[tuple, str] = {}
     stored: dict[tuple, int] = {}
@@ -827,8 +847,8 @@ def status_notes(candidates: list[dict], also_stored: list[dict], sent: set) -> 
             if sh:
                 continue
             if n:
-                cells.append(f"{label} / {title}: left out ({n} more row{'s' if n != 1 else ''} stored, not sent). "
-                             "Write \"left out\" and cite the report. Never write \"not printed\".")
+                cells.append(f"{label} / {title}: left out. In a table cell write only \"left out\" (no count, no note); "
+                             "never \"not printed\".")
             else:
                 cells.append(f"{label} / {title}: not printed (no stored row at this size).")
     if not cells:
@@ -838,10 +858,44 @@ def status_notes(candidates: list[dict], also_stored: list[dict], sent: set) -> 
     return ["Line-item status by report. A table cell or sentence follows this exactly; every line item and report not listed "
             "here was shown above:"] + ["  " + c for c in cells]
 
-def build(lib, sub: Sub, tier: str, reports: dict, row_cap: int) -> None:
-    """Apply the row cap, build the figure documents and the definition cards. Reads only."""
+
+LEFT_OUT_LINE_REPORTS = 4
+
+
+def left_out_by_report(candidates: list[dict], also_stored: list[dict], sent: set) -> dict[str, int]:
+    """{report title: stored matching rows that were not sent}, over the rows a part found."""
+    out: dict[str, int] = {}
+    for r in list(candidates) + list(also_stored):
+        if (r["report_slug"], r["figure_key"]) not in sent:
+            t = _doc_title(r)
+            out[t] = out.get(t, 0) + 1
+    return out
+
+
+def left_out_line(per_part: list[dict]) -> str:
+    """The one short line that names what was stored but not sent, for the end of the answer (never a table
+    row): "Left out (not sent): <report> <N> rows, ...". At most LEFT_OUT_LINE_REPORTS reports are named, most
+    rows first; the full list is on the admin row. "" when nothing was left out."""
+    total: dict[str, int] = {}
+    for d in per_part:
+        for t, n in d.items():
+            total[t] = total.get(t, 0) + n
+    if not total:
+        return ""
+    ranked = sorted(total.items(), key=lambda kv: (-kv[1], kv[0]))
+    named = ranked[:LEFT_OUT_LINE_REPORTS]
+    text = ", ".join(f"{t} {n} row{'s' if n != 1 else ''}" for t, n in named)
+    if len(ranked) > len(named):
+        text += f", and {len(ranked) - len(named)} more report{'s' if len(ranked) - len(named) != 1 else ''}"
+    return f"Left out (not sent): {text}."
+
+
+def pick(lib, sub: Sub, tier: str, row_cap: int) -> None:
+    """Apply the row cap to one part and build its definition cards. The figure documents are built
+    later, once, for the whole turn (merge_figure_docs). Reads only."""
     names = list(sub.metrics)
     rows = pick_rows(sub.candidates, row_cap)
+    sub.picked = rows
     sub.capped_rows = len(sub.candidates) - len(rows)
     if sub.capped_rows:
         sub.notes.append(f"{sub.capped_rows} further matching figures were not sent (the oldest and least close go first). "
@@ -849,21 +903,59 @@ def build(lib, sub: Sub, tier: str, reports: dict, row_cap: int) -> None:
     sub.rows = len(rows)
     for r in rows:
         sub.match_mix[r["match"]] = sub.match_mix.get(r["match"], 0) + 1
-    if rows:
-        included: set = set()
-        docs, left = _figure_docs(rows, FIGURES_CHARS.get(tier, 9000), reports, included)
-        sub.docs += docs
-        sub.documents = [{"title": d["title"], "rows": d.get("rows", 0)} for d in docs]
-        sub.truncated_rows = left
-        sub.notes += status_notes(sub.candidates, sub.also_stored, included)
-        if left:
-            sub.notes.append(f"{left} matching figures were left out for length; ask a narrower question for them.")
     if sub.intent == "definition":
         cards = _card_docs(lib, names, CARD_CHARS.get(tier, 6000))
         sub.cards = len(cards)
         sub.docs += cards
         if names and not cards:
             sub.notes.append("No workbook definition card is stored for this metric.")
+
+
+def merge_figure_docs(subs: list[Sub], tier: str, reports: dict) -> list[dict]:
+    """One figures document per report for the whole turn. The rows every part picked are merged by
+    (report, figure), a row keeping the numbers of the parts that asked for it, then built once, so a report
+    is one document and one entry in Sources however many parts used it. Each part keeps its own character
+    budget (nothing is divided); the merged budget is their sum. Sets, on each part, `documents` (its rows in
+    each document), `truncated_rows`, `left_out_by_report` and the line-item status notes, all measured against
+    what was really sent. Returns the documents (the caller attaches them to a part)."""
+    merged: list[dict] = []
+    index: dict[tuple, dict] = {}
+    active = [(n, s) for n, s in enumerate(subs, 1) if s.picked]
+    for n, s in active:
+        for r in s.picked:
+            key = (r["report_slug"], r["figure_key"])
+            if key in index:
+                index[key]["asked_by"].append(n)
+            else:
+                row = dict(r, asked_by=[n])
+                index[key] = row
+                merged.append(row)
+    if not merged:
+        return []
+    budget = FIGURES_CHARS.get(tier, 9000) * len(active)
+    included: set = set()
+    docs, left = _figure_docs(merged, budget, reports, included)
+    for d in docs:
+        d["parts"] = sorted({n for g in merged if _doc_title(g) == d["title"] for n in g["asked_by"]})
+    for n, s in active:
+        mine: dict[str, int] = {}
+        for r in s.picked:
+            if (r["report_slug"], r["figure_key"]) in included:
+                t = _doc_title(r)
+                mine[t] = mine.get(t, 0) + 1
+        s.documents = [{"title": t, "rows": c} for t, c in mine.items()]
+        s.truncated_rows = sum(1 for r in s.picked if (r["report_slug"], r["figure_key"]) not in included)
+        s.notes += status_notes(s.candidates, s.also_stored, included)
+        s.left_out_by_report = left_out_by_report(s.candidates, s.also_stored, included)
+        if s.truncated_rows:
+            s.notes.append(f"{s.truncated_rows} matching figures were left out for length; ask a narrower question for them.")
+    return docs
+
+
+def build(lib, sub: Sub, tier: str, reports: dict, row_cap: int) -> None:
+    """Pick, then build the figure documents, for one part on its own (a single lookup)."""
+    pick(lib, sub, tier, row_cap)
+    sub.docs += merge_figure_docs([sub], tier, reports)
 
 
 PRESTEP_RULES = (
@@ -1091,7 +1183,16 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
         gather(lib, s, over_time=sig["over_time"] and not ps.split_ran)
     caps = allocate_caps(todo)
     for s in todo:
-        build(lib, s, tier, reports, caps.get(id(s), PART_ROWS_CAP))
+        pick(lib, s, tier, caps.get(id(s), PART_ROWS_CAP))
+    fdocs = merge_figure_docs(todo, tier, reports)
+    ps.figure_documents = [{"title": d["title"], "rows": d.get("rows", 0), "parts": d.get("parts", [])} for d in fdocs]
+    holder = next((s for s in todo if s.picked), None)
+    if holder is not None:
+        holder.docs += fdocs
+    ps.left_out_detail = {}
+    for s in todo:
+        for t, c in s.left_out_by_report.items():
+            ps.left_out_detail[t] = ps.left_out_detail.get(t, 0) + c
     # The text block sent before the question: lookup notes, the plan, the notice.
     lines: list[str] = []
     seen_notes: set[str] = set()
@@ -1108,6 +1209,10 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
         if ps.rest_of_question:
             plan.append(f"Not covered by a lookup: {ps.rest_of_question}")
         plan.append("Answer every part, then the rest of the question.")
+    closing = left_out_line([ps.left_out_detail]) if ps.left_out_detail else ""
+    if closing:
+        plan.append("Closing line for the end of the answer (never inside a table; copy it as written, once, after the last "
+                    "table or paragraph, and add nothing about left-out rows anywhere else):\n" + closing)
     shape_used = any(m in fg.SHAPE_LABELS for s in ps.subs for m in s.metrics)
     if shape_used:
         plan.append(SHAPE_RULES)
