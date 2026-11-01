@@ -255,7 +255,9 @@ def test_each_subquery_keeps_its_own_character_budget(lib, monkeypatch):
     lib_docs = [d for d in _docs(c.answer_calls()[0]) if not _is_figures(d)]
     total = sum(len(_doc_text(d)) for d in lib_docs)
     per_source = agent.EFFORT_SETTINGS["standard"]["source_chars"]
-    assert total == 3 * 8 * per_source > budget          # 3 sub-queries, none sharing one budget
+    # 3 sub-queries, none sharing one budget. A part that holds stored figure rows sends half the tier's
+    # articles (hit_allowance, PR 759); the rest-of-question part sends all of them.
+    assert total == (4 + 4 + 8) * per_source > budget
     assert total <= 3 * budget
 
 

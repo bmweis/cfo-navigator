@@ -22,7 +22,7 @@ def _system(benchmark_rules):
 # the $20-$30M turn ran no lookup and was answered without them.
 EVERY_TURN = {
     "lead with sentences, publisher and year inside": ["3 to 5 sentences", "publisher and year inside the sentence"],
-    "at most one small table, six rows": ["at most one small table", "Six rows at most"],
+    "at most one small table, six rows": ["one small table per topic", "no more than two tables", "Six rows at most"],
     "one line on what is missing": ["what the data does not cover"],
     "no practical read, advice, commentary, multiples": ["No \"practical read\"", "investor multiples"],
     "no illustrative figures as benchmarks": ["illustrative or worked-example company is not a benchmark"],

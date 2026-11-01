@@ -24,7 +24,32 @@ INFERENCE = (
     ("which means", re.compile(r"\bwhich means\b", re.I)),
     ("attractive to investors", re.compile(r"\battractive to investors\b", re.I)),
     ("is the floor for", re.compile(r"\bis the floor for\b", re.I)),
+    # A prediction about what stored medians cover or what a kind of company spends, after a figure.
+    ("will understate", re.compile(r"\bwill (?:understate|overstate)\b", re.I)),
+    ("typically spends", re.compile(r"\btypically spends?\b", re.I)),
+    # Characterization the rules ban. Any sentence, cited or not; "material" also matches the noun
+    # ("source material"), a known false positive.
+    ("meaningful", re.compile(r"\bmeaningful\b", re.I)),
+    ("material", re.compile(r"\bmaterial\b", re.I)),
+    ("significant", re.compile(r"\bsignificant\b", re.I)),
+    ("sharp", re.compile(r"\bsharp\b", re.I)),
+    ("steep", re.compile(r"\bsteep\b", re.I)),
 )
+# A trend claim in a sentence with no figure: nothing shown supports it. Flag only. Stripping is not
+# safe here (the same words open true sentences with a number in the next clause), so the admin row shows it.
+TREND = (
+    ("broad-based", re.compile(r"\bbroad-based\b", re.I)),
+    ("across all", re.compile(r"\bacross all\b", re.I)),
+    ("compression is", re.compile(r"\bcompression is\b", re.I)),
+)
+# A change worked out in the answer ("a drop of 61", "down 5 points", "12% higher") with no
+# "derived, not in report" in the sentence. A change a report states, with a citation, is flagged
+# too (known false positive): the lint cannot tell who computed it.
+DERIVED_CHANGE = re.compile(
+    r"\b(?:a\s+)?(?:drop|decline|fall|decrease|increase|rise|gain)\s+of\s+\$?\d"
+    r"|\b(?:down|up)\s+\$?\d[\d.,]*\s*(?:%|points?|pts|pp|percentage points)?"
+    r"|\b\d[\d.,]*%\s+(?:higher|lower|more|less|above|below)\b", re.I)
+DERIVED_LABEL = "derived, not in report"
 
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 _MARKER = re.compile(r"\[\d+\]")
@@ -53,6 +78,12 @@ def lint_answer(text: str) -> list[dict]:
         for phrase, rx in INFERENCE:
             if rx.search(sent):
                 flags.append({"phrase": phrase, "snippet": sent[:200]})
+        if not _NUMBER.search(sent):
+            for phrase, rx in TREND:
+                if rx.search(sent):
+                    flags.append({"phrase": phrase, "snippet": sent[:200]})
+        if DERIVED_CHANGE.search(sent) and DERIVED_LABEL not in sent.lower() and not sent.lstrip().startswith("|"):
+            flags.append({"phrase": "derived change without label", "snippet": sent[:200]})
         if _MARKER.search(sent):
             continue
         for phrase in TRIGGERS:

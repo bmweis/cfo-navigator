@@ -20,7 +20,9 @@ MIN_WORDS_LEFT = 40
 PATTERNS = (
     ("causal", re.compile(r"\b(?:driven by|due to|because of|as a result of|reflects|reflecting)\b", re.I)),
     ("forecast or advice", re.compile(
-        r"\b(?:expect|you should|would likely|will likely|likely to|will (?:sit|be|run|see)|confirm whether)\b", re.I)),
+        r"\b(?:expect|you should|would likely|will likely|likely to|confirm whether)\b"
+        # "will sit/be/run/see", with up to two adverbs between ("will almost certainly sit", "will typically be").
+        r"|\bwill(?:\s+(?:\w+ly|almost|just|still|also|generally)){0,2}\s+(?:sit|be|run|see)\b", re.I)),
     ("characterization", re.compile(
         r"\b(?:striking|dramatic|dramatically|remarkable|notably|is the floor for|attractive to investors)\b", re.I)),
 )

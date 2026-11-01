@@ -109,7 +109,9 @@ def test_cited_inferences_are_flagged_not_stripped(sentence, phrase):
 
 def test_a_plain_cited_figure_is_not_flagged():
     assert lint_answer("S&M was 38% of revenue [3].") == []
-    assert lint_answer("The word meaningful appears here [2].") == []
+    # "meaningful" used to be the example of an unflagged cited word; PR 759 flags it (Part C3), so a
+    # different plain cited sentence stands in.
+    assert lint_answer("The word report appears here [2].") == []
 
 
 def test_admin_row_shows_a_clause_removal_with_what_was_kept():

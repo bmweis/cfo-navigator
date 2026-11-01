@@ -36,6 +36,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import figures as fg
+from .answer_rules import SHAPE_RULES
 from .citation_label import make_label
 
 _log = logging.getLogger(__name__)
@@ -128,6 +129,8 @@ class Sub:
     truncated_rows: int = 0
     illustrative_left_out: int = 0
     illustrative_ids: set = field(default_factory=set)
+    hits_left_out: int = 0               # library articles the per-part allowance left out (after the cross-part dedupe)
+    merged: int = 0                      # parts folded into this one because they were the same lookup
     segment_dropped: str = ""
     # Over-time lookups: "" = the recent window, "full" = every edition (historically, all editions),
     # a year = editions from that year on ("since 2015").
@@ -175,7 +178,7 @@ class Prestep:
             "requested_subs": self.requested_subs, "notice": self.notice,
             "rest_of_question": self.rest_of_question, "match_mix": mix,
             "subs": [{"intent": s.intent, "text": s.text[:200], "metrics": s.metrics, "band": s.band, "segment": s.segment,
-                      "year": s.year, "figure_rows": s.rows, "cards": s.cards,
+                      "year": s.year, "merged": s.merged, "library_hits_left_out": s.hits_left_out, "figure_rows": s.rows, "cards": s.cards,
                       "library_hits": s.library_hits, "figure_rows_left_out": s.truncated_rows + s.capped_rows + s.fetch_cut,
                       "rows_capped": s.capped_rows + s.fetch_cut, "history": s.history,
                       "editions_left_out": next((n for n in s.notes if n.startswith(WINDOW_NOTE_PREFIX)), ""),
@@ -221,6 +224,9 @@ def _mask_spans(question: str, spans: list[tuple[int, int]]) -> str:
 
 
 _name_key = fg.name_key
+
+
+_TOTAL_HEADCOUNT_KEY = fg.name_key("Total employees")
 
 
 def distinct_metric_count(found: list[dict], extra_names: list[str]) -> int:
@@ -311,6 +317,24 @@ def detect(lib, question: str) -> dict:
                 set(fg.expense_family_request(t)) >= set(fg.GENERIC_EXPENSE_KEYS) for t in terms + extra):
             fam_terms.remove(fg.GENERIC_EXPENSE_LABEL)
         extra += fam_terms
+        # "Org structure" and "spend profile" are defined shapes (total FTE and headcount by function;
+        # operating expenses by function, cost of revenue and gross margin). One label each, headcount
+        # first. A registry or stored name the label already reaches is dropped so it is not looked up twice.
+        shape = fg.detect_shape_terms(masked)
+        if shape:
+            hc, gm = fg.HEADCOUNT_FAMILY_LABEL in shape, fg.COGS_FAMILY_LABEL in shape
+
+            def _reached(t: str) -> bool:
+                if hc and (fg.headcount_family_row(t) or fg.name_key(t) == _TOTAL_HEADCOUNT_KEY):
+                    return True
+                return bool(gm and fg.cogs_family_row(t, "percent of revenue", "percent"))
+            terms = [t for t in terms if not _reached(t)]
+            canon = [c for c in canon if not _reached(c)]
+            extra = [t for t in extra if not _reached(t) and t not in shape]
+            if hc and shape[0] == fg.HEADCOUNT_FAMILY_LABEL:
+                terms, canon = [fg.HEADCOUNT_FAMILY_LABEL] + terms, [fg.HEADCOUNT_FAMILY_LABEL] + canon
+                shape = shape[1:]
+            extra = [t for t in shape if t not in terms] + [t for t in extra if t not in shape]
         room = MAX_SUBQUERIES - len(terms)
         extra = extra[:max(room, 0)]
         if extra:
@@ -578,11 +602,16 @@ def _window_args(sub: Sub) -> dict:
     return {"recent_window": True}
 
 
+# Rows kept for each basis group (revenue, ARR, basis not stated) before the cap fills the rest. A cap
+# that binds on a part where revenue-basis rows outnumber ARR-basis rows ten to one used to leave one ARR row.
+BASIS_RESERVE = 6
+
+
 def pick_rows(rows: list[dict], cap: int) -> list[dict]:
     """At most `cap` rows from rows already sorted best first (basis group, match, band,
     sample, newest year). Before the rest is filled, the best row of every publisher and of
-    every basis group is kept, so a cap never drops a publisher or one basis entirely. The
-    result keeps the sorted order."""
+    every basis group is kept, then up to BASIS_RESERVE rows of each basis group, so a cap never
+    drops a publisher or one basis. The result keeps the sorted order."""
     if len(rows) <= cap:
         return rows
     chosen: list[int] = []
@@ -595,6 +624,15 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
             if basis:
                 seen_basis.add(basis)
             chosen.append(i)
+    per_basis: dict[str, int] = {}
+    for i in chosen:
+        b = rows[i].get("basis_group") or ""
+        per_basis[b] = per_basis.get(b, 0) + 1
+    for i, r in enumerate(rows):
+        b = r.get("basis_group") or ""
+        if b and i not in chosen and per_basis.get(b, 0) < BASIS_RESERVE:
+            chosen.append(i)
+            per_basis[b] = per_basis.get(b, 0) + 1
     chosen = chosen[:cap]
     for i in range(len(rows)):
         if len(chosen) >= cap:
@@ -622,6 +660,13 @@ def allocate_caps(subs: list[Sub]) -> dict[int, int]:
             left -= need[id(s)]
             pending.remove(s)
     return caps
+
+
+def hit_allowance(sub: Sub, max_library: int) -> int:
+    """Library articles one part of a split turn may send. A part with stored figure rows gets half the
+    tier's per-part count (the numbers come from the figures, the articles add context); a part with
+    none, such as the rest-of-question part, gets the full count. Never fewer than one."""
+    return max(max_library if not sub.rows else max_library // 2, 1)
 
 
 def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
@@ -761,6 +806,23 @@ def _norm(v: str) -> str:
     return " ".join(str(v or "").lower().split())
 
 
+def _family_key(lib, metric: str) -> frozenset:
+    """The metric family a name belongs to: the registry's canonical name when the name resolves to exactly
+    one, else the name itself, reduced to its significant words (name_key drops "total" and folds headcount,
+    FTEs and employees together). "total employees" and "Headcount: Total" are one family; "Headcount:
+    Sales" is another."""
+    r = fg.resolve_metric(lib, metric)
+    base = r[0]["canonical"] if len(r) == 1 else metric
+    return fg.name_key(base) or frozenset({_norm(base)})
+
+
+def _merge_key(lib, s: Sub) -> tuple:
+    """Two parts with the same key are one lookup: same intent, same metric families, same band, same
+    segment, same asked basis (revenue or ARR). Not name equality."""
+    return (s.intent, frozenset(_family_key(lib, m) for m in s.metrics), _norm(s.band), _norm(s.segment),
+            fg.asked_basis(s.text or ""))
+
+
 def _guard_split(lib, subs: list[Sub], question: str, sig: dict) -> list[Sub]:
     """Three rules the splitter's output must obey, applied before any lookup.
     A2: a headcount metric the user named is never replaced by a per-employee ratio
@@ -774,18 +836,33 @@ def _guard_split(lib, subs: list[Sub], question: str, sig: dict) -> list[Sub]:
             if s.intent != "other" and _PER_HEAD.search(" ".join(s.metrics + [s.text])):
                 s.metrics = [head_terms[0]]
                 s.text = head_terms[0] + (f" at {s.band}" if s.band else "")
+    # A shape label the rules chose ("Headcount by function", "Cost of revenue and gross margin") is the
+    # lookup for every part that asks for rows of that family, whatever the splitter called its metric.
+    for label, belongs in ((fg.HEADCOUNT_FAMILY_LABEL, lambda m: fg.headcount_family_row(m)),
+                           (fg.COGS_FAMILY_LABEL, lambda m: bool(fg.cogs_family_row(m, "percent of revenue", "percent")))):
+        if label in sig["terms"]:
+            for s in subs:
+                if s.intent != "other" and s.metrics and all(belongs(m) or m == label for m in s.metrics):
+                    s.metrics = [label]
     merged: list[Sub] = []
     for s in subs:
-        key = (s.intent, frozenset(_norm(m) for m in s.metrics), _norm(s.band), _norm(s.segment))
+        key = _merge_key(lib, s)
         twin = None
         if s.intent != "other" and s.metrics:
-            twin = next((m for m in merged if (m.intent, frozenset(_norm(x) for x in m.metrics),
-                                                _norm(m.band), _norm(m.segment)) == key), None)
+            twin = next((m for m in merged if m.intent != "other" and m.metrics and _merge_key(lib, m) == key), None)
         if twin is None:
             merged.append(s)
-        elif s.year == "all" and twin.year != "all":
+            continue
+        # One lookup: the names are variants of one metric family (a registry name and a stored name),
+        # so the survivor searches under both, keeps the wider search text, and the admin row says so.
+        for m in s.metrics:
+            if m not in twin.metrics:
+                twin.metrics.append(m)
+        if len(s.text or "") > len(twin.text or ""):
+            twin.text = s.text
+        if s.year == "all":
             twin.year = "all"
-            twin.text = s.text or twin.text
+        twin.merged += 1 + s.merged
     subs = merged
     if len(subs) < MAX_SUBQUERIES:
         # Covered by canonical metric, so the splitter's "NRR" covers the detected "net revenue retention".
@@ -796,7 +873,10 @@ def _guard_split(lib, subs: list[Sub], question: str, sig: dict) -> list[Sub]:
                     covered |= {r["canonical"] for r in fg.resolve_metric(lib, m)}
                 covered |= {d["canonical"] for d in fg.detect_metrics(lib, s.text)}
         term_canon = {d["term"]: d["canonical"] for d in fg.detect_metrics(lib, question)}
-        missing = [t for t in sig["terms"] if term_canon.get(t) not in covered]
+        covered_names = {_norm(m) for s in subs for m in s.metrics}
+        covered_fams = {_family_key(lib, m) for s in subs if s.intent != "other" for m in s.metrics}
+        missing = [t for t in sig["terms"] if term_canon.get(t) not in covered
+                   and _norm(t) not in covered_names and _family_key(lib, t) not in covered_fams]
         lookups = [s for s in subs if s.intent != "other"]
         if missing and lookups:
             ref = lookups[0]
@@ -929,6 +1009,9 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
         if ps.rest_of_question:
             plan.append(f"Not covered by a lookup: {ps.rest_of_question}")
         plan.append("Answer every part, then the rest of the question.")
+    shape_used = any(m in fg.SHAPE_LABELS for s in ps.subs for m in s.metrics)
+    if shape_used:
+        plan.append(SHAPE_RULES)
     ps.plan_text = "\n".join(
         ([("BENCHMARK LOOKUP NOTES:\n" + "\n".join(lines))] if lines else [])
         + (["\n".join(plan)] if plan else []))
