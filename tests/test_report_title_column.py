@@ -31,7 +31,7 @@ def client(tmp_path, monkeypatch):
 
 
 def _td(html: str, title: str) -> str:
-    return re.search(r"<td[^>]*>[^<]*" + re.escape(title) + r"[^<]*</td>", html).group(0)
+    return re.search(r"<td[^>]*>(?:<strong>)?[^<]*" + re.escape(title) + r".*?</td>", html).group(0)
 
 
 def test_report_title_width_is_one_named_constant(client):
