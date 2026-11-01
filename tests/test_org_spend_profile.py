@@ -218,3 +218,31 @@ def test_e_a_ratio_or_growth_name_is_not_in_the_headcount_family():
     assert not fg.headcount_family_row("Headcount growth")
     assert fg.headcount_family_row("Engineering % of headcount")
     assert not fg.cogs_family_row("COGS per customer", "", "USD")
+
+
+# --- Part E4, D3, E2: the rules reach the prompt -----------------------------------
+
+def test_e4_the_shape_rules_reach_the_lookup_notes_of_a_shape_turn(lib):
+    ps = plan(lib, F.QUESTION, {"subqueries": [F._part("benchmark", "Total employees", "x"),
+                                               F._part("benchmark", "Gross margin", "y")], "rest_of_question": ""})
+    for phrase in ("ANSWER SHAPE", "Total row", "not printed", "never leave one out", "(c) What changed over time"):
+        assert phrase in ps.plan_text, phrase
+
+
+def test_e4_a_turn_without_the_shape_labels_gets_no_shape_rules(lib):
+    ps = plan(lib, Q_A_SIMPLE, {"subqueries": [F._part("benchmark", "Total employees", "x"),
+                                               F._part("benchmark", "Operating expenses by function", "y")],
+                                "rest_of_question": "hiring"})
+    assert "ANSWER SHAPE" not in ps.plan_text
+
+
+Q_A_SIMPLE = "What is total headcount and what are operating expenses by function at $20-$30M ARR, and what should we hire next?"
+
+
+def test_d3_and_e2_rules_are_on_every_turn():
+    from linklib.answer_rules import ANSWER_RULES
+    assert 'Say "exact band" only for a figure whose band is the band asked or sits inside it' in ANSWER_RULES
+    assert "Never work one out from the other" in ANSWER_RULES
+    assert "100 minus gross margin" in ANSWER_RULES
+    assert 'write "not printed" for COGS' in ANSWER_RULES
+    assert "Good: \"COGS: not printed." in ANSWER_RULES

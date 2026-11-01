@@ -70,6 +70,12 @@ ANSWER_RULES = (
     "In a table, the two bases share one table and a Basis column says which is which; never a second table for "
     "the second basis. Never mix bases in one row or one sentence figure, and never convert one basis into the other. "
     "Say plainly when a figure's basis is not stated.\n"
+    "- Say \"exact band\" only for a figure whose band is the band asked or sits inside it. A figure whose band is wider "
+    "than the asked one is a wider band: give its band. Good: \"the newest figure is from a wider band, under $100M ARR\". "
+    "Bad: \"the newest exact-band figure is for companies under $100M ARR\".\n"
+    "- Cost of revenue (COGS) and gross margin are separate rows. Never work one out from the other, in a sentence or a "
+    "table: no \"100 minus gross margin\". When a report prints only gross margin, give it as printed and write \"not "
+    "printed\" for COGS. Good: \"COGS: not printed. Gross margin: 74% [2].\" Bad: \"COGS is about 26% (100 minus gross margin).\"\n"
     "- A figure from an illustrative or worked-example company is not a benchmark. Never present one as one. "
     "Answer from survey data or authored content, or say none is on file.\n"
     "\nRules for numbers and claims (every turn):\n"
@@ -94,3 +100,19 @@ ANSWER_RULES = (
     "- When two publishers disagree, show both with their dates. Do not average them or pick one.\n"
     "- Give the year of every source you take a number from. Say when a source is more than three years old."
 )
+
+
+# Added to the lookup notes of a turn whose pre-step used the org-structure or spend-profile lookups
+# (benchmark_prestep.plan_turn), so it costs nothing on any other turn.
+SHAPE_RULES = (
+    "ANSWER SHAPE for an org structure and spend profile question (the lookups above were run for it):\n"
+    "- After one plain first sentence, up to three short sections in this order, each with a short heading; leave out a "
+    "section only when its lookup (headcount by function, cost of revenue) was not run:\n"
+    "  (a) Headcount. Total FTE and headcount by function in one table. Rows are the functions plus a Total row; "
+    "columns are source and period. A cell with no printed figure says \"not printed\".\n"
+    "  (b) Spend. One table of spend as a percent of revenue or ARR. Rows: S&M, R&D, G&A, customer success, cost "
+    "of revenue (COGS), gross margin, total. Columns by basis, each labelled (percent of revenue, percent of ARR), "
+    "with source and period. A cell with no printed figure says \"not printed\".\n"
+    "  (c) What changed over time. 3 to 4 sentences, only with figures shown in the tables.\n"
+    "- Then one line on what the data does not cover.\n"
+    "- Show every row; never leave one out. This is the one shape that takes two tables.\n")

@@ -36,6 +36,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import figures as fg
+from .answer_rules import SHAPE_RULES
 from .citation_label import make_label
 
 _log = logging.getLogger(__name__)
@@ -1008,6 +1009,9 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
         if ps.rest_of_question:
             plan.append(f"Not covered by a lookup: {ps.rest_of_question}")
         plan.append("Answer every part, then the rest of the question.")
+    shape_used = any(m in fg.SHAPE_LABELS for s in ps.subs for m in s.metrics)
+    if shape_used:
+        plan.append(SHAPE_RULES)
     ps.plan_text = "\n".join(
         ([("BENCHMARK LOOKUP NOTES:\n" + "\n".join(lines))] if lines else [])
         + (["\n".join(plan)] if plan else []))
