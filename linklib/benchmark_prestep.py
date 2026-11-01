@@ -169,6 +169,9 @@ class Prestep:
     outcome: str = ""
     figure_documents: list = field(default_factory=list)     # merged documents: [{"title","rows","parts"}]
     left_out_detail: dict = field(default_factory=dict)      # {report title: stored rows not sent}, whole turn
+    shifts: list = field(default_factory=list)               # computed shift lines sent to the model (figures.compute_shifts)
+    shifts_suppressed: int = 0                               # shifts below the threshold, left out silently
+    shifts_skipped: list = field(default_factory=list)       # cells skipped because a report prints two values
 
     def log(self) -> dict:
         if not self.active and not self.split_fallback:
@@ -192,6 +195,9 @@ class Prestep:
                       "documents": s.documents,
                       "match_mix": s.match_mix} for s in self.subs],
             "documents": self.figure_documents,
+            "shifts": [{"line": x["line"], "kind": x["kind"], "size": x["size"], "threshold": x["threshold"],
+                        "directional": x["directional"]} for x in self.shifts],
+            "shifts_suppressed": self.shifts_suppressed, "shifts_skipped": self.shifts_skipped,
             "left_out_detail": dict(sorted(self.left_out_detail.items(), key=lambda kv: -kv[1])),
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
             "remaining_usd": None if self.remaining_usd is None else round(self.remaining_usd, 4),
@@ -523,6 +529,10 @@ def _row_line(r: dict) -> str:
         parts.append(f"page {r['page']}")
     if r["data_period"]:
         parts.append(f"period {r['data_period']}")
+    if r.get("also_printed_in"):
+        parts.append("also printed in " + "; ".join(r["also_printed_in"]) + " (one source, not two)")
+    if r.get("cited_source"):
+        parts.append(f"republished: this report cites {r['cited_source']} as its source (count it with that source)")
     tag = f"match: {r['match']}"
     if r.get("basis_group") in ("revenue", "arr"):
         parts.insert(0, "basis group: " + fg.BASIS_LABELS[r["basis_group"]] + (" (OTHER BASIS)" if r.get("other_basis") else ""))
@@ -759,11 +769,12 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
         if sub.segment and not seg_m:
             sub.segment_dropped = sub.segment
             sub.notes.append(f"Segment not used by the data: {sub.segment}. The figures below are not narrowed to it.")
-        all_ed = sub.year == "all" or over_time
+        all_ed = sub.year == "all" or over_time or bool(sub.history)
         res = fg.find_figures(lib, m, band=sub.band or None, segment=seg_m or None,
                               year=(sub.year if sub.year not in ("", "all") else None),
                               all_editions=all_ed, limit=FIGURE_FETCH_LIMIT,
                               include_illustrative=include_illustrative, basis_hint=sub.text,
+                              default_window=not all_ed,
                               **(_window_args(sub) if all_ed else {}))
         sub.fetch_cut += max(res["total_matching"] - res["returned"], 0)
         sub.illustrative_ids |= set(res.get("illustrative_ids", ()))
@@ -786,7 +797,7 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
     fg.mark_period_gap(rows)
     rows.sort(key=lambda r: (r.get("basis_rank", 0), fg._MATCH_RANK[r["match"]], r.get("band_context", False),
                              fg._has_sample_size(r), r.get("period_gap", 0), fg.statistic_rank(r["statistic"], wants),
-                             -fg._year_num(r.get("report_year")), r["source"]))
+                             -fg._year_num(r.get("data_period")), -fg._year_num(r.get("report_year")), r["source"]))
     # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
     # segment, statistic, basis or a related metric) are sent only when nothing closer
     # exists, at most RELATED_CAP, and the notes say so.
@@ -1193,6 +1204,11 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
     for s in todo:
         for t, c in s.left_out_by_report.items():
             ps.left_out_detail[t] = ps.left_out_detail.get(t, 0) + c
+    shift_block = _shift_notes(lib, ps, todo)
+    for s_ in todo:
+        order = _order_note(s_.picked)
+        if order:
+            s_.notes.append(order)
     # The text block sent before the question: lookup notes, the plan, the notice.
     lines: list[str] = []
     seen_notes: set[str] = set()
@@ -1218,8 +1234,62 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
         plan.append(SHAPE_RULES)
     ps.plan_text = "\n".join(
         ([("BENCHMARK LOOKUP NOTES:\n" + "\n".join(lines))] if lines else [])
-        + (["\n".join(plan)] if plan else []))
+        + (["\n".join(plan)] if plan else [])
+        + ([shift_block] if shift_block else []))
     return ps
+
+
+MAX_SHIFT_LINES = 4
+
+
+def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
+    """Compute the turn's shifts (figures.compute_shifts) from an all-editions, recent-window lookup of
+    every benchmark part's metrics, and return the notes block that hands the exact lines to the model.
+    No model call. Sets ps.shifts / shifts_suppressed / shifts_skipped. "" when nothing is above the
+    threshold (smaller moves are left out silently)."""
+    rows: list[dict] = []
+    seen: set = set()
+    for s in subs:
+        if s.intent != "benchmark" or not s.metrics:
+            continue
+        seg = fg.usable_segment(lib, s.segment)
+        for m in s.metrics:
+            try:
+                res = fg.find_figures(lib, m, band=s.band or None, segment=seg or None, all_editions=True, recent_window=True,
+                                      limit=FIGURE_FETCH_LIMIT, basis_hint=s.text)
+            except Exception:
+                _log.exception("shift lookup failed for %r", m)
+                continue
+            for r in res["rows"]:
+                k = (r["report_slug"], r["figure_key"])
+                if k not in seen:
+                    seen.add(k)
+                    rows.append(r)
+    if not rows:
+        return ""
+    out = fg.compute_shifts(rows, lib.shift_rules())
+    ps.shifts = out["shifts"][:MAX_SHIFT_LINES]
+    ps.shifts_suppressed = out["suppressed"] + max(len(out["shifts"]) - MAX_SHIFT_LINES, 0)
+    ps.shifts_skipped = out["skipped"]
+    if not ps.shifts:
+        return ""
+    return ("COMPUTED SHIFTS (worked out by the system from the stored reports above; these lines are exact):\n"
+            + "\n".join(f"  {i}. {x['line']}" for i, x in enumerate(ps.shifts, 1))
+            + "\nUnder a short heading \"What shifted\", write at most the two largest of these lines, each ending "
+              "\"(derived from stored reports)\", with the figures shown. No cause and no forecast. Never work out, add or "
+              "mention any other change over time yourself.")
+
+
+def _order_note(picked: list[dict]) -> str:
+    """The order table rows follow: newest data period first, then the more recent publisher."""
+    seen: list[str] = []
+    for r in sorted(picked, key=lambda r: (-fg._year_num(r.get("data_period")), -fg._year_num(r.get("report_year")))):
+        label = f"{r['source']} {r['report_year']} ({r['data_period']})" if r.get("data_period") else f"{r['source']} {r['report_year']}"
+        if label not in seen:
+            seen.append(label)
+    if len(seen) < 2:
+        return ""
+    return "Table row order, newest data period first: " + "; ".join(seen[:8]) + ". Follow this order in every table."
 
 
 def dedupe_docs(docs: list[dict]) -> list[dict]:

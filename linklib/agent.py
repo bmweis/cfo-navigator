@@ -1120,6 +1120,9 @@ def answer_question(
     try:
         resp = _get_client().messages.create(**kwargs)
         text, citations = _assemble_cited_answer(resp.content, sent_docs)
+        # A marker the model typed itself (no Sources entry) is dropped and recorded, never shown.
+        from .citations import drop_unresolved_markers
+        text, dropped_markers = drop_unresolved_markers(text, citations)
         # Only one of these is ever non-empty for a given turn: exa_hits
         # when Exa handled the web tier, native_web when the native tool did
         # (empty when it wasn't armed, or was armed but the model chose not
@@ -1150,7 +1153,10 @@ def answer_question(
             _log.exception("answer strip failed; answer left as written")
         try:
             from .answer_lint import lint_answer
-            lint = lint_answer(text)
+            lint = lint_answer(text, shifts=list(getattr(prestep, "shifts", []) or []))
+            if dropped_markers:
+                lint.append({"phrase": "marker with no source",
+                             "snippet": "Dropped from the answer, no Sources entry: " + ", ".join(dropped_markers)})
             # A sentence the strip kept (too short an answer) is still a breach to show.
             lint += [{"phrase": r["pattern"], "snippet": r["sentence"][:200]}
                      for r in stripped if r.get("action") == "kept_short"]

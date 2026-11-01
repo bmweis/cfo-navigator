@@ -731,6 +731,194 @@ def apply_edition_window(rows: list[dict], from_year: int | None = None) -> tupl
     return kept, note
 
 
+
+# --- republished figures -------------------------------------------------------------------
+# A report can print another survey's numbers and say so in its footer. Brian marks that in the admin
+# UI (benchmark_reports.cited_source, optionally for one metric family). The figures layer then never
+# shows the republisher as a second, independent source: when the original is stored and prints the
+# same cell, the original keeps the row and notes "also printed in <republisher>"; when it is not
+# stored, the row is labelled "<republisher>, citing <cited source>" and is one series with it.
+
+def _words(text: str) -> set:
+    return set(re.findall(r"[a-z0-9&]+", _lc(text)))
+
+
+def find_cited_original(cited: str, reports: dict, exclude_slug: str) -> str:
+    """Slug of the stored report a cited-source name points at (every word of the name is in the report's
+    publisher, title and year), or ""."""
+    need = _words(cited)
+    if not need:
+        return ""
+    for slug, rep in reports.items():
+        if slug != exclude_slug and need <= _words(f"{rep.get('source', '')} {rep.get('report', '')} {rep.get('report_year', '')}"):
+            return slug
+    return ""
+
+
+def _cell_key(r: dict) -> tuple:
+    return (name_key(r["metric"]) or frozenset({_lc(r["metric"])}), _lc(r["band"]), _basis_key(r["band_basis"]),
+            _lc(r["segment"]), _lc(r["statistic"]), _lc(r["unit"]), _lc(r["value"]))
+
+
+def collapse_republished(rows: list[dict], reports: dict) -> tuple[list[dict], list[str]]:
+    """(rows, notes). See the section comment. `reports` is {slug: benchmark_reports row}."""
+    notes: list[str] = []
+    cells: dict[tuple, dict] = {}
+    for r in rows:
+        cells.setdefault((r["report_slug"], _cell_key(r)), r)
+    drop: set[int] = set()
+    folded: dict[str, int] = {}
+    for r in rows:
+        rep = reports.get(r["report_slug"]) or {}
+        cited = (rep.get("cited_source") or "").strip()
+        if not cited:
+            continue
+        fam = (rep.get("cited_source_metric") or "").strip()
+        if fam and _lc(fam) not in _lc(r["metric"]):
+            continue
+        orig_slug = find_cited_original(cited, reports, r["report_slug"])
+        who = ", ".join(x for x in (r["source"], r["report"]) if x) + (f" ({r['report_year']})" if r["report_year"] else "")
+        r["cited_source"] = cited
+        r["series"] = (reports[orig_slug]["source"] if orig_slug else cited)
+        o = cells.get((orig_slug, _cell_key(r))) if orig_slug else None
+        if o is not None and o is not r:
+            if who not in o["also_printed_in"]:
+                o["also_printed_in"].append(who)
+            drop.add(id(r))
+            folded[who] = folded.get(who, 0) + 1
+            continue
+        r["gaps"].append(f"republished: this report says its figures come from {cited}; it is one series with that source, "
+                         "not a second source")
+    if folded:
+        notes.append("Republished figures were folded into the original: "
+                     + "; ".join(f"{n} row(s) of {w}" for w, n in folded.items())
+                     + ". Each original row says where else it is printed. Never count them as two sources.")
+    return [r for r in rows if id(r) not in drop], notes
+
+
+# --- computed shifts ------------------------------------------------------------------------
+# A change between two editions of one series, worked out here from stored rows and handed to the
+# model as exact lines. Reported only above a per-metric threshold: 3 points for a percent metric,
+# 10 percent relative for everything else (metric_registry.shift_threshold overrides). Smaller
+# moves are left out silently; the count is kept for the admin row.
+
+DEFAULT_SHIFT_POINTS = 3.0
+DEFAULT_SHIFT_RELATIVE = 10.0
+
+
+def _is_percent(unit) -> bool:
+    u = _lc(unit)
+    return "%" in u or "percent" in u or u in ("pct", "pp")
+
+
+def shift_rule(unit, canonical: str = "", rules: dict | None = None) -> tuple[float, str]:
+    """(threshold, kind): the registry rule for the metric when it has one, else the default for its unit."""
+    if rules and _lc(canonical) in rules:
+        t, k = rules[_lc(canonical)]
+        if t is not None and k in ("points", "relative"):
+            return float(t), k
+    return (DEFAULT_SHIFT_POINTS, "points") if _is_percent(unit) else (DEFAULT_SHIFT_RELATIVE, "relative")
+
+
+def _num(x: float) -> str:
+    return f"{x:.1f}".rstrip("0").rstrip(".")
+
+
+def _ends(r: dict) -> str:
+    return f"{r['source']}, {r['report']}".strip(", ") + (f", {r['data_period']}" if r["data_period"] else "")
+
+
+def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
+    """{shifts, suppressed, skipped}. `rows` come from an all-editions, recent-window lookup.
+    shifts: largest first, each {metric, band, statistic, unit, kind, threshold, delta, size, from, to,
+    directional, line}. A change inside one publisher's series is preferred (earliest to newest edition
+    in the window); a pair across publishers is used only when no publisher has two editions, and is
+    labelled directional. A cell that holds different values inside one report is skipped and named in
+    `skipped`. A republisher's row is one series with the source it cites (row["series"])."""
+    skipped: list[str] = []
+    ok: list[dict] = []
+    for r in rows:
+        if r["match"] not in ("exact", "adjacent_band") or r.get("band_context") or r.get("other_basis"):
+            continue
+        if r.get("value_num") is None:
+            continue
+        if any(g.startswith("values differ within the report") for g in r["gaps"]):
+            label = f"{r['metric']} at {r['band'] or 'no band'} in {_ends(r)}: the report prints different values for the same figure"
+            if label not in skipped:
+                skipped.append(label)
+            continue
+        ok.append(r)
+    base = lambda r: (name_key(r["metric"]) or frozenset({_lc(r["metric"])}), _lc(r["band"]), _basis_key(r["band_basis"]),
+                      _lc(r["segment"]), _lc(r["statistic"]), _lc(r["denominator"]), _lc(r["unit"]),
+                      r.get("basis_group") or "")
+    groups: dict[tuple, dict[str, list[dict]]] = {}
+    for r in ok:
+        groups.setdefault(base(r), {}).setdefault(_lc(r.get("series") or r["source"]), []).append(r)
+    shifts: list[dict] = []
+    suppressed = 0
+
+    def _emit(a: dict, b: dict, directional: bool) -> None:
+        nonlocal suppressed
+        thr, kind = shift_rule(b["unit"], b.get("canonical_metric", ""), rules)
+        delta = b["value_num"] - a["value_num"]
+        if kind == "relative":
+            if not a["value_num"]:
+                return
+            size = abs(delta) / abs(a["value_num"]) * 100
+        else:
+            size = abs(delta)
+        if size <= thr:
+            suppressed += 1
+            return
+        unit = "percent" if _is_percent(b["unit"]) else (b["unit"] or "")
+        unit_txt = "points" if kind == "points" else "percent"
+        direction = "up" if delta > 0 else "down"
+        v = lambda x: _num(x["value_num"]) + ("%" if _is_percent(x["unit"]) else (f" {x['unit']}" if x["unit"] else ""))
+        line = (f"{b['metric']} at {b['band'] or 'no band'} ({b['statistic'] or 'statistic not stated'}): {direction} {_num(size)} "
+                f"{unit_txt}, from {v(a)} ({_ends(a)}) to {v(b)} ({_ends(b)}); "
+                + ("different surveys, directional only" if directional else f"one series: {a['series'] or a['source']}")
+                + "; derived from stored reports")
+        shifts.append({"metric": b["metric"], "band": b["band"], "statistic": b["statistic"], "unit": unit, "kind": kind,
+                       "threshold": thr, "delta": round(delta, 4), "size": round(size, 4), "directional": directional,
+                       "from": {"source": a["source"], "report": a["report"], "year": a["report_year"], "period": a["data_period"],
+                                "value": a["value"]},
+                       "to": {"source": b["source"], "report": b["report"], "year": b["report_year"], "period": b["data_period"],
+                              "value": b["value"]},
+                       "line": line, "_norm": size / thr})
+
+    for key, by_series in groups.items():
+        made = False
+        for series_rows in by_series.values():
+            by_ed: dict[int, dict] = {}
+            for r in series_rows:
+                y = _year_num(r["report_year"])
+                if y <= 0:
+                    continue
+                cur = by_ed.get(y)
+                if cur is None or _year_num(r["data_period"]) > _year_num(cur["data_period"]):
+                    by_ed[y] = r
+            if len(by_ed) < 2:
+                continue
+            ys = sorted(by_ed)
+            a, b = by_ed[ys[0]], by_ed[ys[-1]]
+            ya, yb = _year_num(a["data_period"]), _year_num(b["data_period"])
+            if ya > 0 and yb > 0 and yb <= ya:
+                continue          # the same data period printed twice is not a change
+            made = True
+            _emit(a, b, False)
+        if not made and len(by_series) >= 2:
+            newest = sorted((max(v, key=lambda x: (_year_num(x["data_period"]), _year_num(x["report_year"])))
+                             for v in by_series.values()),
+                            key=lambda x: (_year_num(x["data_period"]), _year_num(x["report_year"])))
+            a, b = newest[-2], newest[-1]
+            if _year_num(a["data_period"]) < _year_num(b["data_period"]):
+                _emit(a, b, True)
+    shifts.sort(key=lambda s: (-s["_norm"], s["line"]))
+    for s in shifts:
+        s.pop("_norm", None)
+    return {"shifts": shifts, "suppressed": suppressed, "skipped": skipped}
+
+
 # --- find_figures --------------------------------------------------------------
 
 _FTS_STOP = {"the", "of", "and", "for", "a", "an", "in", "to", "per", "by", "rate", "ratio", "metric"}
@@ -762,6 +950,10 @@ def _row_out(r: dict, landings: dict, canonical: str) -> dict:
         "unit": r["unit"], "n": r["n"], "page": r["page"],
         "link": land["url"], "link_note": "" if land["url"] else NO_LINK_NOTE,
         "match": "exact", "gaps": [],
+        # Republished figures: the original a report cites as its source, the series a row belongs to
+        # (a republisher's row counts as one series with the source it cites) and the republishers
+        # whose identical cell was folded into this row.
+        "cited_source": "", "series": r["source"], "also_printed_in": [],
     }
 
 
@@ -849,7 +1041,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
                  basis=None, denominator=None, all_editions: bool = False,
                  limit: int = DEFAULT_LIMIT, include_illustrative: bool = False,
                  basis_hint: str = "", recent_window: bool = False,
-                 from_year: int | None = None) -> dict:
+                 from_year: int | None = None, default_window: bool = False) -> dict:
     """Stored figures for a metric, exact matches first, every gap disclosed.
 
     Returns {rows, resolution, notes, total_matching, returned, truncated,
@@ -1090,6 +1282,20 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         older = sorted({(r["report"], r["report_year"]) for r in rows
                         if _year_num(r["report_year"]) < newest[_family(r)]})
         rows = [r for r in rows if _year_num(r["report_year"]) == newest[_family(r)]]
+        if default_window and newest:
+            # The recent window also applies to the newest edition of each report: one whose newest
+            # edition is more than EDITION_WINDOW_YEARS before the newest on file (any publisher) is
+            # left out, and named. The newest family always stays, so the window is never empty.
+            cutoff = max(newest.values()) - EDITION_WINDOW_YEARS
+            old_fams = {f for f, y in newest.items() if 0 < y < cutoff}
+            if old_fams:
+                gone = sorted({(r["report"], r["report_year"]) for r in rows if _family(r) in old_fams},
+                              key=lambda t: (-_year_num(t[1]), t[0]))
+                rows = [r for r in rows if _family(r) not in old_fams]
+                if gone:
+                    notes.append("Older editions outside the recent window were left out: "
+                                 + "; ".join(f"{n} ({y})" for n, y in gone)
+                                 + ". Ask \"since <year>\" or \"historically\" for them.")
         if older:
             notes.append("Older editions exist and were left out: "
                          + "; ".join(f"{n} ({y})" for n, y in older)
@@ -1106,6 +1312,12 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         if window_note:
             notes.append(window_note)
 
+    # Republished figures: one series with the source they cite, never a second source.
+    rep_meta = {r["report_slug"]: r for r in lib.list_benchmark_reports()}
+    if any(m.get("cited_source") for m in rep_meta.values()):
+        rows, rep_notes = collapse_republished(rows, rep_meta)
+        notes += rep_notes
+
     # Newest edition first, always: when a cap cuts rows it cuts the oldest.
     wants = statistic_wants(f"{metric} {basis_hint}")
     mark_period_gap(rows)
@@ -1113,6 +1325,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
                              _has_sample_size(r),   # a survey that states its sample before a guide that does not
                              r["period_gap"],       # within a report, the newest data period first (FY2025 before FY2024)
                              statistic_rank(r["statistic"], wants),   # median first, extremes last (a cap cuts the last)
+                             -_year_num(r["data_period"]),            # newest data period first across reports
                              -_year_num(r["report_year"]),
                              r["source"], r["report"], r["band_basis"],
                              (parse_band(r["band"]) or {"lo": 0})["lo"], r["statistic"]))

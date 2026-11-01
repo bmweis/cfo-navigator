@@ -226,7 +226,7 @@ def test_e_a_ratio_or_growth_name_is_not_in_the_headcount_family():
 def test_e4_the_shape_rules_reach_the_lookup_notes_of_a_shape_turn(lib):
     ps = plan(lib, F.QUESTION, {"subqueries": [F._part("benchmark", "Total employees", "x"),
                                                F._part("benchmark", "Gross margin", "y")], "rest_of_question": ""})
-    for phrase in ("ANSWER SHAPE", "Total row", "not printed", "never leave one out", "(c) What changed over time"):
+    for phrase in ("ANSWER SHAPE", "Total row", "not printed", "never leave one out", "(c) What shifted"):
         assert phrase in ps.plan_text, phrase
 
 

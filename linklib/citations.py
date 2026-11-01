@@ -41,6 +41,24 @@ def strip_citation_markers(text: str, numbers=None) -> str:
     return _MARKER_RE.sub(_sub, text)
 
 
+def drop_unresolved_markers(text: str, citations) -> tuple[str, list[str]]:
+    """Remove every `[n]` in an answer whose n has no entry in `citations`, and return (text, markers
+    dropped). extract_citations numbers sources 1..N in first-use order, so a marker above N, or a
+    marker in an answer with no sources, was typed by the model rather than placed by the Citations API
+    (it tends to type a document's position in the prompt, which is not a Sources number). Left in, it
+    shows as bare text that points at nothing. Never touches a 3-or-more digit bracket (a year)."""
+    cited = {int(c["n"]) for c in (citations or []) if isinstance(c, dict) and c.get("n") is not None}
+    dropped: list[str] = []
+
+    def _sub(m):
+        if int(m.group(1)) in cited:
+            return m.group(0)
+        dropped.append(f"[{m.group(1)}]")
+        return ""
+
+    return re.sub(r"[ \t]*\[(\d{1,2})\](?!\()", _sub, text or ""), dropped
+
+
 def citation_problem(texts, citations) -> str | None:
     """Why a grounded AI draft's citations are unusable, or None when they
     are fine (issue #642). `texts` is every cited field's text; `citations`

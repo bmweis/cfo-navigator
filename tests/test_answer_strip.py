@@ -125,7 +125,10 @@ def test_the_record_is_written_and_stored_text_equals_the_poll_text(lib, monkeyp
     monkeypatch.setattr(agent, "_get_client", lambda: _Client(EXAMPLE))
     uid = lib.create_user("asker", "supersecret", role="user")
     out = orch.run_ask(lib, uid, "How are costs structured?", request_id="req-0123456789abcdef")
-    assert out["answer"] == PAD + "\n\nThat's a 30-point compression in three years." and "striking" not in out["answer"]
+    # The stub model types a [1] but cites no source, so the unresolved marker is dropped (PR 765).
+    from linklib.citations import drop_unresolved_markers
+    expected = drop_unresolved_markers(PAD + "\n\nThat's a 30-point compression in three years.", [])[0]
+    assert out["answer"] == expected and "striking" not in out["answer"]
     row = dict(lib.conn.execute("SELECT * FROM ask_questions").fetchone())
     assert row["answer"] == out["answer"]
     rec = json.loads(row["stripped_json"])

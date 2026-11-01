@@ -38124,7 +38124,22 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
                 f'<input type="url" id="landing-{_esc(r["report_slug"])}" name="landing_url" value="{manual}" '
                 f'placeholder="https://" style="flex:1 1 220px;min-width:0;max-width:100%;font-size:13px;padding:6px 8px;">'
                 f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save</button></form>')
-        return shown + form
+        cs = _esc(r.get("cited_source") or "")
+        cm = _esc(r.get("cited_source_metric") or "")
+        slug = _esc(r["report_slug"])
+        cited = (f'<form method="post" action="/admin/reader/figures/cited-source" '
+                 f'style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">'
+                 f'<input type="hidden" name="report_slug" value="{slug}">'
+                 f'<label for="cited-{slug}" style="position:absolute;left:-9999px;">Cited source for {slug}</label>'
+                 f'<input type="text" id="cited-{slug}" name="cited_source" value="{cs}" maxlength="200" '
+                 f'placeholder="Republished from (for example, High Alpha 2025 SaaS Benchmarks)" '
+                 f'style="flex:1 1 220px;min-width:0;max-width:100%;font-size:13px;padding:6px 8px;">'
+                 f'<label for="citedm-{slug}" style="position:absolute;left:-9999px;">Metric family for {slug}</label>'
+                 f'<input type="text" id="citedm-{slug}" name="cited_source_metric" value="{cm}" maxlength="120" '
+                 f'placeholder="Only for metrics containing (optional)" '
+                 f'style="flex:1 1 160px;min-width:0;max-width:100%;font-size:13px;padding:6px 8px;">'
+                 f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save source</button></form>')
+        return shown + form + cited
 
     report_rows = "".join(
         f'<tr><td style="padding:10px 12px;font-size:13px;white-space:nowrap;vertical-align:top;">{_esc(r["report_slug"])}</td>'
@@ -38148,12 +38163,39 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_COUNT}px;">Year</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Rows stored</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_DATE}px;">Loaded</th>
-  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_MESSAGE}px;">Landing URL</th>
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_MESSAGE}px;">Landing URL and cited source</th>
 </tr></thead>
 <tbody>{report_rows}</tbody>
 </table>
 </div>""" if reports else '<p style="color:var(--muted);font-size:13.5px;margin:0;">No reports loaded yet.</p>')
     cols = ", ".join(f"<code>{c}</code>" for c in _fg.COLUMNS)
+    _lib2 = _lib()
+    try:
+        _reg = [dict(r) for r in _lib2.conn.execute(
+            "SELECT canonical_metric, shift_threshold, shift_kind FROM metric_registry ORDER BY canonical_metric")]
+    finally:
+        _lib2.close()
+    _srows = "".join(
+        f'<tr><td style="padding:8px 12px;font-size:13px;">{_esc(m["canonical_metric"])}</td>'
+        f'<td colspan="3" style="padding:8px 12px;"><form method="post" action="/admin/reader/figures/shift-threshold" '
+        f'style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+        f'<input type="hidden" name="canonical_metric" value="{_esc(m["canonical_metric"])}">'
+        f'<input type="number" step="any" min="0" name="threshold" value="{"" if m["shift_threshold"] is None else _esc(m["shift_threshold"])}" '
+        f'placeholder="default" aria-label="Shift threshold for {_esc(m["canonical_metric"])}" '
+        f'style="width:110px;min-width:0;font-size:13px;padding:6px 8px;">'
+        f'<select name="kind" aria-label="Kind" style="font-size:13px;padding:6px 8px;">'
+        f'<option value="points"{" selected" if m["shift_kind"] == "points" else ""}>points</option>'
+        f'<option value="relative"{" selected" if m["shift_kind"] == "relative" else ""}>percent relative</option></select>'
+        f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save</button></form></td></tr>'
+        for m in _reg)
+    shift_section = (
+        '<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;max-width:900px;">A change between two editions is '
+        'reported on an answer only above this size. Blank uses the default: more than 3 points for a percent metric, more '
+        'than 10 percent relative change for everything else. Smaller moves are left out silently.</p>'
+        + (f'<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;"><table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">'
+           f'<thead><tr style="background:var(--accent-light);"><th style="{_FIGURES_TH}">Metric</th>'
+           f'<th style="{_FIGURES_TH}" colspan="3">Threshold and kind</th></tr></thead><tbody>{_srows}</tbody></table></div>'
+           if _reg else '<p style="color:var(--muted);font-size:13.5px;margin:0;">No metrics in the registry yet.</p>'))
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Benchmark figures</h1>
@@ -38173,6 +38215,8 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
 <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;max-width:900px;">{summary["reports"]:,} reports, {summary["figures"]:,} figures, {summary["metrics"]:,} distinct metric names. {summary["null_value_num"]:,} {"figure has" if summary["null_value_num"] == 1 else "figures have"} a value that is not a plain number. Metric registry: {summary["registry"]:,} metrics, {summary["aliases"]:,} aliases. Metric name map: {summary["name_map"]:,} rows (filled by a later job).</p>
 {reports_table}
 
+<h2 style="font-size:16px;margin:28px 0 10px;">Shift thresholds</h2>
+{shift_section}
 <h2 style="font-size:16px;margin:28px 0 10px;">Landing URLs</h2>
 <form method="post" action="/admin/reader/figures/landing-preview" enctype="multipart/form-data"
       style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;max-width:900px;">
@@ -38548,6 +38592,64 @@ async def admin_figures_landing(request: Request):
     if not ok:
         return _figures_page(error=msg, status=400)
     return _figures_page(notice=_esc(f"Landing URL {'saved' if url else 'cleared'} for {slug}."))
+
+
+@app.post("/admin/reader/figures/cited-source", response_class=HTMLResponse)
+async def admin_figures_cited_source(request: Request):
+    """Sets or clears the original source a republishing report cites (optionally for one metric family).
+    Saved with its side effects: the audit log row, and the stored figures are untouched."""
+    _digest_gate(request, post=True)
+    form = await request.form()
+    slug = str(form.get("report_slug") or "").strip()
+    cited = str(form.get("cited_source") or "").strip()
+    fam = str(form.get("cited_source_metric") or "").strip()
+
+    def _work():
+        lib = _lib()
+        try:
+            try:
+                ok = lib.set_report_cited_source(slug, cited, fam)
+            except ValueError as e:
+                return str(e), False
+            if ok:
+                _log_archive_audit(lib, request, "edit", None,
+                                   detail=f"benchmark report cited source {'set to ' + cited if cited else 'cleared'}"
+                                          f"{' for ' + fam if fam else ''}: {slug}")
+            return ("" if ok else "That report is not loaded."), ok
+        finally:
+            lib.close()
+    msg, ok = await run_in_threadpool(_work)
+    if not ok:
+        return _figures_page(error=msg, status=400)
+    return _figures_page(notice=_esc(f"Cited source {'saved' if cited else 'cleared'} for {slug}."))
+
+
+@app.post("/admin/reader/figures/shift-threshold", response_class=HTMLResponse)
+async def admin_figures_shift_threshold(request: Request):
+    """Sets or clears (blank) one registry metric's shift threshold."""
+    _digest_gate(request, post=True)
+    form = await request.form()
+    metric = str(form.get("canonical_metric") or "").strip()
+    raw = str(form.get("threshold") or "").strip()
+    kind = str(form.get("kind") or "").strip()
+
+    def _work():
+        lib = _lib()
+        try:
+            try:
+                ok = lib.set_metric_shift(metric, raw or None, kind)
+            except ValueError as e:
+                return str(e), False
+            if ok:
+                _log_archive_audit(lib, request, "edit", None,
+                                   detail=f"metric shift threshold {raw + ' ' + kind if raw else 'cleared'}: {metric}")
+            return ("" if ok else "That metric is not in the registry."), ok
+        finally:
+            lib.close()
+    msg, ok = await run_in_threadpool(_work)
+    if not ok:
+        return _figures_page(error=msg, status=400)
+    return _figures_page(notice=_esc(f"Shift threshold {'saved' if raw else 'cleared'} for {metric}."))
 
 
 @app.post("/admin/reader/figures/registry", response_class=HTMLResponse)
