@@ -748,6 +748,80 @@ def _flag(row: dict, match: str, gap: str) -> None:
         row["match"] = match
 
 
+# --- statistic ranking (a preference, never a drop) ---------------------------------------
+# A point lookup wants the median, then the mean, then a single printed value. Quartiles follow
+# them; they move up (right behind the median) only when the question asks for a range or spread.
+# Minimum and maximum come last unless the question asks for them. A lower-ranked statistic is
+# what a row cap cuts first; nothing is removed because of its statistic.
+_WANT_RANGE = re.compile(r"\b(?:ranges?|spread|quartiles?|interquartile|percentiles?|p25|p75|iqr)\b")
+_WANT_EXTREME = re.compile(r"\b(?:min|max|minimum|maximum|lowest|highest|smallest|largest)\b")
+
+
+def statistic_wants(text: str) -> dict:
+    low = _lc(text)
+    return {"range": bool(_WANT_RANGE.search(low)), "extreme": bool(_WANT_EXTREME.search(low))}
+
+
+def statistic_rank(statistic, wants: dict | None = None) -> float:
+    wants = wants or {}
+    s = _lc(statistic)
+    if s in ("median", "p50", "50th percentile", "50th"):
+        return 0
+    if s in ("mean", "average", "avg"):
+        return 1
+    if s in ("min", "minimum", "max", "maximum", "lowest", "highest"):
+        return 2.5 if wants.get("extreme") else 5
+    if re.match(r"^(p\d+|\d+(st|nd|rd|th)( percentile)?|q[1-4]|(top|bottom|upper|lower) quartile|top_quartile|bottom_quartile)", s):
+        return 1.5 if wants.get("range") else 4
+    return 2          # empty, "value", "reported": the single printed value
+
+
+_TOTAL_FTE_KEY = None
+
+
+def is_total_fte_row(row: dict) -> bool:
+    """True for a total headcount row: "Total employees", "Headcount: Total", "FTEs". The family
+    name_key() folds headcount, FTEs and employees together and drops "total"."""
+    global _TOTAL_FTE_KEY
+    if _TOTAL_FTE_KEY is None:
+        _TOTAL_FTE_KEY = name_key("Total employees")
+    return bool(_TOTAL_FTE_KEY) and name_key(row.get("metric") or "") == _TOTAL_FTE_KEY \
+        and not _PER_HEAD_NAME.search(_lc(row.get("metric")))
+
+
+_PER_HEAD_NAME = re.compile(r"\bper\b|/|%|percent|growth|attrition|turnover")
+
+
+def dedupe_cells(rows: list[dict]) -> tuple[list[dict], int, int]:
+    """Collapse identical rows inside one report (same period, band, segment, metric, denominator,
+    statistic, unit and value: the same cell extracted twice). Where one cell holds different values
+    (201 and 200), both stay and each says "values differ within the report". Returns
+    (rows, duplicates_removed, conflicting_cells). First stored row (lowest figure_key) is kept."""
+    seen: dict[tuple, dict] = {}
+    cells: dict[tuple, list[dict]] = {}
+    out: list[dict] = []
+    removed = 0
+    for r in sorted(rows, key=lambda x: x["figure_key"]):
+        cell = (r["report_slug"], _lc(r["data_period"]), _basis_key(r["band_basis"]), _lc(r["band"]), _lc(r["segment"]),
+                _lc(r["metric"]), _lc(r["denominator"]), _lc(r["statistic"]), _lc(r["unit"]))
+        full = cell + (_lc(r["value"]),)
+        if full in seen:
+            removed += 1
+            continue
+        seen[full] = r
+        cells.setdefault(cell, []).append(r)
+        out.append(r)
+    conflicts = 0
+    for grp in cells.values():
+        if len(grp) > 1:
+            conflicts += 1
+            vals = " and ".join(sorted({str(g["value"]) for g in grp}))
+            for g in grp:
+                g["gaps"].append(f"values differ within the report: it prints {vals} for the same figure")
+    keep = {id(r) for r in out}
+    return [r for r in rows if id(r) in keep], removed, conflicts
+
+
 def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year=None,
                  basis=None, denominator=None, all_editions: bool = False,
                  limit: int = DEFAULT_LIMIT, include_illustrative: bool = False,
@@ -856,6 +930,12 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
             notes.append(f"{illustrative_left_out} illustrative rows left out (a worked example company, not survey data).")
 
     rows = [_row_out(r, landings, canon) for r, canon in cand]
+    rows, dup_removed, dup_conflicts = dedupe_cells(rows)
+    if dup_removed:
+        notes.append(f"{dup_removed} duplicate row(s) inside a report (the same figure stored twice) were collapsed to one.")
+    if dup_conflicts:
+        notes.append(f"{dup_conflicts} figure(s) are printed with different values inside one report; both values are "
+                     "returned and flagged. Name both; do not pick one.")
     for row in rows:
         if related:
             _flag(row, "related_metric", "metric name only partly matches the request")
@@ -1004,8 +1084,10 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
             notes.append(window_note)
 
     # Newest edition first, always: when a cap cuts rows it cuts the oldest.
+    wants = statistic_wants(f"{metric} {basis_hint}")
     rows.sort(key=lambda r: (r["basis_rank"], _MATCH_RANK[r["match"]], r["band_context"],
                              _has_sample_size(r),   # a survey that states its sample before a guide that does not
+                             statistic_rank(r["statistic"], wants),   # median first, extremes last (a cap cuts the last)
                              -_year_num(r["report_year"]),
                              r["source"], r["report"], r["band_basis"],
                              (parse_band(r["band"]) or {"lo": 0})["lo"], r["statistic"]))

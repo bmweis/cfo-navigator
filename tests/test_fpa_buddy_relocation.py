@@ -72,7 +72,7 @@ def test_past_questions_search_only_shows_helpful_rated(env):
     lib = Library(db)
     uid = lib.create_user("asker", "supersecret", role="user")
     helpful_id = lib.record_ask_question(
-        uid, "What is a good rule of thumb for burn multiple?",
+        uid, "What is a good heuristic for burn multiple?",
         "A burn multiple under 2x is generally considered efficient.",
         "claude-sonnet-4-6", "standard", True, False, True, cost_usd=0.01)
     unhelpful_id = lib.record_ask_question(
@@ -93,7 +93,7 @@ def test_past_questions_search_only_shows_helpful_rated(env):
     allh = client.get("/tools/fpa-buddy").text
     assert "An unrated question nobody has judged yet." in allh
     html = client.get("/tools/fpa-buddy?helpful=1").text
-    assert "What is a good rule of thumb for burn multiple?" in html
+    assert "What is a good heuristic for burn multiple?" in html
     assert "How do I calculate CAC payback the wrong way?" not in html
     assert "An unrated question nobody has judged yet." not in html
 

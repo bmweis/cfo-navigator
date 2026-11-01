@@ -35,6 +35,20 @@ INFERENCE = (
     ("sharp", re.compile(r"\bsharp\b", re.I)),
     ("steep", re.compile(r"\bsteep\b", re.I)),
 )
+# Characterization that still gets past the strip. Flag only, any sentence, cited or not; never stripped.
+# Known false positives: "stable" in "a stable value", "toward the" in a spatial or procedural sentence,
+# "healthy" in a quoted metric name ("healthy ARR growth" a report prints), "attractive" in a report title.
+CHARACTERIZATION = (
+    ("high end of", re.compile(r"\bhigh end of\b", re.I)),
+    ("low end of", re.compile(r"\blow end of\b", re.I)),
+    ("relatively stable", re.compile(r"\brelatively stable\b", re.I)),
+    ("stable", re.compile(r"\bstable\b(?<!relatively stable)", re.I)),
+    ("structurally", re.compile(r"\bstructurally\b", re.I)),
+    ("toward the", re.compile(r"\btoward the\b", re.I)),
+    ("healthy", re.compile(r"\bhealthy\b", re.I)),
+    ("attractive", re.compile(r"\battractive\b(?! to investors)", re.I)),
+    ("rule of thumb", re.compile(r"\brule[- ]of[- ]thumb\b", re.I)),
+)
 # A trend claim in a sentence with no figure: nothing shown supports it. Flag only. Stripping is not
 # safe here (the same words open true sentences with a number in the next clause), so the admin row shows it.
 TREND = (
@@ -77,6 +91,9 @@ def lint_answer(text: str) -> list[dict]:
                 flags.append({"phrase": phrase, "snippet": sent[:200]})
         for phrase, rx in INFERENCE:
             if rx.search(sent):
+                flags.append({"phrase": phrase, "snippet": sent[:200]})
+        for phrase, rx in CHARACTERIZATION:
+            if rx.search(sent) and not (phrase == "stable" and re.search(r"relatively stable", sent, re.I)):
                 flags.append({"phrase": phrase, "snippet": sent[:200]})
         if not _NUMBER.search(sent):
             for phrase, rx in TREND:
