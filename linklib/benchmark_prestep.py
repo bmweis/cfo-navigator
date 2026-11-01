@@ -659,14 +659,14 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
             ed = (_norm(r["source"]), _norm(r["report"]), _norm(r["report_year"]))
             if ed not in best or (_norm(r["segment"]) in ("all", "") and _norm(rows[best[ed]]["segment"]) not in ("all", "")):
                 best[ed] = i
-    reserved = sorted(best.values(), key=lambda i: (-fg._year_num(rows[i]["report_year"]), i))[:max(cap // 2, 1)]
+    reserved = sorted(best.values(), key=lambda i: (-fg._year_num(rows[i].get("report_year")), i))[:max(cap // 2, 1)]
     chosen += reserved
     # The publisher floor: the best-ranked row (rows are sorted best first, newest data period first) of each
     # publisher's NEWEST edition inside the rows given. Older editions of a publisher never take a floor slot.
     newest_ed: dict[str, int] = {}
     for r in rows:
         src = _norm(r["source"])
-        newest_ed[src] = max(newest_ed.get(src, -1), fg._year_num(r["report_year"]))
+        newest_ed[src] = max(newest_ed.get(src, -1), fg._year_num(r.get("report_year")))
     floor: list[int] = []
     seen_src: set = set()
     seen_basis: set = set()
@@ -675,7 +675,7 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
         if i in chosen:
             seen_src.add(src)
             continue
-        if fg._year_num(r["report_year"]) != newest_ed[src]:
+        if fg._year_num(r.get("report_year")) != newest_ed[src]:
             continue
         if src not in seen_src or (basis and basis not in seen_basis):
             seen_src.add(src)
@@ -683,7 +683,7 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
                 seen_basis.add(basis)
             floor.append(i)
     # If the floor alone would overfill the cap, newer editions keep their slot and older ones are cut first.
-    floor.sort(key=lambda i: (-fg._year_num(rows[i]["report_year"]), i))
+    floor.sort(key=lambda i: (-fg._year_num(rows[i].get("report_year")), i))
     chosen += floor[:max(cap - len(chosen), 0)]
     per_basis: dict[str, int] = {}
     for i in chosen:
@@ -786,7 +786,7 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
     fg.mark_period_gap(rows)
     rows.sort(key=lambda r: (r.get("basis_rank", 0), fg._MATCH_RANK[r["match"]], r.get("band_context", False),
                              fg._has_sample_size(r), r.get("period_gap", 0), fg.statistic_rank(r["statistic"], wants),
-                             -fg._year_num(r["report_year"]), r["source"]))
+                             -fg._year_num(r.get("report_year")), r["source"]))
     # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
     # segment, statistic, basis or a related metric) are sent only when nothing closer
     # exists, at most RELATED_CAP, and the notes say so.
@@ -935,7 +935,6 @@ def merge_figure_docs(subs: list[Sub], tier: str, reports: dict) -> list[dict]:
     budget = FIGURES_CHARS.get(tier, 9000) * len(active)
     included: set = set()
     docs, left = _figure_docs(merged, budget, reports, included)
-    by_doc: dict[tuple, int] = {}
     for d in docs:
         d["parts"] = sorted({n for g in merged if _doc_title(g) == d["title"] for n in g["asked_by"]})
     for n, s in active:
