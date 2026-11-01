@@ -1702,6 +1702,8 @@ _CSS = """
   /* Sitewide wordmark treatment — nav + footer "CFO Navigator"/logo mark only,
      never body or heading text. */
   --font-wordmark:'Permanent Marker',cursive;
+  /* Dropdown caret: one size sitewide (BRAND.md section 5, "One select caret, one size"). */
+  --select-caret-size:16px;
 }
 *{box-sizing:border-box;}
 /* Phase F8: mobile browsers (WebKit and Chromium alike) auto-boost font
@@ -2005,6 +2007,25 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 
 /* Inputs — navy focus border + soft seafoam ring */
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(163,229,212,.55);}
+
+/* One select caret, one size (BRAND.md section 5). Every <select> is a native element drawn with
+   appearance:none and this chevron; --select-caret-size is the only number to change. Most selects
+   carry inline style (a `background:#fff` shorthand would reset the image, an inline `padding`
+   shorthand would reset padding-right), so the caret properties (and line-height:1.4, which keeps a select the height a native one is, about 1.4 x font size: only
+   appearance:none makes a select honor the page's 1.65 line-height) are !important. That is the
+   one sanctioned override; background-color stays the page's own. Navy is #002975, muted #6F6A60,
+   written %23-escaped inside the data URI. The Buddy Depth and Sources buttons are not selects and
+   use the same image through .ask-dd-caret. webapp/checks.py "Select caret is the shared style"
+   fails on any other select rule that draws its own arrow. */
+:root{--select-caret-img:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23002975' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 6l4.5 4.5L12.5 6'/%3E%3C/svg%3E");
+  --select-caret-img-muted:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236F6A60' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 6l4.5 4.5L12.5 6'/%3E%3C/svg%3E");}
+select{-webkit-appearance:none!important;appearance:none!important;
+  background-image:var(--select-caret-img)!important;background-repeat:no-repeat!important;
+  background-position:right 12px center!important;background-size:var(--select-caret-size) var(--select-caret-size)!important;
+  padding-right:calc(var(--select-caret-size) + 20px)!important;line-height:1.4!important;text-overflow:ellipsis;}
+select:disabled{background-image:var(--select-caret-img-muted)!important;}
+.ask-dd-caret{display:inline-block;width:var(--select-caret-size);height:var(--select-caret-size);
+  background:var(--select-caret-img) no-repeat center/contain;}
 
 /* Footer — navy background sitewide (BRAND.md §4) */
 .site-footer{padding:24px 28px;display:flex;align-items:center;gap:14px;font-size:13px;background:var(--navy);color:rgba(255,255,255,.55);}
@@ -24747,7 +24768,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         <div class="ask-dd" id="ask-dd-top">
           <div class="ask-dd-row">
             <div class="ask-dd-col">
-              <label class="ask-dd-lbl"><span class="ask-dd-h">Depth</span><button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
+              <label class="ask-dd-lbl"><span class="ask-dd-h">Depth</span><button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true"></span></button></label>
               <div class="ask-dd-panel" data-dd="depth" hidden>
                 <div class="ask-tags" role="radiogroup" aria-label="Depth">
                   {tier_tags}
@@ -24755,7 +24776,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
               </div>
             </div>
             <div class="ask-dd-col">
-              <label class="ask-dd-lbl"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
+              <label class="ask-dd-lbl"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true"></span></button></label>
               <div class="ask-dd-panel" data-dd="sources" hidden>
                 <div class="ask-tags">
                   {source_tags}
@@ -24971,7 +24992,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-dd-btn[aria-expanded="true"]{{border-color:var(--navy);}}
 .ask-dd-k{{flex-shrink:0;}}
 .ask-dd-v{{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--navy);}}
-.ask-dd-caret{{flex-shrink:0;color:var(--muted);}}
+.ask-dd-caret{{flex-shrink:0;}}
 .ask-dd-panel{{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;}}
 .ask-dd-panel[hidden]{{display:none;}}
 .ask-dd-panel .ask-tags{{flex-direction:column;flex-wrap:nowrap;gap:2px;}}
@@ -30117,6 +30138,7 @@ _LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Outbound links open in a new tab",
         "Reading column holds its tables and grids",
         "Table actions column is headed Actions",
+        "Select caret is the shared style",
         "One table format",
     )),
     ("Site structure and content", (

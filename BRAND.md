@@ -598,6 +598,19 @@ graffiti marks on admin tables, forms, or the chat UI.
   within.
 - **Links** — navy; optional seafoam underline for emphasis in editorial copy.
 
+### One select caret, one size
+
+Every dropdown draws the same navy chevron at one size, `--select-caret-size` (default 16px; §7). It is a
+native `<select>` with `appearance:none`, not a custom widget, so the system picker still opens on a phone.
+The Buddy Depth and Sources buttons are not selects; they use the same image through `.ask-dd-caret`. The
+sitewide `select{...}` rule in `_CSS` is the only place an arrow is drawn. Its four caret properties and
+`line-height:1.4` are `!important` on purpose: most selects carry inline `background:#fff` and `padding`
+shorthands that would otherwise reset the image and the right padding. `line-height:1.4` keeps a select the
+height a native one is (about 1.4 times the font size); `appearance:none` alone makes it honor the page's 1.65.
+A select with its own arrow, `appearance` or caret image needs an entry in
+`brand_check.SELECT_CARET_ALLOWLIST` with its reason (none today). "Select caret is the shared style" on
+`/admin/checks` enforces it. To resize every caret, edit the one token.
+
 ### Status chips
 
 A status is a **non-interactive chip**: a plain glyph plus a word, 18px tall, rounded pill, no border, one neutral fill (`--line`) with `--ink-soft` text, 12px. It is never a button shape. Only actions get a border or a fill of their own.
@@ -1279,6 +1292,8 @@ colors for status only," §6, still holds everywhere else).
   /* Sitewide wordmark treatment — nav + footer "CFO Navigator"/logo mark only,
      never body or heading text. */
   --font-wordmark:'Permanent Marker',cursive;
+  /* Dropdown caret: one size sitewide (BRAND.md section 5, "One select caret, one size"). */
+  --select-caret-size:16px;
 }
 ```
 <!-- END GENERATED TOKENS -->
@@ -1336,6 +1351,8 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
     throughout.
   - Admin pages are out of scope entirely — see the sanctioned pending-count-badge exception
     below, which already puts more than one coral element on an admin screen.
+- **Select caret is the shared style (2026-11)** — §5's "One select caret, one size", enforced by
+  `brand_check.select_caret_problems()`: no CSS rule or inline style on a `<select>` may draw its own arrow.
 - **Reading column holds its tables and grids (2026-10)** — §5's rule, enforced by
   `linklib.brand_check.reading_column_problems()`, with its own `/admin/checks` row and
   `tests/test_reading_column_rule.py`. A **source** scan, for the same reason as outbound
