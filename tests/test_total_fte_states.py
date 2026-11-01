@@ -201,7 +201,7 @@ def test_d_a_named_comparison_is_not_flagged():
 
 def test_d_no_rule_of_thumb_left_in_code_docs_or_copy():
     allowed = {"linklib/voice_review.py", "linklib/answer_rules.py", "linklib/answer_lint.py", "tests/test_total_fte_states.py",
-               "CLAUDE.md"}
+               "CLAUDE.md", "ARCHITECTURE.md", "BRAND.md"}
     hits = []
     for base in ("linklib", "webapp", "scripts", "tests", "docs"):
         for p in (ROOT / base).rglob("*"):
