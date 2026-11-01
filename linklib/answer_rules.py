@@ -14,8 +14,8 @@ LENGTH_CEILING = {"quick": 6, "standard": 12, "deep": 18}
 
 def length_rule(effort: str = "standard") -> str:
     n = LENGTH_CEILING.get(effort or "standard", LENGTH_CEILING["standard"])
-    return (f"- Length: at most {n} sentences in the whole answer, not counting the table, and one table in "
-            "total (two only when two bases each need one). When the question has several parts, give each "
+    return (f"- Length: at most {n} sentences in the whole answer, not counting the tables, and at most two "
+            "tables in total, one per topic the user asked about. When the question has several parts, give each "
             "part one short heading and 3 to 4 sentences. Cut a sentence before you add a section.\n")
 
 
@@ -49,8 +49,9 @@ ANSWER_RULES = (
     "that give the headline figures, each with its publisher and year inside the sentence. Good: \"Median gross "
     "margin was 79% in FY2024 and 81% in FY2025 at $20M-$50M ARR (Example Benchmarks, 2026).\" Bad: a list of "
     "every row a report holds.\n"
-    "- After those sentences, at most one small table, only when it adds exact figures a CFO would copy. Six "
-    "rows at most, never rows that repeat the sentences. Skip the table when it would only repeat them.\n"
+    "- After those sentences, one small table per topic the user asked about and no more than two tables in "
+    "the answer, only when a table adds exact figures a CFO would copy. Six rows at most in each, never rows that "
+    "repeat the sentences. Skip a table that would only repeat them.\n"
     "- Then one line on what the data does not cover, only when something the user asked for is missing "
     "in every stored figure you were given, of every basis and band. Say a cut is missing only when no figure "
     "covers it. When figures exist, lead with the newest year found for each publisher and say which data period "
@@ -66,8 +67,8 @@ ANSWER_RULES = (
     "and no talk of investor multiples unless the user asks for them. Always end on a full sentence.\n"
     "- When the figures come in two bases (a percent of revenue and a percent of ARR, tagged \"basis group\" and \"OTHER BASIS\"), "
     "lead with the basis the user asked for and give the other in one clause (\"on an ARR basis, Example Capital 2026 shows ...\"). "
-    "In a table, put the two bases under two small headers or in a Basis column; each group may use its own table "
-    "of six rows or fewer. Never mix bases in one row or one sentence figure, and never convert one basis into the other. "
+    "In a table, the two bases share one table and a Basis column says which is which; never a second table for "
+    "the second basis. Never mix bases in one row or one sentence figure, and never convert one basis into the other. "
     "Say plainly when a figure's basis is not stated.\n"
     "- A figure from an illustrative or worked-example company is not a benchmark. Never present one as one. "
     "Answer from survey data or authored content, or say none is on file.\n"
