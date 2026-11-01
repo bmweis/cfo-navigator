@@ -1655,6 +1655,12 @@ CREATE TABLE IF NOT EXISTS benchmark_reports (
     -- Phase B: an admin-typed landing URL; a reload never touches it, and it
     -- wins over landing_url (figures.resolve_landings).
     landing_url_manual TEXT NOT NULL DEFAULT '',
+    -- A republished report: the original source this report says its figures come from
+    -- (for example "High Alpha 2025 SaaS Benchmarks"), optionally only for one metric family
+    -- (cited_source_metric, matched as a substring of the metric name; '' = every metric).
+    -- Set in the admin UI; a reload never touches it.
+    cited_source TEXT NOT NULL DEFAULT '',
+    cited_source_metric TEXT NOT NULL DEFAULT '',
     row_count   INTEGER NOT NULL DEFAULT 0,
     sha256      TEXT NOT NULL DEFAULT '',
     loaded_at   TEXT NOT NULL,
@@ -1720,7 +1726,12 @@ CREATE TABLE IF NOT EXISTS metric_registry (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     canonical_metric TEXT NOT NULL UNIQUE,
     card_url         TEXT NOT NULL DEFAULT '',
-    aliases_line     TEXT NOT NULL DEFAULT ''
+    aliases_line     TEXT NOT NULL DEFAULT '',
+    -- The size of a change between two editions that is worth reporting (figures.compute_shifts).
+    -- NULL = the default for the metric's unit: 3 points for a percent metric, 10 percent
+    -- relative for everything else. shift_kind is 'points' or 'relative'.
+    shift_threshold  REAL,
+    shift_kind       TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS metric_aliases (
     alias            TEXT PRIMARY KEY,      -- lowercase
@@ -1987,6 +1998,10 @@ class Library:
         for _col_sql in [
             "ALTER TABLE model_catalog ADD COLUMN allowed_roles TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE benchmark_reports ADD COLUMN landing_url_manual TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE benchmark_reports ADD COLUMN cited_source TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE benchmark_reports ADD COLUMN cited_source_metric TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE metric_registry ADD COLUMN shift_threshold REAL",
+            "ALTER TABLE metric_registry ADD COLUMN shift_kind TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN advisor INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE tools ADD COLUMN vendor_email TEXT NOT NULL DEFAULT ''",
@@ -8212,6 +8227,42 @@ class Library:
             else:
                 counts["kept"] += 1
         return counts
+
+    def set_report_cited_source(self, report_slug: str, cited_source: str, metric_family: str = "") -> bool:
+        """Set (or clear, with "") the original source a republishing report says its figures come from,
+        optionally for one metric family only. Returns False for an unknown report."""
+        cited_source, metric_family = " ".join((cited_source or "").split()), " ".join((metric_family or "").split())
+        if len(cited_source) > 200 or len(metric_family) > 120:
+            raise ValueError("The cited source or metric family is too long.")
+        if metric_family and not cited_source:
+            raise ValueError("A metric family needs a cited source.")
+        cur = self.conn.execute(
+            "UPDATE benchmark_reports SET cited_source = ?, cited_source_metric = ? WHERE report_slug = ?",
+            (cited_source, metric_family, report_slug))
+        self.conn.commit()
+        return cur.rowcount == 1
+
+    def set_metric_shift(self, canonical_metric: str, threshold, kind: str) -> bool:
+        """Set the shift threshold of one registry metric (None/"" clears it back to the unit default)."""
+        if threshold in (None, ""):
+            threshold, kind = None, ""
+        else:
+            threshold = float(threshold)
+            if threshold <= 0 or threshold > 10000:
+                raise ValueError("The threshold must be greater than 0.")
+            if kind not in ("points", "relative"):
+                raise ValueError("The kind must be points or relative.")
+        cur = self.conn.execute(
+            "UPDATE metric_registry SET shift_threshold = ?, shift_kind = ? WHERE canonical_metric = ?",
+            (threshold, kind, canonical_metric))
+        self.conn.commit()
+        return cur.rowcount == 1
+
+    def shift_rules(self) -> dict:
+        """{lower-case canonical metric: (threshold, kind)} for every registry metric with an explicit rule."""
+        return {r[0].lower(): (r[1], r[2]) for r in self.conn.execute(
+            "SELECT canonical_metric, shift_threshold, shift_kind FROM metric_registry "
+            "WHERE shift_threshold IS NOT NULL AND shift_kind != ''")}
 
     def list_benchmark_reports(self) -> list[dict]:
         rows = self.conn.execute(

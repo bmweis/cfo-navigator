@@ -66,7 +66,8 @@ def _inline(s: str, cites: list[dict], scope: str = "") -> str:
             if re.match(r"https?://", url, re.I):
                 return (f'<sup class="cite"><a href="{_esc(url)}" target="_blank" '
                         f'rel="noopener" title="{_esc(c.get("title") or "")}">[{i}]</a></sup>')
-        return m.group(0)
+        # A marker with no Sources entry points at nothing: not shown (a 3-4 digit bracket never matches).
+        return ""
 
     # Last, so injected markup is never re-processed; a literal [2026] stays text.
     return re.sub(r"\[(\d{1,2})\](?!\()", _cite, s)
