@@ -38656,7 +38656,7 @@ async def admin_figures_edit(request: Request, report_slug: str):
     gate = _digest_gate(request, post=False)
     if gate is not None:
         return gate
-    return await run_in_threadpool(_figures_edit_page, report_slug)
+    return await run_in_threadpool(lambda: _figures_edit_page(report_slug))
 
 
 @app.post("/admin/reader/figures/{report_slug}/edit", response_class=HTMLResponse)
@@ -38685,7 +38685,7 @@ async def admin_figures_edit_save(request: Request, report_slug: str):
     if err:
         return await run_in_threadpool(lambda: _figures_edit_page(report_slug, values=vals, error=err, status=400))
     if changed is None:
-        return await run_in_threadpool(_figures_edit_page, report_slug)
+        return await run_in_threadpool(lambda: _figures_edit_page(report_slug))
     note = ("Saved. Changed: " + ", ".join(changed) + ".") if changed else "Nothing changed."
     return await run_in_threadpool(lambda: _figures_edit_page(report_slug, notice=note))
 
