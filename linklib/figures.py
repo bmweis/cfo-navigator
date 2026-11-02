@@ -924,6 +924,20 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
 _FTS_STOP = {"the", "of", "and", "for", "a", "an", "in", "to", "per", "by", "rate", "ratio", "metric"}
 
 
+def apply_report_overrides(lib, rows: list[dict]) -> None:
+    """Sets source/report/report_year on stored figure rows to what the admin edited on the report's
+    edit page (benchmark_reports.*_override). The stored rows stay as the CSV printed them; this is
+    applied on read, so a reload of the zip can never undo an edit."""
+    edited = {r["report_slug"]: r for r in lib.list_benchmark_reports()
+              if r["source_override"] or r["report_override"] or r["year_override"]}
+    if not edited:
+        return
+    for row in rows:
+        rep = edited.get(row.get("report_slug"))
+        if rep:
+            row["source"], row["report"], row["report_year"] = rep["source"], rep["report"], rep["report_year"]
+
+
 def _fts_metric_rows(lib, text: str, cap: int = 400) -> list[dict]:
     toks = [t for t in re.findall(r"[a-z0-9]+", _lc(text)) if len(t) > 2 and t not in _FTS_STOP]
     if not toks:
@@ -1134,6 +1148,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
             notes.append(f"No figure is stored under '{metric}' or a registered name for it; these are "
                          "figures whose metric name contains the same words, which may measure something different.")
 
+    apply_report_overrides(lib, [r for r, _ in cand])
     illustrative_left_out = 0
     illustrative_ids: list[int] = []
     if not include_illustrative:
@@ -1376,9 +1391,10 @@ def coverage(lib, metric: str | None = None) -> dict:
             names |= _names_for(idx, r["canonical"])
         where = f"WHERE lower(trim(metric)) IN ({','.join('?' for _ in names)})"
         args = tuple(names)
-    cur = lib.conn.execute(
+    cur = [dict(r) for r in lib.conn.execute(
         f"""SELECT report_slug, source, report, report_year, band_basis, band, segment,
-                   denominator, statistic FROM benchmark_figures {where}""", args)
+                   denominator, statistic FROM benchmark_figures {where}""", args)]
+    apply_report_overrides(lib, cur)
     reports: dict[str, dict] = {}
     sets = {k: set() for k in ("bands", "band_basis", "segments", "statistics", "denominators")}
     for r in cur:
