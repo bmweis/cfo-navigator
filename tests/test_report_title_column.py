@@ -31,7 +31,7 @@ def client(tmp_path, monkeypatch):
 
 
 def _td(html: str, title: str) -> str:
-    return re.search(r"<td[^>]*>[^<]*" + re.escape(title) + r"[^<]*</td>", html).group(0)
+    return re.search(r"<td[^>]*>(?:<strong>)?[^<]*" + re.escape(title) + r".*?</td>", html).group(0)
 
 
 def test_report_title_width_is_one_named_constant(client):
@@ -52,7 +52,10 @@ def test_the_other_figures_columns_do_not_wrap_either(client):
     html = c.get("/admin/reader/figures").text
     row = re.search(r"<tbody><tr>(.*?)</tr></tbody>", html, re.S).group(1)
     cells = re.findall(r"<td([^>]*)>", row)
-    assert len(cells) == 6 and all("white-space:nowrap" in c_ for c_ in cells)
+    # Eight cells now; the link and republished-from cells may wrap (a long address, a source name),
+    # every short-token cell and the title still may not.
+    assert len(cells) == 8
+    assert all("white-space:nowrap" in c_ for c_ in cells if not re.search(r'data-label="(Landing URL|Republished from)"', c_))
 
 
 def test_digests_preview_title_cell_does_not_wrap(client):
