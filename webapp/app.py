@@ -38089,8 +38089,11 @@ _FIGURES_TH = _DIGEST_TH
 # Phones: the report list becomes labelled cards (the /admin/library-backup pattern), so no column
 # sits off-screen. The sitewide block already removes the td top border for table.bk-stack.
 _FIGURES_STACK_CSS = """<style>
+.fg-reports th:last-child, .fg-reports td[data-label="Actions"]{position:sticky;right:0;background:var(--surface,#fff);box-shadow:-1px 0 0 var(--line);}
+.fg-reports th:last-child{background:var(--accent-light);}
 @media(max-width:700px){
   .fg-reports{min-width:0 !important;}
+  .fg-reports th:last-child, .fg-reports td[data-label="Actions"]{position:static;box-shadow:none;}
   .fg-reports thead{display:none;}
   .fg-reports, .fg-reports tbody, .fg-reports tr, .fg-reports td{display:block;width:100%;}
   .fg-reports tr{border-bottom:1px solid var(--line);padding:10px 12px;}
@@ -38169,10 +38172,10 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
   <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_REPORT_TITLE}px;">Report</th>
   <th style="{_FIGURES_TH}">Source</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_COUNT}px;">Year</th>
-  <th style="{_FIGURES_TH}width:{_COL_WIDTH_STATUS_AGE}px;">Rows stored</th>
+  <th style="{_FIGURES_TH}width:120px;">Rows stored</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_DATE}px;">Loaded</th>
-  <th style="{_FIGURES_TH}min-width:180px;">Landing URL</th>
-  <th style="{_FIGURES_TH}min-width:170px;">Republished from</th>
+  <th style="{_FIGURES_TH}min-width:150px;">Landing URL</th>
+  <th style="{_FIGURES_TH}min-width:140px;">Republished from</th>
   {_actions_th(_FIGURES_TH)}
 </tr></thead>
 <tbody>{report_rows}</tbody>
