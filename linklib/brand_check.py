@@ -686,9 +686,15 @@ def _plain_header_text(html: str) -> str:
     return re.sub(r"<[^>]+>|\{[^}]*\}", "", html).strip()
 
 
-# One select caret, one size (BRAND.md section 5). Every <select> gets its arrow from the single
-# sitewide `select{...}` rule in webapp/app.py's _CSS. A reason is required for each entry; empty today.
-SELECT_CARET_ALLOWLIST: dict[str, str] = {}
+# Two arrow indicators, one size (BRAND.md section 5): a disclosure triangle (east closed, south open) for
+# anything that expands and collapses, and a dropdown chevron (always down) for selects and the Buddy
+# Depth and Sources buttons, both drawn from webapp/app.py's _CSS at --indicator-size. Each allowlist entry
+# needs a reason. Keys: a glyph escape such as "u25b2" (lowercase), a CSS selector, or "inline:select".
+SELECT_CARET_ALLOWLIST: dict[str, str] = {
+    "u25b2": "Sort direction in the Reader feeds table header (ascending). It marks a sorted column, "
+             "not an expandable box or a dropdown, so neither shared shape fits.",
+    "u25bc": "Sort direction in the Reader feeds table header (descending). Same reason as u25b2.",
+}
 
 _SEL_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 _SEL_RULE_RE = re.compile(r"([^{};]+)\{([^{}]*)\}")
@@ -696,49 +702,104 @@ _SEL_WORD_RE = re.compile(r"(?<![\w-])select(?![\w-])", re.I)
 _SEL_CARET_PROP_RE = re.compile(r"appearance\s*:|background-image\s*:|background(?:-image)?\s*:[^;]*url\(", re.I)
 _SEL_TAG_RE = re.compile(r"<select\b[^>]*>", re.I)
 _SEL_STYLE_RE = re.compile(r'style\s*=\s*"([^"]*)"|style\s*=\s*\'([^\']*)\'', re.I)
+# Text glyphs that draw a triangle or chevron: entities (decimal) and unicode / escaped code points.
+_IND_ENTITY_RE = re.compile(r"&#(9650|9651|9652|9653|9654|9655|9656|9657|9658|9659|9660|9661|9662|9663|9664|9665|9666|9667|9668|9669);")
+_IND_ESCAPE_RE = re.compile(r"\\+u(25(?:[bB][2-9a-fA-F]|[cC][0-5]))")
+_IND_CSS_ESCAPE_RE = re.compile(r"content\s*:\s*['\"]\\+(25(?:[bB][2-9a-fA-F]|[cC][0-5]))")
+_IND_CHAR_RE = re.compile("[\u25b2-\u25bf\u25c0-\u25c5\u2304\u02c5\u02c4]")
+# SVG chevrons drawn by hand (the common shapes), anywhere in a page.
+_IND_SVG_RE = re.compile(
+    r'points="(?:6 9 12 15 18 9|6 15 12 9 18 15|9 6 15 12 9 18|15 6 9 12 15 18)"|M6 9l6 6 6-6|M19 9l-7 7-7-7|M9 18l6-6-6-6', re.I)
+_IND_CARET_CLASS_RE = re.compile(r'class="(?:disclosure-caret|ask-pq-rc|ask-pq-caret)"([^>]*)>([^<]*)</span>')
+_IND_CARET_SELECTORS = ("disclosure-caret", "ask-pq-rc", "ask-pq-caret", "rr-cat-chev", "ask-dd-caret")
 
 
 def select_caret_problems(src: str) -> list[str]:
-    """Anything that gives a `<select>` its own arrow instead of the shared one.
+    """Anything that draws a dropdown or disclosure indicator outside the shared rules.
 
-    **Flagged:** (1) a CSS rule whose selector names `select` and whose body sets `appearance`,
-    `background-image` or a `url(...)` background, other than the one shared rule (selector exactly
-    `select` or `select:disabled`, body using `--select-caret-img`); (2) an inline `<select ... style=...>`
-    carrying any of those properties; (3) the shared rule or the `--select-caret-size` token missing.
-    Entries in `SELECT_CARET_ALLOWLIST` (keyed by the selector or `inline:<name>`) are skipped.
+    **Dropdown family (selects and the Buddy buttons):** a CSS rule naming `select` that sets `appearance`,
+    `background-image` or a `url(...)` background, other than the one shared rule; an inline `<select style>`
+    carrying those; a rule on `.ask-dd-caret` that rotates it (a dropdown chevron is always down).
+    **Disclosure family:** a text glyph triangle or chevron (entity, unicode character or `\\uXXXX` escape);
+    a CSS-border triangle (`width:0;height:0` with borders) or a border chevron (border plus
+    `rotate(45deg)`); a hand-drawn SVG chevron; a rule on a caret class that sets its own `font-size`,
+    `width` or `height`, or rotates by anything but 90 degrees; a caret span with text or an inline font size.
+    **Required:** the shared `select{...}` rule, the shared disclosure rule, and the `--indicator-size` and
+    triangle image tokens. Entries in `SELECT_CARET_ALLOWLIST` (each with a reason) are skipped.
 
-    **Not caught:** a select built by JavaScript from pieces that never put the style and the tag in one
-    string, a rule assembled by string concatenation, and controls that are not `<select>` elements.
+    **Not caught:** an indicator built by JavaScript from pieces that never put the markup in one string, an
+    image file or icon font, an SVG chevron of a shape not listed above, and controls that are not `<select>`
+    elements. The text arrows `&rarr;` and `&larr;` inside link labels, the Reader expand and collapse icons
+    and the up/down buttons that reorder feeds are not indicators of either kind and are not scanned.
     """
     problems: list[str] = []
     # f-string literals double their braces; fold them so CSS inside an f-string scans like plain CSS.
     text = src.replace("{{", "{").replace("}}", "}")
     css = _SEL_CSS_COMMENT_RE.sub("", text)
-    shared_ok = False
+    shared_select = shared_disc = False
     for m in _SEL_RULE_RE.finditer(css):
         # A selector never contains a tag; drop HTML lines that run into the rule from the text above it.
         sel = " ".join(l.strip() for l in m.group(1).split("\n") if l.strip() and "<" not in l).strip()
         body = m.group(2)
-        if not _SEL_WORD_RE.search(sel) or not _SEL_CARET_PROP_RE.search(body):
-            continue
-        if sel in ("select", "select:disabled") and "--select-caret-img" in body:
-            if sel == "select":
-                shared_ok = True
-            continue
-        if sel in SELECT_CARET_ALLOWLIST:
-            continue
         line = css[:m.start()].count("\n") + 1
-        problems.append(f"rule '...{sel[-50:]}' draws its own select arrow (near line {line})")
-    if not shared_ok:
-        problems.append("the shared `select{...}` caret rule is missing")
-    if "--select-caret-size:" not in css:
-        problems.append("the --select-caret-size token is missing")
+        if _SEL_WORD_RE.search(sel) and _SEL_CARET_PROP_RE.search(body):
+            if sel in ("select", "select:disabled") and "--indicator-chevron-img" in body:
+                if sel == "select":
+                    shared_select = True
+            elif sel not in SELECT_CARET_ALLOWLIST:
+                problems.append(f"rule '...{sel[-50:]}' draws its own select arrow (near line {line})")
+        compact = re.sub(r"\s+", "", body)
+        if (re.search(r"width:0(?:px)?;", compact) and re.search(r"height:0(?:px)?;", compact)
+                and "border" in compact and sel not in SELECT_CARET_ALLOWLIST):
+            problems.append(f"rule '...{sel[-50:]}' draws a CSS-border triangle (near line {line})")
+        if re.search(r"border-(?:right|bottom|top|left)\s*:", body) and re.search(r"rotate\(\s*-?45deg", body) \
+                and sel not in SELECT_CARET_ALLOWLIST:
+            problems.append(f"rule '...{sel[-50:]}' draws a border chevron (near line {line})")
+        if any(c in sel for c in _IND_CARET_SELECTORS) or "summary::before" in sel:
+            if "--indicator-triangle-img" in body and "--indicator-size" in body:
+                if sel.startswith(".disclosure-caret"):
+                    shared_disc = True
+                continue
+            if "--indicator-chevron-img" in body and "ask-dd-caret" in sel:
+                continue
+            for rm in re.finditer(r"rotate\(\s*(-?[\d.]+)deg", body):
+                if "ask-dd-caret" in sel or float(rm.group(1)) != 90:
+                    problems.append(f"rule '...{sel[-50:]}' rotates an indicator by {rm.group(1)}deg "
+                                    f"(only the disclosure triangle turns, by 90deg) (near line {line})")
+            if re.search(r"(?<![\w-])(?:font-size|width|height)\s*:", body):
+                problems.append(f"rule '...{sel[-50:]}' sets its own indicator size (near line {line})")
+    if not shared_select:
+        problems.append("the shared `select{...}` chevron rule is missing")
+    if not shared_disc:
+        problems.append("the shared disclosure triangle rule is missing")
+    if "--indicator-size:" not in css:
+        problems.append("the --indicator-size token is missing")
     for m in _SEL_TAG_RE.finditer(text):
         for sm in _SEL_STYLE_RE.finditer(m.group(0)):
             style = sm.group(1) or sm.group(2) or ""
             if _SEL_CARET_PROP_RE.search(style) and "inline:select" not in SELECT_CARET_ALLOWLIST:
                 line = text[:m.start()].count("\n") + 1
                 problems.append(f"inline <select> style draws its own arrow (line {line})")
+    for m in _IND_SVG_RE.finditer(text):
+        line = text[:m.start()].count("\n") + 1
+        problems.append(f"hand-drawn SVG chevron (line {line})")
+    for m in _IND_CARET_CLASS_RE.finditer(text):
+        line = text[:m.start()].count("\n") + 1
+        if m.group(2).strip():
+            problems.append(f"indicator span carries text instead of the shared shape (line {line})")
+        if "font-size" in m.group(1):
+            problems.append(f"indicator span sets its own size (line {line})")
+    # Glyphs: scan code lines only (not Python comments); CSS comments are already gone from `css`.
+    for i, l in enumerate(css.split("\n"), 1):
+        if l.lstrip().startswith("#"):
+            continue
+        hits = [("&#%s;" % e).lower() for e in _IND_ENTITY_RE.findall(l)]
+        hits += ["u" + e.lower() for e in _IND_ESCAPE_RE.findall(l)]
+        hits += ["u" + e.lower() for e in _IND_CSS_ESCAPE_RE.findall(l)]
+        hits += ["u%04x" % ord(c) for c in _IND_CHAR_RE.findall(l)]
+        for h in hits:
+            if h not in SELECT_CARET_ALLOWLIST:
+                problems.append(f"text glyph indicator {h} (near line {i}); use the shared triangle or chevron")
     return problems
 
 

@@ -703,7 +703,7 @@ def test_bulk_delete_check_rejects_empty_ids(env):
 def test_disclosure_block_reuses_communities_markup_pattern(env):
     admin = _admin_client(env)
     body = admin.get("/admin/users").text
-    assert '<span class="disclosure-caret">&#9654;</span>How to set up a new MCP user' in body
+    assert '<span class="disclosure-caret"></span>How to set up a new MCP user' in body
     # Same wrapping <details> style as /admin/tools/communities' own block.
     assert re.search(
         r'<details style="margin:0 0 24px;border:1px solid var\(--line\);'
