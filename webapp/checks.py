@@ -728,6 +728,13 @@ def run_all() -> list[dict]:
         "detail": "; ".join(sc[:6]) if sc
                   else "No select rule or inline style draws its own arrow."})
 
+    bh = _tasks.cached_static_check("button_height", lambda: brand_check.button_height_problems(src))
+    results.append({
+        "name": "Button height is the shared standard", "where": "Live + CI", "ok": not bh,
+        "what": "Every button draws its height from the one shared rule and token; none sets its own height.",
+        "detail": "; ".join(bh[:6]) if bh
+                  else f"No button rule or inline style sets its own height ({len(brand_check.BUTTON_HEIGHT_ALLOWLIST)} approved exceptions)."})
+
     from webapp.app import _CSS as _app_css
     # Cached (2026-09): both halves are pure functions of on-disk source —
     # table_override_problems specifically is ~6.3s of run_all()'s ~15s

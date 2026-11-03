@@ -60,6 +60,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, urlsplit
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1704,6 +1705,8 @@ _CSS = """
   --font-wordmark:'Permanent Marker',cursive;
   /* Dropdown caret: one size sitewide (BRAND.md section 5, "One select caret, one size"). */
   --indicator-size:14px;
+  /* Button height: one number for every button-like control (BRAND.md section 5, "One button height"). */
+  --control-h:28px;
 }
 *{box-sizing:border-box;}
 /* Phase F8: mobile browsers (WebKit and Chromium alike) auto-boost font
@@ -1966,16 +1969,38 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 .article-atlantic .tool-prose p{line-height:1.75;margin-bottom:22px;}
 
 /* Buttons — primary navy fill, ghost navy outline. Seafoam is NEVER a button. */
-.btn{display:inline-block;padding:11px 22px;background:var(--navy);color:#fff;border-radius:10px;font:600 15px var(--font-body);border:1px solid var(--navy);cursor:pointer;}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:0 22px;background:var(--navy);color:#fff;border-radius:10px;font:600 15px var(--font-body);border:1px solid var(--navy);cursor:pointer;white-space:nowrap;}
 .btn:hover{background:var(--navy-deep);border-color:var(--navy-deep);text-decoration:none;}
 .btn-ghost{background:transparent;color:var(--navy);border:1px solid var(--navy);}
 .btn-ghost:hover{background:var(--accent-light);color:var(--navy);}
 
+/* One button height (BRAND.md section 5). Every button-like control renders at --control-h: the height and
+   vertical padding below are !important so an inline style or a page rule cannot change them. The 44px phone
+   touch target is an invisible ::after, so a 28px button is still easy to hit. Icon-only buttons (.ctl) keep
+   their icon inside the same 28px; their width may be smaller. A control that genuinely cannot meet it must
+   be listed in brand_check.BUTTON_HEIGHT_ALLOWLIST with a reason. */
+.btn,.btn-ghost,.admin-only,.ask-ctl,.ask-dd-btn,.fu-send,.tcat-btn,.ccat-btn,.ger-mode,.ctl{
+  box-sizing:border-box!important;height:var(--control-h)!important;min-height:var(--control-h)!important;
+  max-height:var(--control-h)!important;padding-top:0!important;padding-bottom:0!important;line-height:1.2!important;
+  position:relative;white-space:nowrap;}
+.btn::after,.btn-ghost::after,.admin-only::after,.ask-ctl::after,.ask-dd-btn::after,.fu-send::after,
+.tcat-btn::after,.ccat-btn::after,.ger-mode::after,.ctl::after{content:"";position:absolute;left:0;right:0;top:-9px;bottom:-9px;}
+.ctl::after{left:-3px;right:-3px;}
+.ctl{display:inline-flex;align-items:center;justify-content:center;min-width:var(--control-h);background:#fff;border:1px solid var(--line);border-radius:6px;
+  font:inherit;font-size:12px;padding-left:8px;padding-right:8px;cursor:pointer;color:var(--ink);}
+.ctl:disabled{background:var(--surface);color:var(--muted);cursor:not-allowed;}
+/* Selects and text inputs inside an admin table share the token so a row of controls lines up. Form fields
+   outside a table keep their own height (a field you type in is not a row button). */
+.table-frame td select:not([multiple]),.table-frame td input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]),
+.ff-table select,.ff-table input:not([type=checkbox]),.fs-table input:not([type=checkbox]){
+  box-sizing:border-box!important;height:var(--control-h)!important;min-height:var(--control-h)!important;
+  padding-top:0!important;padding-bottom:0!important;}
+
 /* Admin-only controls (BRAND.md, Admin-only controls): ONE class. Outlined, no fill, 1px
    deep-seafoam border and text, so it can't be mistaken for a seafoam category tag.
    Two size tiers: card controls 28px/6px as the base, page-level 42px/10px (.admin-only-page). */
-.admin-only{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;height:28px;padding:0 10px;border-radius:6px;background:transparent;color:var(--seafoam-deep);border:1px solid var(--seafoam-deep);font:600 12px var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;}
-.admin-only-page{height:42px;padding:0 22px;border-radius:10px;font-size:15px;gap:6px;}
+.admin-only{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;padding:0 10px;border-radius:6px;background:transparent;color:var(--seafoam-deep);border:1px solid var(--seafoam-deep);font:600 12px var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;}
+.admin-only-page{padding:0 22px;border-radius:10px;font-size:15px;gap:6px;}
 .admin-only:focus-visible{outline:2px solid var(--seafoam-deep);outline-offset:2px;}
 .admin-only:disabled{opacity:.5;cursor:not-allowed;}
 .admin-only[hidden]{display:none;}
@@ -2411,7 +2436,7 @@ def _password_change_nudge_html(lib: Library, request: Request) -> str:
     key = f"pw_nudge_dismissed_{user['id']}"
     return f"""<div id="pw-nudge-banner" style="background:var(--navy-wash);border:1px solid var(--line);border-radius:12px;padding:12px 18px;margin:0 0 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
 <span style="font-size:14px;color:var(--ink-soft);">Your password was set for you&mdash;worth changing it to one only you know. <a href="/change-password" style="font-weight:600;color:var(--navy);">Change it now &rarr;</a></span>
-<button type="button" onclick="try{{localStorage.setItem('{key}','1');}}catch(e){{}}var b=document.getElementById('pw-nudge-banner');if(b)b.style.display='none';" style="background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:4px 8px;">Dismiss</button>
+<button type="button" onclick="try{{localStorage.setItem('{key}','1');}}catch(e){{}}var b=document.getElementById('pw-nudge-banner');if(b)b.style.display='none';" class="btn btn-ghost" style="font-size:13px;">Dismiss</button>
 </div>
 <script>(function(){{try{{if(localStorage.getItem('{key}')){{var b=document.getElementById('pw-nudge-banner');if(b)b.style.display='none';}}}}catch(e){{}}}})();</script>"""
 
@@ -6292,7 +6317,7 @@ def growth_engine_calculator(request: Request):
   .ger-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
   .ger-grid-3{display:grid;grid-template-columns:88px 1fr 1fr 1fr;gap:10px;align-items:center;}
   .ger-modes{display:flex;flex-wrap:wrap;gap:8px;}
-  .ger-mode{font:inherit;font-size:14px;font-weight:500;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:999px;padding:8px 16px;cursor:pointer;}
+  .ger-mode{font:inherit;font-size:14px;font-weight:500;color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:999px;padding:0 16px;cursor:pointer;}
   .ger-mode:hover{background:var(--accent-light);color:var(--ink);}
   .ger-mode-on{background:var(--accent) !important;color:#fff !important;border-color:var(--accent) !important;}
   .ger-in{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:15px;background:var(--bg);}
@@ -9260,7 +9285,7 @@ Not sure which tool's for you? {(
 </div>
 
 <style>
-.tcat-btn{{font-size:13px;font-weight:500;padding:6px 14px;border-radius:20px;border:1px solid var(--line);
+.tcat-btn{{font-size:13px;font-weight:500;padding:0 14px;border-radius:20px;border:1px solid var(--line);
   background:none;color:var(--muted);cursor:pointer;white-space:nowrap;}}
 .tcat-btn:hover{{background:var(--accent-light);color:var(--ink);}}
 .tcat-active{{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;}}
@@ -11248,7 +11273,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 </div>
 
 <style>
-.ccat-btn{{font-size:13px;font-weight:500;padding:6px 14px;border-radius:20px;border:1px solid var(--line);
+.ccat-btn{{font-size:13px;font-weight:500;padding:0 14px;border-radius:20px;border:1px solid var(--line);
   background:none;color:var(--muted);cursor:pointer;white-space:nowrap;}}
 .ccat-btn:hover{{background:var(--accent-light);color:var(--ink);}}
 .ccat-active{{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;}}
@@ -13690,7 +13715,7 @@ def admin_email_failures(request: Request):
           <td style="padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;">
             {'<span style="color:var(--muted);">dismissed</span>' if f['resolved_at'] else
              f'<form method="post" action="/admin/inbox/email-failures/{f["id"]}/dismiss" style="margin:0;">'
-             f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:4px 12px;">Dismiss</button></form>'}
+             f'<button type="submit" class="btn btn-ghost" style="font-size:12px;">Dismiss</button></form>'}
           </td>
         </tr>"""
         for f in failures
@@ -15850,7 +15875,7 @@ def _feature_review_queue_item_card(item: dict, categories: dict[int, dict], too
   <form method="post" action="/admin/tools/software/feature-review-queue/{item['id']}/deny" style="margin:14px 0 0;display:flex;gap:6px;align-items:center;">
     <input type="text" name="resolution_note" placeholder="Note (optional, shown as resolved)" maxlength="500"
       style="flex:1;min-width:180px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:#fff;">
-    <button type="submit" class="btn btn-ghost" style="font-size:13px;padding:7px 16px;">Dismiss</button>
+    <button type="submit" class="btn btn-ghost" style="font-size:13px;">Dismiss</button>
   </form>
 </div>"""
 
@@ -24391,7 +24416,7 @@ def api_search(request: Request, q: str = "", limit: int = 50, token: str | None
 # surfaces (Done, Resume). 44px is the Depth and Sources control height and the
 # touch minimum; the existing buttons are not restyled.
 _ASK_CTL_CSS = (
-    ".ask-ctl{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 16px;"
+    ".ask-ctl{display:inline-flex;align-items:center;justify-content:center;padding:0 16px;"
     "box-sizing:border-box;border:1px solid var(--navy);border-radius:10px;background:transparent;color:var(--navy);"
     "font:600 14px var(--font-body);cursor:pointer;text-decoration:none;white-space:nowrap;}"
     "@media(hover:hover){.ask-ctl:hover{background:var(--accent-light);}}"
@@ -24399,8 +24424,7 @@ _ASK_CTL_CSS = (
     # Compact variant: 28px visible, with a 44px touch target from a pseudo-element
     # that adds no layout height (inset from the 1px border, so -9px gives 44px). -w gives the row buttons one shared width
     # (sized to the widest label, "Remove from view", with room to spare).
-    ".ask-ctl-sm{min-height:28px;padding:0 12px;font-size:13px;position:relative;}"
-    ".ask-ctl-sm::after{content:\"\";position:absolute;left:0;right:0;top:-9px;bottom:-9px;}"
+    ".ask-ctl-sm{padding:0 12px;font-size:13px;}"
     # Width is a floor, not a fixed value: a label that fits renders at exactly 128px, a wider
     # one (fallback font) grows instead of spilling out of the pill.
     ".ask-ctl-w{min-width:128px;padding-left:10px;padding-right:10px;white-space:nowrap;}"
@@ -24427,6 +24451,35 @@ _ASK_CHIP_CSS = (
     ".ask-chip{display:inline-flex;align-items:center;gap:3px;box-sizing:border-box;height:18px;padding:0 8px;border-radius:999px;background:var(--line);color:var(--ink-soft);font-size:12px;line-height:1;white-space:nowrap;}\n"
     ".ask-chip-hidden{background:none;padding:0;color:var(--seafoam-deep);}\n"
     ".ask-chip-failed{background:none;padding:0;color:var(--alert);}\n"
+)
+
+
+# Past-question row styles, shared by /tools/fpa-buddy and its full list page. Plain string, single
+# braces; injected with {_ASK_PQ_CSS}. The chip styles ride along in _ASK_CHIP_CSS.
+_ASK_PQ_CSS = (
+    '.ask-pq-row{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}\n'
+    '.ask-pq-row[open]{border-color:var(--navy);}\n'
+    '.ask-pq-sum{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;}\n'
+    '.ask-pq-sum::-webkit-details-marker{display:none;}\n'
+    '@media(hover:hover){.ask-pq-sum:hover{background:var(--accent-light);border-radius:8px;}}\n'
+    '.ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{transform:rotate(90deg);}\n'
+    '.ask-pq-q{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);\n'
+    '  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}\n'
+    '.ask-pq-row[open] .ask-pq-q{display:block;overflow:visible;}\n'
+    '.ask-pq-meta{flex:0 0 calc(100% - 22px);order:3;margin-left:22px;display:flex;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}\n'
+    '.ask-pq-ml{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;justify-content:flex-end;flex:1 1 auto;min-width:0;}\n'
+    '.ask-pq-seg{white-space:nowrap;}\n'
+    '@media(min-width:700px){.ask-pq-meta{flex:0 1 auto;order:0;margin-left:auto;max-width:50%;}.ask-pq-ml{flex:0 1 auto;justify-content:flex-end;}}\n'
+    '.ask-pq-body{padding:2px 16px 14px 32px;}\n'
+    '.ask-pq-heading{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}\n'
+    + _ASK_CHIP_CSS
+    + ".ask-pq-foot{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}"
+    # The list under the search box: one disclosure with the newest few rows and a link to the rest.
+    ".ask-pq-listsum{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0;margin-bottom:6px;}"
+    ".ask-pq-listsum::-webkit-details-marker{display:none;}"
+    ".ask-pq-list[open]>.ask-pq-listsum .disclosure-caret{transform:rotate(90deg);}"
+    ".ask-pq-listsum .ask-pq-heading{margin:0;}"
+    ".ask-pq-more{margin:6px 0 0;font-size:14px;}"
 )
 
 
@@ -24490,6 +24543,70 @@ def _ask_byline(row: dict, viewer_user_id: int | None, viewer_is_admin: bool) ->
     return None
 
 
+    # The Buddy page shows the newest few of each list; the full list is one tap away.
+_PQ_LIST_SHOWN = 6      # rows in "All questions" when expanded
+_PQ_SEARCH_SHOWN = 10   # rows shown for a search before "See all matches"
+_PQ_PAGE_SIZE = 10      # rows per page on the full list
+
+
+def _pq_row_html(r: dict, usage_user_id, authed: bool) -> str:
+    """One past-question row (a closed <details>), shared by /tools/fpa-buddy and its full list."""
+    # Byline: one shared function (_ask_byline), three cases in order.
+    date = _esc((r.get("created_at") or "")[:10])
+    who = _ask_byline(r, usage_user_id, authed)
+    admin_controls = ""
+    if authed:
+        admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="admin-only ask-ctl-sm ask-ctl-w">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>
+    </div>"""
+    # Meta: status chips first (Hidden for admins, Private, rating, from the
+    # one chip function), then the byline and date as plain nowrap segments.
+    # The chip set is the same on every surface; unrated, public, visible
+    # shows nothing.
+    chips = _ask_status_chips_html(r.get("helpful_count"), r.get("negative_count"),
+                                   private=bool(r.get("is_private")),
+                                   hidden=bool(r.get("hidden_public")), viewer_is_admin=authed,
+                                   failed=bool(r.get("failed")))
+    segs = [chips] if chips else []
+    if who is not None:
+        segs.append(f'<span class="ask-pq-seg">{_esc(who)}</span>')
+    segs.append(f'<span class="ask-pq-seg ask-pq-date">{date}</span>')
+    meta_html = f'<span class="ask-pq-ml">{"".join(segs)}</span>'
+    q_txt = _esc(r.get("question") or "")
+    _own_row = usage_user_id is not None and r.get("user_id") == usage_user_id
+    a_html, src_html = _render_cited_answer(r.get("answer") or "",
+                                            r.get("citations_json") or "[]",
+                                            r.get("stop_reason") or "",
+                                            cost_line=_turn_cost_line(r.get("cost_usd")) if (_own_row and not r.get("failed")) else "")
+    if r.get("failed"):
+        # Only an admin ever gets a failed row. No answer exists; show the
+        # raw error text instead (admin only).
+        a_html = f'<p style="margin:0;color:var(--alert);">{_esc(r.get("error") or "No answer was produced.")}</p>'
+        src_html = ""
+    # Resume is for the reader's own conversations only; another member's
+    # row gets nothing. The server still decides (403 for someone else's).
+    resume_html = ""
+    if usage_user_id is not None and r.get("user_id") == usage_user_id and r.get("conversation_id"):
+        priv_label = "Allow sharing" if r.get("is_private") else "Make private"
+        resume_html = (f'<div class="ask-pq-foot">'
+                       f'<form method="post" action="/questions/{r["id"]}/private" style="margin:0;">'
+                       f'<button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w">{priv_label}</button></form>'
+                       f'<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" '
+                       f'data-cid="{_esc(r["conversation_id"])}" onclick="resumeConvoById(this.dataset.cid)">Resume</button></div>')
+    # A native <details>, closed on every load: the row is the question,
+    # byline and a chevron; the answer, sources and admin buttons are the
+    # disclosure body. Same fold element the Search past questions section uses.
+    return f"""<details class="ask-pq-row">
+  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true"></span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{meta_html}</span></summary>
+  <div class="ask-pq-body">
+    <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
+    {src_html}
+    {resume_html}
+    {admin_controls}
+  </div>
+</details>"""
+
+
 @app.get("/tools/fpa-buddy", response_class=HTMLResponse)
 def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = ""):
     # Member-gated: signed-in members and admin. Anonymous visitors go to login.
@@ -24517,7 +24634,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         # ask_feedback.rating='helpful' row, so a member searching here only
         # ever finds answers someone already vouched for.
         helpful_only = helpful == "1"
-        pq_rows = usage_lib.list_public_ask_questions(query=pq, limit=200, helpful_only=helpful_only,
+        # The list shows the newest few; "See all questions" holds the rest (10 a page).
+        # A search shows up to 10 matches.
+        pq_show = _PQ_SEARCH_SHOWN if pq.strip() else _PQ_LIST_SHOWN
+        pq_total = usage_lib.count_public_ask_questions(query=pq, helpful_only=helpful_only,
+                                                        viewer_id=usage_user_id, see_private=authed)
+        pq_rows = usage_lib.list_public_ask_questions(query=pq, limit=pq_show, helpful_only=helpful_only,
                                                       viewer_id=usage_user_id, see_private=authed)
         # One Exa call per turn when a web-capable source is on and Exa (not the
         # native tool) is the provider; nothing else a turn does calls Exa. The
@@ -24529,62 +24651,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     finally:
         usage_lib.close()
 
-    def _pq_row(r: dict) -> str:
-        # Byline: one shared function (_ask_byline), three cases in order.
-        date = _esc((r.get("created_at") or "")[:10])
-        who = _ask_byline(r, usage_user_id, authed)
-        admin_controls = ""
-        if authed:
-            admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
-      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="admin-only ask-ctl-sm ask-ctl-w">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>
-    </div>"""
-        # Meta: status chips first (Hidden for admins, Private, rating, from the
-        # one chip function), then the byline and date as plain nowrap segments.
-        # The chip set is the same on every surface; unrated, public, visible
-        # shows nothing.
-        chips = _ask_status_chips_html(r.get("helpful_count"), r.get("negative_count"),
-                                       private=bool(r.get("is_private")),
-                                       hidden=bool(r.get("hidden_public")), viewer_is_admin=authed,
-                                       failed=bool(r.get("failed")))
-        segs = [chips] if chips else []
-        if who is not None:
-            segs.append(f'<span class="ask-pq-seg">{_esc(who)}</span>')
-        segs.append(f'<span class="ask-pq-seg ask-pq-date">{date}</span>')
-        meta_html = f'<span class="ask-pq-ml">{"".join(segs)}</span>'
-        q_txt = _esc(r.get("question") or "")
-        _own_row = usage_user_id is not None and r.get("user_id") == usage_user_id
-        a_html, src_html = _render_cited_answer(r.get("answer") or "",
-                                                r.get("citations_json") or "[]",
-                                                r.get("stop_reason") or "",
-                                                cost_line=_turn_cost_line(r.get("cost_usd")) if (_own_row and not r.get("failed")) else "")
-        if r.get("failed"):
-            # Only an admin ever gets a failed row. No answer exists; show the
-            # raw error text instead (admin only).
-            a_html = f'<p style="margin:0;color:var(--alert);">{_esc(r.get("error") or "No answer was produced.")}</p>'
-            src_html = ""
-        # Resume is for the reader's own conversations only; another member's
-        # row gets nothing. The server still decides (403 for someone else's).
-        resume_html = ""
-        if usage_user_id is not None and r.get("user_id") == usage_user_id and r.get("conversation_id"):
-            priv_label = "Allow sharing" if r.get("is_private") else "Make private"
-            resume_html = (f'<div class="ask-pq-foot">'
-                           f'<form method="post" action="/questions/{r["id"]}/private" style="margin:0;">'
-                           f'<button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w">{priv_label}</button></form>'
-                           f'<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" '
-                           f'data-cid="{_esc(r["conversation_id"])}" onclick="resumeConvoById(this.dataset.cid)">Resume</button></div>')
-        # A native <details>, closed on every load: the row is the question,
-        # byline and a chevron; the answer, sources and admin buttons are the
-        # disclosure body. Same fold element the Search past questions section uses.
-        return f"""<details class="ask-pq-row">
-  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true"></span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{meta_html}</span></summary>
-  <div class="ask-pq-body">
-    <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
-    {src_html}
-    {resume_html}
-    {admin_controls}
-  </div>
-</details>"""
-
     if pq_rows:
         pq_empty = ""
     elif pq:
@@ -24593,21 +24659,33 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         pq_empty = "No questions have been rated helpful yet."
     else:
         pq_empty = "No past questions yet."
-    pq_rows_html = "".join(_pq_row(r) for r in pq_rows) or \
+    pq_rows_html = "".join(_pq_row_html(r, usage_user_id, authed) for r in pq_rows) or \
         ('<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;'
          'padding:24px;text-align:center;color:var(--muted);">' + pq_empty + '</div>')
-    pq_heading = "Helpful questions only" if helpful_only else "All questions"
+    # Heading names what the list holds and how many there are: "All questions (41)",
+    # "Helpful questions only (12)", or "Matches (3)" after a search.
+    if pq.strip():
+        pq_heading = "Matching questions" + (" (helpful only)" if helpful_only else "")
+    else:
+        pq_heading = "Helpful questions only" if helpful_only else "All questions"
     # Search keeps the filter it was run under; the toggle flips it. Both are
     # submit buttons named "helpful", so one GET form carries either value.
     pq_keep = "1" if helpful_only else ""
     pq_flip = "" if helpful_only else "1"
+    # A search, or the Helpful only filter, opens the list; otherwise it loads collapsed.
+    pq_open = " open" if (pq.strip() or helpful_only) else ""
+    pq_more = ""
+    if pq_total > len(pq_rows):
+        _more_qs = urllib.parse.urlencode({k: v for k, v in (("pq", pq.strip()), ("helpful", "1" if helpful_only else "")) if v})
+        _more_label = "See all matches" if pq.strip() else "See all questions"
+        pq_more = (f'<p class="ask-pq-more"><a href="/tools/fpa-buddy/questions{"?" + _more_qs if _more_qs else ""}">'
+                   f'{_more_label} &rarr;</a></p>')
 
-    # A <details> so it can fold to one line while a conversation is on screen
-    # (the page toggles `open` itself when a thread appears or clears). In the
-    # empty state it is always open and its summary is inert, so that state
-    # reads exactly as it did when this was a plain section.
-    past_questions_section = f"""<details id="past-questions" class="ask-section ask-pq" open style="margin-top:0;margin-bottom:28px;">
-  <summary class="ask-section-label"><span class="ask-pq-caret" aria-hidden="true"></span>Search past questions</summary>
+    # The search box and its buttons are always visible and never fold. The list under
+    # them is a <details> that loads collapsed (rule: every expandable group loads
+    # collapsed) and opens by itself when a search or the Helpful only filter was run.
+    past_questions_section = f"""<section id="past-questions" class="ask-section ask-pq" style="margin-top:0;margin-bottom:28px;">
+  <div class="ask-section-label">Search past questions</div>
   <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Search before running your query.</p>
   <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
@@ -24615,9 +24693,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     <button type="submit" name="helpful" value="{pq_keep}" class="ask-ctl ask-ctl-sm ask-ctl-w">Search</button>
     <button type="submit" name="helpful" value="{pq_flip}" class="ask-ctl ask-ctl-sm ask-ctl-w" aria-pressed="{"true" if helpful_only else "false"}">Helpful only</button>
   </form>
-  <h2 class="ask-pq-heading">{pq_heading}</h2>
-  {pq_rows_html}
-</details>"""
+  <details id="pq-all" class="ask-pq-list"{pq_open}>
+    <summary class="ask-pq-listsum"><span class="disclosure-caret" aria-hidden="true"></span><span class="ask-pq-heading">{pq_heading} ({pq_total})</span></summary>
+    {pq_rows_html}
+    {pq_more}
+  </details>
+</section>"""
 
     # Quick / Standard / Deep is the only choice shown — no separate model
     # picker. Each tier maps internally (linklib.agent.EFFORT_SETTINGS) to a
@@ -24886,13 +24967,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fpa-thread-open .fpa-intro-area-example{{display:none;}}
 .fpa-thread-open .fpa-intro-layout{{grid-template-columns:1fr;grid-template-rows:none;
   grid-template-areas:{_intro_areas_thread};}}
-.ask-pq>summary{{list-style:none;display:flex;align-items:center;gap:8px;pointer-events:none;cursor:default;}}
-.ask-pq>summary::-webkit-details-marker{{display:none;}}
-.ask-pq>summary .ask-pq-caret{{display:none;}}
-.ask-pq:not([open])>summary{{margin-bottom:0;}}
-.fpa-thread-open .ask-pq>summary{{pointer-events:auto;cursor:pointer;}}
-.fpa-thread-open .ask-pq>summary .ask-pq-caret{{display:inline-block;}}
-.ask-pq[open]>summary .ask-pq-caret{{transform:rotate(90deg);}}
 .fpa-intro-area-intro{{grid-area:intro;}}
 .fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
 .fpa-intro-area-usage{{grid-area:usage;}}
@@ -24990,7 +25064,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
    Depth, multi-select for Sources), restyled as list rows. The follow-up
    bubble holds a clone of this whole block. */
 .ask-dd-row{{display:flex;align-items:flex-start;gap:8px;}}
-.ask-dd-btn{{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);font:inherit;font-size:14px;color:var(--ink-soft);cursor:pointer;text-align:left;}}
+.ask-dd-btn{{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:6px;padding:0 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);font:inherit;font-size:14px;color:var(--ink-soft);cursor:pointer;text-align:left;}}
 .ask-dd-btn[aria-expanded="true"]{{border-color:var(--navy);}}
 .ask-dd-k{{flex-shrink:0;}}
 .ask-dd-v{{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--navy);}}
@@ -25009,22 +25083,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu .ask-dd-panel{{width:max(100%,220px);box-sizing:border-box;}}
 .fu .ask-dd-col:last-of-type .ask-dd-panel{{margin-left:min(0px,calc(100% - 220px));}}
 
-.ask-pq-row{{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}}
-.ask-pq-row[open]{{border-color:var(--navy);}}
-.ask-pq-sum{{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;}}
-.ask-pq-sum::-webkit-details-marker{{display:none;}}
-@media(hover:hover){{.ask-pq-sum:hover{{background:var(--accent-light);border-radius:8px;}}}}
-.ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{{transform:rotate(90deg);}}
-.ask-pq-q{{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}}
-.ask-pq-row[open] .ask-pq-q{{display:block;overflow:visible;}}
-.ask-pq-meta{{flex:0 0 calc(100% - 22px);order:3;margin-left:22px;display:flex;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}}
-.ask-pq-ml{{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;justify-content:flex-end;flex:1 1 auto;min-width:0;}}
-.ask-pq-seg{{white-space:nowrap;}}
-{_ASK_CHIP_CSS}
-@media(min-width:700px){{.ask-pq-meta{{flex:0 1 auto;order:0;margin-left:auto;max-width:50%;}}.ask-pq-ml{{flex:0 1 auto;justify-content:flex-end;}}}}
-.ask-pq-body{{padding:2px 16px 14px 32px;}}
-.ask-pq-heading{{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}}
+{_ASK_PQ_CSS}
 .ask-recent-item{{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;box-sizing:border-box;
   font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
   margin-bottom:8px;transition:border-color .12s ease;}}
@@ -25071,9 +25130,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu-row{{display:flex;gap:8px;align-items:flex-end;}}
 .fu textarea{{flex:1 1 0;min-width:0;min-height:44px;height:44px;max-height:120px;resize:none;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font:inherit;font-size:16px;line-height:1.35;background:var(--bg);box-sizing:border-box;}}
 /* Send: a filled navy circle, white up arrow. 44px hit area, 36px visible. */
-.fu-send{{flex:0 0 44px;width:44px;height:44px;padding:0;border:0;background:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;}}
-.fu-send .fu-send-dot{{width:36px;height:36px;border-radius:50%;background:var(--navy);display:inline-flex;align-items:center;justify-content:center;}}
-.fu-send svg{{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;}}
+.fu-send{{flex:0 0 28px;width:28px;padding:0;border:0;background:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;}}
+.fu-send .fu-send-dot{{width:28px;height:28px;border-radius:50%;background:var(--navy);display:inline-flex;align-items:center;justify-content:center;}}
+.fu-send svg{{width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;}}
 .fu-send:disabled{{cursor:not-allowed;}}
 .fu-send:disabled .fu-send-dot{{background:var(--line);}}
 .fu-send:focus-visible{{outline:2px solid var(--navy);outline-offset:2px;}}
@@ -25085,7 +25144,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-turn.has-row:not(.open)>.ask-answer{{display:none;}}
 .ask-recent-item.recent-hl{{border-color:var(--navy);box-shadow:0 0 0 2px var(--accent-light);}}
 .fu-meta{{display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:12px;color:var(--muted);}}
-.fu-meta .ask-dd-btn{{min-height:40px;font-size:13px;}}
+.fu-meta .ask-dd-btn{{font-size:13px;}}
 .fu-sum{{display:none;font-size:12.5px;color:var(--muted);margin-top:6px;min-height:44px;align-items:center;justify-content:space-between;gap:10px;box-sizing:border-box;}}
 /* Compact while typing, driven by a class rather than :focus. Tapping the Ask
    follow-up button blurs the textarea; if blur re-expanded the controls, the
@@ -25696,17 +25755,17 @@ function doneThread() {{
   topBusy = false; topSync();
   var rec = document.getElementById('ask-recent');
   if (loading) {{
-    if (!rec.querySelector('.ask-section-label'))
-      rec.innerHTML = '<div class="ask-section-label">Recent conversations</div>';
+    recentShell();
     var n = document.createElement('p');
     n.className = 'ask-done-note'; n.id = 'ask-done-note';
     n.textContent = 'Your answer will appear in Recent.';
-    rec.querySelector('.ask-section-label').insertAdjacentElement('afterend', n);
+    document.getElementById('recent-items').insertAdjacentElement('beforebegin', n);
   }}
   if (rec.innerHTML) rec.style.display = 'block';
   if (cid) {{
     var items = rec.querySelectorAll('.ask-recent-item');
     for (var i = 0; i < items.length; i++) if (items[i].getAttribute('data-cid') === cid) {{
+      recentShell().open = true;   // the reader just finished this one: show where it went
       (function(el) {{ el.classList.add('recent-hl'); setTimeout(function() {{ el.classList.remove('recent-hl'); }}, 2500); }})(items[i]);
     }}
   }}
@@ -25737,6 +25796,24 @@ function recentItemHtml(c) {{
          '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" onclick="event.stopPropagation();resumeConvo(this.closest(\\'.ask-recent-item\\'))">Resume</button></div></div>';
 }}
 var RECENT_MAX = 5;   // the server's own cap on /ask/conversations
+// Recent conversations is one disclosure, collapsed on load, headed with its count. The rows live in
+// #recent-items; "See all conversations" is the paginated /ask/history page.
+function recentShell() {{
+  var box = document.getElementById('ask-recent');
+  var d = document.getElementById('recent-list');
+  if (!d) {{
+    box.innerHTML = '<details id="recent-list" class="ask-pq-list"><summary class="ask-pq-listsum">' +
+      '<span class="disclosure-caret" aria-hidden="true"></span><span class="ask-pq-heading">' +
+      'Recent conversations (<span id="recent-count">0</span>)</span></summary>' +
+      '<div id="recent-items"></div><p class="ask-pq-more"><a href="/ask/history">See all conversations &rarr;</a></p></details>';
+    d = document.getElementById('recent-list');
+  }}
+  return d;
+}}
+function recentSync() {{
+  var c = document.getElementById('recent-count');
+  if (c) c.textContent = document.querySelectorAll('#recent-items .ask-recent-item').length;
+}}
 async function loadRecent() {{
   try {{
     var resp = await fetch('/ask/conversations');
@@ -25745,7 +25822,9 @@ async function loadRecent() {{
     var list = d.conversations || [];
     if (!list.length) return;
     var box = document.getElementById('ask-recent');
-    box.innerHTML = '<div class="ask-section-label">Recent conversations</div>' + list.map(recentItemHtml).join('');
+    recentShell();
+    document.getElementById('recent-items').innerHTML = list.map(recentItemHtml).join('');
+    recentSync();
     box.style.display = asked ? 'none' : 'block';
     highlightRecent();
   }} catch(e) {{}}
@@ -25760,8 +25839,7 @@ function recentUpsert(cid, atLimit) {{
   var bubbles = document.querySelectorAll('#ask-thread .ask-q-bubble');
   if (!bubbles.length) return;
   var box = document.getElementById('ask-recent');
-  if (!box.querySelector('.ask-section-label'))
-    box.innerHTML = '<div class="ask-section-label">Recent conversations</div>';
+  recentShell();
   var items = box.querySelectorAll('.ask-recent-item');
   for (var i = 0; i < items.length; i++)
     if (items[i].getAttribute('data-cid') === cid) items[i].remove();
@@ -25770,9 +25848,10 @@ function recentUpsert(cid, atLimit) {{
     conversation_id: cid, first_question: bubbles[0].textContent,
     turns: bubbles.length, last_at: new Date().toISOString(), capped: !!atLimit,
     private: convoPrivate}});
-  box.querySelector('.ask-section-label').insertAdjacentElement('afterend', holder.firstChild);
+  document.getElementById('recent-items').insertAdjacentElement('afterbegin', holder.firstChild);
   var all = box.querySelectorAll('.ask-recent-item');
   for (var j = RECENT_MAX; j < all.length; j++) all[j].remove();
+  recentSync();
 }}
 // Pre-select the feedback controls with the turn's stored rating so a
 // resumed transcript looks exactly like it did live — and re-rating still
@@ -26074,6 +26153,7 @@ document.addEventListener('keydown', function(e) {{
   var page = document.getElementById('fpa-page');
   var thread = document.getElementById('ask-thread');
   var pq = document.getElementById('past-questions');
+  var pqAll = document.getElementById('pq-all');
   var open = false;
   // A search the reader just ran (or a link to the section) stays visible.
   var keepPq = /[?&]pq=/.test(location.search) || location.hash === '#past-questions';
@@ -26082,14 +26162,11 @@ document.addEventListener('keydown', function(e) {{
     if (now === open) return;
     open = now;
     page.classList.toggle('fpa-thread-open', open);
-    if (!pq) return;
-    if (open) {{ if (!keepPq) pq.open = false; keepPq = false; }}
-    else pq.open = true;
+    if (!pqAll) return;
+    if (open) {{ if (!keepPq) pqAll.open = false; keepPq = false; }}
   }}
   new MutationObserver(sync).observe(thread, {{childList: true}});
   if (pq) {{
-    // In the empty state the section is not collapsible, even from the keyboard.
-    pq.addEventListener('toggle', function() {{ if (!open && !pq.open) pq.open = true; }});
     // The search is a plain GET: carry the open conversation through it so the
     // reload reopens the thread instead of dropping it.
     var pqForm = pq.querySelector('form');
@@ -26120,6 +26197,7 @@ function highlightRecent() {{
   var items = document.querySelectorAll('#ask-recent .ask-recent-item');
   for (var i = 0; i < items.length; i++) {{
     if (items[i].getAttribute('data-cid') === c) {{
+      document.getElementById('recent-list').open = true;   // a conversation named in the URL: show its row
       items[i].classList.add('recent-hl');
       items[i].scrollIntoView({{block:'center'}});
       return;
@@ -26129,6 +26207,73 @@ function highlightRecent() {{
 </script>"""
 
     return HTMLResponse(_page("FP&A Buddy—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
+
+
+@app.get("/tools/fpa-buddy/questions", response_class=HTMLResponse)
+def fpa_buddy_questions(request: Request, pq: str = "", helpful: str = "", page: int = 1):
+    """The full past-questions list behind "See all questions": every question the viewer
+    may see (the same visibility rule as the list on /tools/fpa-buddy), newest first, 10 a
+    page, with the search and Helpful only filters kept across pages. /ask/history is the
+    asker's own history and is a different list; this one is everyone's shared questions."""
+    if not _is_member(request):
+        return _login_redirect(request)
+    authed = _is_authed(request)
+    helpful_only = helpful == "1"
+    lib = _lib()
+    try:
+        uid = _current_user_id(lib, request)
+        total = lib.count_public_ask_questions(query=pq, helpful_only=helpful_only, viewer_id=uid, see_private=authed)
+        pages = max(1, -(-total // _PQ_PAGE_SIZE))
+        page = min(max(page, 1), pages)
+        rows = lib.list_public_ask_questions(query=pq, limit=_PQ_PAGE_SIZE, offset=(page - 1) * _PQ_PAGE_SIZE,
+                                             helpful_only=helpful_only, viewer_id=uid, see_private=authed)
+    finally:
+        lib.close()
+
+    def _qs(**kw) -> str:
+        d = {"pq": pq.strip(), "helpful": "1" if helpful_only else "", **kw}
+        d = {k: v for k, v in d.items() if v not in ("", None)}
+        return ("?" + urllib.parse.urlencode(d)) if d else ""
+
+    rows_html = "".join(_pq_row_html(r, uid, authed) for r in rows) or (
+        '<div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;'
+        'text-align:center;color:var(--muted);">' +
+        ("No past questions match your search." if pq.strip() else
+         "No questions have been rated helpful yet." if helpful_only else "No past questions yet.") + "</div>")
+    nav = []
+    if page > 1:
+        nav.append(f'<a href="/tools/fpa-buddy/questions{_qs(page=page - 1)}">&larr; Previous</a>')
+    if page < pages:
+        nav.append(f'<a href="/tools/fpa-buddy/questions{_qs(page=page + 1)}" style="margin-left:auto;">Next &rarr;</a>')
+    pager = (f'<p class="ask-pq-pager" style="display:flex;gap:12px;font-size:14px;margin:18px 0 0;">{"".join(nav)}</p>'
+             if nav else "")
+    flip = "" if helpful_only else "1"
+    keep = "1" if helpful_only else ""
+    heading = ("Matching questions" if pq.strip() else "Helpful questions only" if helpful_only else "All questions")
+    body = f"""<div class="page page-standard">
+<div class="tool-prose">
+<p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
+<h1>{heading} ({total})</h1>
+<form method="get" action="/tools/fpa-buddy/questions" style="display:flex;gap:8px;margin:14px 0;flex-wrap:wrap;align-items:center;">
+  <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
+    style="flex:1 1 200px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
+  <button type="submit" name="helpful" value="{keep}" class="ask-ctl ask-ctl-sm ask-ctl-w">Search</button>
+  <button type="submit" name="helpful" value="{flip}" class="ask-ctl ask-ctl-sm ask-ctl-w" aria-pressed="{"true" if helpful_only else "false"}">Helpful only</button>
+</form>
+{rows_html}
+{pager}
+</div>
+<style>
+{_ASK_CTL_CSS}
+{_ASK_PQ_CSS}
+</style>
+<script>
+// Resume opens the thread on the Buddy page (which strips the parameter after opening it).
+function resumeConvoById(id) {{ location.href = '/tools/fpa-buddy?resume=' + encodeURIComponent(id); }}
+</script>
+</div>"""
+    return HTMLResponse(_page("Past questions—FP&A Buddy—Brian Weisberg", "CFO Toolbox", body,
+                              role=_role(request), request=request))
 
 
 @app.post("/ask/similar")
@@ -30138,6 +30283,7 @@ _LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Reading column holds its tables and grids",
         "Table actions column is headed Actions",
         "Select caret is the shared style",
+        "Button height is the shared standard",
         "One table format",
     )),
     ("Site structure and content", (
@@ -31751,17 +31897,12 @@ def _cf_order_arrows_html(feed: dict, boundary: tuple) -> str:
     safety net — dropped rather than kept "just in case"."""
     shown = bool(feed["show_on_current_feed"]) and bool(feed["current_feed_side"])
     is_first, is_last = boundary if shown else (True, True)
-    btn = ("border:1px solid var(--line);border-radius:6px;background:#fff;"
-           "font:inherit;font-size:12px;line-height:1;padding:3px 7px;cursor:pointer;")
-    disabled_btn = "border:1px solid var(--line);border-radius:6px;background:var(--surface);" \
-                   "font:inherit;font-size:12px;line-height:1;padding:3px 7px;color:var(--muted);"
-
     def _btn(direction: str, label: str, disabled: bool) -> str:
         if disabled:
-            return f'<button type="button" disabled aria-label="{label}: {_esc(feed["name"])}" style="{disabled_btn}">{"&uarr;" if direction == "up" else "&darr;"}</button>'
+            return f'<button type="button" disabled aria-label="{label}: {_esc(feed["name"])}" class="ctl">{"&uarr;" if direction == "up" else "&darr;"}</button>'
         return (f'<form method="post" action="/admin/reader/feeds/{feed["id"]}/order-move" style="display:inline;margin:0;">'
                 f'<input type="hidden" name="direction" value="{direction}">'
-                f'<button type="submit" aria-label="{label}: {_esc(feed["name"])}" style="{btn}">'
+                f'<button type="submit" aria-label="{label}: {_esc(feed["name"])}" class="ctl">'
                 f'{"&uarr;" if direction == "up" else "&darr;"}</button></form>')
 
     return (f'<span style="display:inline-flex;align-items:center;gap:3px;">'
@@ -32097,12 +32238,12 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .fs-name{{width:50%;}}
 .fs-count{{width:18%;font-size:13px;color:var(--muted);}}
 .fs-actions{{width:32%;text-align:right;white-space:nowrap;}}
-.fs-remove{{font-size:12px;padding:5px 12px;color:#b91c1c;border-color:#fca5a5;}}
+.fs-remove{{font-size:12px;padding:0 12px;color:#b91c1c;border-color:#fca5a5;}}
 /* Disabled rather than absent: an absent control reads as "sections can't be
    removed at all", a disabled one reads as "not this one, yet". The title
    attribute carries the reason on desktop; the Feeds count carries it
    everywhere, including touch, where there's no hover. */
-.fs-remove-off{{font-size:12px;padding:5px 12px;color:var(--muted);border-color:var(--line);
+.fs-remove-off{{font-size:12px;padding:0 12px;color:var(--muted);border-color:var(--line);
   opacity:.55;cursor:not-allowed;margin-left:4px;}}
 /* Below this width the columns can't coexist: the URL cell gets narrow enough
    that word-break:break-all wraps a feed address one character per line, which
@@ -35167,8 +35308,7 @@ def admin_users(request: Request, msg: str = ""):
                 f'color:var(--navy);flex-wrap:wrap;">'
                 f'<span>&#9888; Requested a password reset&mdash;{when}</span>'
                 f'<form method="post" action="/admin/users/{uid}/password-reset/dismiss" style="margin:0;">'
-                f'<button type="submit" style="font-size:11px;padding:1px 8px;border:1px solid var(--line);'
-                f'border-radius:5px;background:transparent;color:var(--navy);cursor:pointer;">Dismiss</button>'
+                f'<button type="submit" class="btn btn-ghost" style="font-size:11px;">Dismiss</button>'
                 f'</form></div>'
             )
         row_attrs = _admin_row_data_attrs({
