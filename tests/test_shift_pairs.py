@@ -57,6 +57,8 @@ def test_a_public_index_with_no_size_band_pairs_with_itself(lib):
 
 
 def test_a_five_points_apart_yields_a_line(lib):
+    # GUARD test: passes on base on purpose. It pins the plain same-spelling, same-band percent pair
+    # (the one shape that already worked) so the band-key change cannot break it.
     load_report(lib, "p-24", [frow(source="Sample Survey Co", report="Sample 2024", year="2024", metric="Gross Margin",
                                    band="$20M-$50M", value="70", unit="%", data_period="FY2023")])
     load_report(lib, "p-25", [frow(source="Sample Survey Co", report="Sample 2025", year="2025", metric="Gross Margin",
@@ -81,6 +83,8 @@ def test_a_every_unpaired_candidate_gets_a_counted_reason(lib):
 
 
 def test_a_a_single_publisher_pair_wins_and_nothing_is_chained(lib):
+    # GUARD test: passes on base on purpose. Base already emitted one line per series and never
+    # chained; this pins that behavior so the new band-less series cannot start chaining publishers.
     load_report(lib, "a-2022", [_emp("Sample Survey Co", 2022, "$20M-$50M", 226, "Q2 2022")])
     load_report(lib, "a-2023", [_emp("Sample Survey Co", 2023, "$20M-$50M", 165, "Q2 2023")])
     load_report(lib, "b-2025", [_emp("Example Benchmarks", 2025, "$20M-$50M", 131, "Q2 2025")])
@@ -110,3 +114,19 @@ def test_d_what_shifted_may_hold_only_computed_lines():
 def test_d_directionally_consistent_is_a_characterization_flag():
     flags = answer_lint.lint_answer("The sentence is directionally consistent with a smaller team.")
     assert any(f["phrase"] == "directionally consistent" for f in flags)
+
+
+def test_a_conflict_in_one_report_skips_only_that_pair_and_others_still_compute(lib):
+    # Sample Survey Co prints 201 and 200 for the same cell in 2024: that pair is skipped and named.
+    load_report(lib, "s-2024", [_emp("Sample Survey Co", 2024, "$20M-$50M", 201, "Q2 2024"),
+                                _emp("Sample Survey Co", 2024, "$20M-$50M", 200, "Q2 2024")])
+    load_report(lib, "s-2025", [_emp("Sample Survey Co", 2025, "$20-50M", 131, "Q2 2025")])
+    # A different publisher's clean pair at the same band still yields its line.
+    load_report(lib, "e-2022", [_emp("Example Benchmarks", 2022, "$20M-$50M", 226, "Q2 2022")])
+    load_report(lib, "e-2023", [_emp("Example Benchmarks", 2023, "$20M-$50M", 165, "Q2 2023")])
+    out = _shifts(lib, "Employees", "$30M")
+    assert len(out["skipped"]) == 1
+    assert "Sample Survey Co" in out["skipped"][0] and "different values for the same figure" in out["skipped"][0]
+    assert "no shift was computed" in out["skipped"][0]
+    assert len(out["shifts"]) == 1 and "Example Benchmarks" in out["shifts"][0]["line"]
+    assert "Sample Survey Co" not in out["shifts"][0]["line"]
