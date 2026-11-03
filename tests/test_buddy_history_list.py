@@ -151,7 +151,7 @@ def test_browser_heights_widths_and_touch_target(site):
             pg.route(re.compile(r"^http://buddy\.test/.*"), Site(html).handle)
             pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
             pg.goto("http://buddy.test/tools/fpa-buddy")
-            pg.evaluate("document.querySelectorAll('details.ask-pq-row').forEach(d=>d.open=true)")
+            pg.evaluate("document.getElementById('pq-all').open=true; document.querySelectorAll('details.ask-pq-row').forEach(d=>d.open=true)")
             def box(sel):
                 return pg.locator(sel).first.bounding_box()
             search = box('#past-questions button:has-text("Search")')
@@ -186,7 +186,8 @@ def test_browser_heights_widths_and_touch_target(site):
                 assert abs(resume["width"] - 128) < 0.6
                 # touch target: a point 7px above the visible edge still hits the button
                 x, y = resume["x"] + resume["width"] / 2, resume["y"] - 7
-                assert pg.evaluate("([x,y])=>!!document.elementFromPoint(x,y).closest('.ask-ctl')", [x, y])
+                hit = pg.evaluate("([x,y])=>{var e=document.elementFromPoint(x,y);return e?e.tagName+'.'+e.className:null}", [x, y])
+                assert hit and "ask-ctl" in hit, (hit, resume)
             ctx.close()
     finally:
         browser.close()

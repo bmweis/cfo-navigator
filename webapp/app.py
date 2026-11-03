@@ -25823,6 +25823,7 @@ async function loadRecent() {{
     if (!list.length) return;
     var box = document.getElementById('ask-recent');
     recentShell();
+    var note = document.getElementById('ask-done-note'); if (note) note.remove();   // the late answer has landed
     document.getElementById('recent-items').innerHTML = list.map(recentItemHtml).join('');
     recentSync();
     box.style.display = asked ? 'none' : 'block';
