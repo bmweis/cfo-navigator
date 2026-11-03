@@ -51,6 +51,8 @@ CHARACTERIZATION = (
     # An inference stated as agreement ("consistent with the headcount contraction"). Known false positive:
     # "consistent with the report's definition" and other plain statements of fit.
     ("consistent with", re.compile(r"\bconsistent with\b", re.I)),
+    # Same inference with an adverb ("directionally consistent"). Same known false positive as above.
+    ("directionally consistent", re.compile(r"\bdirectionally consistent\b", re.I)),
 )
 # A trend claim in a sentence with no figure: nothing shown supports it. Flag only. Stripping is not
 # safe here (the same words open true sentences with a number in the next clause), so the admin row shows it.
@@ -89,10 +91,44 @@ _TWO_VALUES_CELL = re.compile(r"\d[\d.,]*\s*%?\s*\+\s*\d[\d.,]*\s*%?")
 _ROW_MARKER_AFTER_PIPE = re.compile(r"^\s*\|.*\|\s*(?:\[\d{1,2}\]\s*)+$")
 
 
+_WHAT_SHIFTED = re.compile(r"^\s*(?:#{1,6}\s*|\*\*)?what shifted\b", re.I)
+_HEADING = re.compile(r"^\s*(?:#{1,6}\s+\S|\*\*[^*]+\*\*\s*$)")
+
+
+def what_shifted_problems(text: str, shifts: list | None) -> list[dict]:
+    """Flags for the "What shifted" section: it may hold only the computed lines. Any number in it that
+    no computed line carries is flagged (recorded, never stripped); so is a section written when there
+    were no computed lines at all. Known false positive: a computed figure the model rounds ("26.5" for 27)."""
+    if shifts is None:
+        return []
+    allowed: set[str] = set()
+    for x in shifts:
+        allowed.update(n.strip("$,%").rstrip(".") for n in _NUMBER.findall(str(x.get("line", ""))))
+        if "size" in x:
+            allowed.add(f"{float(x['size']):g}")
+    out: list[dict] = []
+    inside = False
+    for line in (text or "").split("\n"):
+        if _WHAT_SHIFTED.match(line):
+            inside = True
+            if not shifts:
+                out.append({"phrase": "what shifted without computed lines", "snippet": line.strip()[:200]})
+            continue
+        if inside and _HEADING.match(line):
+            inside = False
+        if not inside or not line.strip() or not shifts:
+            continue
+        for n in _NUMBER.findall(re.sub(r"\[\d+\]", "", line)):
+            if n.strip("$,%").rstrip(".") not in allowed:
+                out.append({"phrase": "number in what shifted with no computed line", "snippet": line.strip()[:200]})
+                break
+    return out
+
+
 def lint_answer(text: str, shifts: list | None = None) -> list[dict]:
     """[{phrase, snippet}] for each likely breach; [] for a clean answer. `shifts` (the computed shift lines
     the turn was given; [] when none) turns on the check that a "up N points" claim matches one of them."""
-    flags: list[dict] = []
+    flags: list[dict] = list(what_shifted_problems(text, shifts))
     # A citation marker after a table row's closing pipe breaks the row in a renderer that does not repair it.
     for line in (text or "").split("\n"):
         if _ROW_MARKER_AFTER_PIPE.match(line):
