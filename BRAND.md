@@ -598,6 +598,29 @@ graffiti marks on admin tables, forms, or the chat UI.
   within.
 - **Links** — navy; optional seafoam underline for emphasis in editorial copy.
 
+### Two arrow indicators, one size
+
+The site has exactly two arrow indicators, both drawn at one size, `--indicator-size` (14px, the measured size
+of the admin hub triangle it was matched to: ink about 12 by 13px; §7). No page sets its own size.
+
+1. **Disclosure triangle.** Only for a box the user or admin expands and collapses (admin hub groups, every
+   `<details>`, the Buddy past-question and turn rows, the Reader category rows, the Sources disclosure, the
+   thought-leadership "More" toggle). A solid navy triangle: **east (right) when closed, south (down) when
+   open**, turned 90 degrees by CSS, never swapped for another glyph. Classes: `.disclosure-caret` (and
+   `.ask-pq-rc`, `.ask-pq-caret`, `.rr-cat-chev`, `.ask-src-disc > summary::before`), all one shared rule.
+2. **Dropdown chevron.** Every `<select>` and the Buddy Depth and Sources buttons (`.ask-dd-caret`) use the
+   same thin navy chevron, **always pointing down**, with no open or closed variant. A `<select>` stays a
+   native element with `appearance:none` (never a JS widget), so the system picker still opens on a phone.
+   The shared `select{...}` caret properties and `line-height:1.4` are `!important` on purpose: most selects
+   carry inline `background:#fff` and `padding` shorthands that would reset the image and right padding.
+   `line-height:1.4` keeps a select the height a native one is.
+
+Text arrows inside link labels (`&rarr;`, `&larr;`), the Reader expand and collapse icons, and the up and down
+buttons that reorder feeds are actions, not indicators of either kind. The sort arrows in the Reader feeds table
+header are the one documented exception (they mark a sorted column; `brand_check.SELECT_CARET_ALLOWLIST`, with
+its reason). "Select caret is the shared style" on `/admin/checks` fails on any other glyph triangle, CSS
+triangle, hand-drawn chevron, indicator size or turn. To resize every indicator, edit the one token.
+
 ### Status chips
 
 A status is a **non-interactive chip**: a plain glyph plus a word, 18px tall, rounded pill, no border, one neutral fill (`--line`) with `--ink-soft` text, 12px. It is never a button shape. Only actions get a border or a fill of their own.
@@ -1279,6 +1302,8 @@ colors for status only," §6, still holds everywhere else).
   /* Sitewide wordmark treatment — nav + footer "CFO Navigator"/logo mark only,
      never body or heading text. */
   --font-wordmark:'Permanent Marker',cursive;
+  /* Dropdown caret: one size sitewide (BRAND.md section 5, "One select caret, one size"). */
+  --indicator-size:14px;
 }
 ```
 <!-- END GENERATED TOKENS -->
@@ -1336,6 +1361,12 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
     throughout.
   - Admin pages are out of scope entirely — see the sanctioned pending-count-badge exception
     below, which already puts more than one coral element on an admin screen.
+- **Select caret is the shared style (2026-11)** — §5's "Two arrow indicators, one size", enforced by
+  `brand_check.select_caret_problems()` (both families: selects and the Buddy buttons, and the disclosure
+  triangle). Flags a rule or inline style that draws its own select arrow, any text-glyph triangle or chevron,
+  a CSS-border triangle or chevron, a hand-drawn SVG chevron, an indicator with its own size or a turn other
+  than 90 degrees (a dropdown chevron never turns), and a missing shared rule or token. Documented exceptions
+  only, each with a reason in `SELECT_CARET_ALLOWLIST` (today: the two feeds-table sort arrows).
 - **Reading column holds its tables and grids (2026-10)** — §5's rule, enforced by
   `linklib.brand_check.reading_column_problems()`, with its own `/admin/checks` row and
   `tests/test_reading_column_rule.py`. A **source** scan, for the same reason as outbound

@@ -1702,6 +1702,8 @@ _CSS = """
   /* Sitewide wordmark treatment — nav + footer "CFO Navigator"/logo mark only,
      never body or heading text. */
   --font-wordmark:'Permanent Marker',cursive;
+  /* Dropdown caret: one size sitewide (BRAND.md section 5, "One select caret, one size"). */
+  --indicator-size:14px;
 }
 *{box-sizing:border-box;}
 /* Phase F8: mobile browsers (WebKit and Chromium alike) auto-boost font
@@ -2006,6 +2008,32 @@ p{margin:0 0 16px;color:var(--ink-soft);}
 /* Inputs — navy focus border + soft seafoam ring */
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(163,229,212,.55);}
 
+/* Two arrow indicators, one size (BRAND.md section 5). --indicator-size is the only number to change.
+   (1) Disclosure triangle: solid navy, east when closed, south when open (rotate 90deg), for anything
+   the user expands and collapses. Its size is the measured admin hub triangle (ink about 12x13 in a
+   14px box). (2) Dropdown chevron: always down, no open or closed variant, on every <select> and the
+   Buddy Depth and Sources buttons. Every <select> stays a native element drawn with appearance:none;
+   most carry inline style (a `background:#fff` shorthand would reset the image, an inline `padding`
+   shorthand would reset padding-right), so the chevron properties (and line-height:1.4, which keeps a
+   select the height a native one is: only appearance:none makes a select honor the page's 1.65
+   line-height) are !important. That is the one sanctioned override; background-color stays the
+   page's own. Navy is #002975, muted #6F6A60, written %23-escaped inside the data URI.
+   webapp/checks.py "Select caret is the shared style" fails on any other glyph, CSS triangle, SVG
+   chevron or select rule that draws its own indicator. */
+:root{--indicator-triangle-img:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpolygon points='1.5,0.5 13,7 1.5,13.5' fill='%23002975'/%3E%3C/svg%3E");
+  --indicator-chevron-img:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%23002975' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.75 4.5L7 9.75L12.25 4.5'/%3E%3C/svg%3E");
+  --indicator-chevron-img-muted:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%236F6A60' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.75 4.5L7 9.75L12.25 4.5'/%3E%3C/svg%3E");}
+select{-webkit-appearance:none!important;appearance:none!important;
+  background-image:var(--indicator-chevron-img)!important;background-repeat:no-repeat!important;
+  background-position:right 12px center!important;background-size:var(--indicator-size) var(--indicator-size)!important;
+  padding-right:calc(var(--indicator-size) + 20px)!important;line-height:1.4!important;text-overflow:ellipsis;}
+select:disabled{background-image:var(--indicator-chevron-img-muted)!important;}
+.ask-dd-caret{display:inline-block;width:var(--indicator-size);height:var(--indicator-size);
+  background:var(--indicator-chevron-img) no-repeat center/contain;}
+.disclosure-caret,.ask-pq-rc,.ask-pq-caret,.rr-cat-chev,.ask-src-disc>summary::before{content:"";display:inline-block;flex:none;
+  width:var(--indicator-size)!important;height:var(--indicator-size)!important;font-size:0!important;line-height:0;
+  background:var(--indicator-triangle-img) no-repeat center/contain;transition:transform .15s;vertical-align:middle;}
+
 /* Footer — navy background sitewide (BRAND.md §4) */
 .site-footer{padding:24px 28px;display:flex;align-items:center;gap:14px;font-size:13px;background:var(--navy);color:rgba(255,255,255,.55);}
 .site-footer .brand{flex:1;display:flex;align-items:center;gap:10px;}
@@ -2048,8 +2076,6 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--navy);bo
    any disclosure without needing a per-instance wrapper class. */
 details > summary{list-style:none;}
 details > summary::-webkit-details-marker{display:none;}
-details > summary .disclosure-caret{display:inline-block;flex-shrink:0;font-size:15px;
-  font-weight:700;line-height:1;color:var(--navy);transition:transform .15s;}
 details[open] > summary .disclosure-caret{transform:rotate(90deg);}
 .ask-hist-answer{font-size:13.5px;color:var(--ink-soft);line-height:1.6;}
 .ask-hist-answer p{margin:0 0 10px;}
@@ -2125,8 +2151,8 @@ details[open] > summary .disclosure-caret{transform:rotate(90deg);}
 .ask-src-disc{margin:16px 0 0;border-top:1px solid var(--line);padding-top:4px;}
 .ask-src-disc>summary{cursor:pointer;display:flex;align-items:center;gap:8px;min-height:44px;font-size:13px;font-weight:600;color:var(--navy);list-style:none;}
 .ask-src-disc>summary::-webkit-details-marker{display:none;}
-.ask-src-disc>summary::before{content:"";width:7px;height:7px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg);transition:transform .15s;flex:none;margin:0 3px 0 2px;}
-.ask-src-disc[open]>summary::before{transform:rotate(45deg);}
+.ask-src-disc>summary::before{margin:0 3px 0 2px;}
+.ask-src-disc[open]>summary::before{transform:rotate(90deg);}
 .ask-src-list{list-style:none;margin:0;padding:4px 0 2px;display:flex;flex-direction:column;gap:9px;}
 .ask-src-row{display:grid;grid-template-columns:2.4em 1.5em minmax(0,1fr);column-gap:6px;font-size:13px;line-height:1.45;scroll-margin-top:96px;border-radius:6px;}
 .ask-src-row:target,.ask-src-row.ask-src-hit{background:var(--seafoam-wash);}
@@ -2342,7 +2368,7 @@ def _disclosure_group(name: str, body_html: str, *, count_label: str = "",
         f'<span class="group-badge">{badge_html}</span>'
         f'{count_span}'
         f'</span>'
-        f'<span class="disclosure-caret">&#9654;</span>'
+        f'<span class="disclosure-caret"></span>'
         f'</summary>'
         f'<div style="padding:0 {"16px" if nested else "20px"} {"16px" if nested else "20px"};">'
         f'{body_html}'
@@ -6146,8 +6172,7 @@ def thought_leadership(request: Request):
             toggle_html = (
                 f'<button type="button" class="tl-col-item-toggle" aria-expanded="false" aria-controls="{desc_id}" '
                 f'onclick="toggleTLDesc(this,\'{desc_id}\')">'
-                '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" '
-                'stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'
+                '<span class="disclosure-caret" aria-hidden="true"></span>'
                 'More</button>'
                 f'<div class="tl-col-item-desc" id="{desc_id}" hidden>{_esc(it["description"])}</div>'
             )
@@ -9197,7 +9222,7 @@ Not sure which tool's for you? {(
   style="display:block;width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:15px;background:#fff;box-sizing:border-box;margin-bottom:10px;">
 
 <details style="margin-bottom:8px;">
-  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
+  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret"></span></summary>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
     <button id="advisor-btn" class="tcat-btn" onclick="toggleAdvisor()" style="border-color:var(--accent);color:var(--accent);">&#129305; Advisor</button>
     <button class="tcat-btn tcat-all tcat-active" data-cat="" onclick="filterCat(this)">All</button>
@@ -11182,7 +11207,7 @@ groups, associations, and Slack channels. Not sure which community's for you? {(
 </div>
 
 <details style="margin-bottom:8px;">
-  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
+  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;margin-bottom:8px;">Categories <span class="disclosure-caret"></span></summary>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
     <button class="ccat-btn ccat-all ccat-active" data-cat="" onclick="filterCommCat(this)">All categories</button>
     {cat_buttons}
@@ -13542,7 +13567,7 @@ def admin_contacts(request: Request):
         return (
             f'<td style="padding:10px 12px;border-bottom:1px solid var(--line);">'
             f'<details><summary style="cursor:pointer;color:var(--ink-soft);display:flex;align-items:baseline;gap:6px;">'
-            f'<span class="disclosure-caret" style="font-size:11px;">&#9654;</span>{_esc(preview)}</summary>'
+            f'<span class="disclosure-caret"></span>{_esc(preview)}</summary>'
             f'<div style="white-space:pre-wrap;margin-top:8px;color:var(--ink-soft);">{_esc(message)}</div></details></td>'
         )
 
@@ -13974,7 +13999,7 @@ def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]],
         for key, label in columns
     )
     return f"""<details style="margin:0 0 12px;">
-  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;">Columns <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>
+  <summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;">Columns <span class="disclosure-caret"></span></summary>
   <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);max-width:520px;">
     <div style="display:flex;flex-wrap:wrap;gap:10px 16px;">{checks}</div>
     <div style="display:flex;align-items:center;gap:10px;padding-top:8px;border-top:1px solid var(--line);">
@@ -14374,7 +14399,7 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
         # public visitors browsing the directory.
         pills_html = (f'<details style="margin:-2px 0 12px;">'
                       f'<summary style="cursor:pointer;font-size:13px;color:var(--muted);display:inline-flex;'
-                      f'align-items:center;gap:5px;">Categories <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>'
+                      f'align-items:center;gap:5px;">Categories <span class="disclosure-caret"></span></summary>'
                       f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:8px;'
                       f'align-items:center;margin-top:10px;">{boxes}</div></details>'
                       '<style>.admin-cat-pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;'
@@ -14392,7 +14417,7 @@ def _admin_sort_filter_toolbar_html(table_key: str, sort_fields: list[tuple[str,
         )
         category_html = (f'<details style="display:inline-block;"><summary style="cursor:pointer;font-size:13px;'
                           f'color:var(--muted);display:inline-flex;align-items:center;gap:5px;">Categories '
-                          f'<span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>'
+                          f'<span class="disclosure-caret"></span></summary>'
                           f'<div id="{table_key}-filter-categories" style="display:flex;flex-wrap:wrap;gap:6px 12px;'
                           f'margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;'
                           f'background:var(--surface);max-width:420px;">{boxes}</div></details>')
@@ -15521,7 +15546,7 @@ def _feature_category_group_html(category: dict, features: list[dict], pending_i
       <span style="font-size:15px;font-weight:600;color:var(--navy);">{_esc(category['name'])}</span>
       <span style="font-size:12px;color:var(--muted);">{count_bits}</span>
     </span>
-    <span class="disclosure-caret">&#9654;</span>
+    <span class="disclosure-caret"></span>
   </summary>
   <div style="padding:0 18px 16px;">
     <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
@@ -16981,8 +17006,7 @@ _TL_COLUMN_CSS = (
     '.tl-col-item-toggle{display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:0;'
     'font:600 11px var(--font-body);color:var(--navy);background:none;border:none;cursor:pointer;}'
     '.tl-col-item-toggle:hover{text-decoration:underline;}'
-    '.tl-col-item-toggle svg{transition:transform .15s;flex-shrink:0;}'
-    '.tl-col-item-toggle[aria-expanded="true"] svg{transform:rotate(180deg);}'
+    '.tl-col-item-toggle[aria-expanded="true"] .disclosure-caret{transform:rotate(90deg);}'
     '.tl-col-item-desc{margin:6px 0 0;font:400 12.5px var(--font-body);color:var(--ink-soft);line-height:1.5;}'
     '@media(max-width:900px){.tl-cols{flex-wrap:wrap;}.tl-col{flex:1 1 calc(50% - 12px);}}'
     '@media(max-width:560px){.tl-col{flex:1 1 100%;}}'
@@ -18493,7 +18517,7 @@ def _community_profile_form_fields(p: dict | None, community: dict,
         inner = "\n".join(_field(key, label) for label, key in fields)
         return (f'  <details class="cp-group" data-char-group{open_attr}>\n'
                 f'    <summary class="cp-group-summary">'
-                f'<span class="disclosure-caret" aria-hidden="true">&#9654;</span>'
+                f'<span class="disclosure-caret" aria-hidden="true"></span>'
                 f'<h2 class="cp-group-title">{_esc(title)}</h2>'
                 f'{_flag_html(over_max, over_target)}'
                 f'<span class="cp-group-actions"></span>'
@@ -18796,7 +18820,7 @@ def admin_communities(request: Request, filter: str = ""):
 </p>
 
 <details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
-  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>How this works: every prompt/CTA across the feature, and the anonymous tracking behind it</summary>
+  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret"></span>How this works: every prompt/CTA across the feature, and the anonymous tracking behind it</summary>
   <div style="margin-top:16px;">
     {_COMMUNITIES_REFERENCE_HTML}
   </div>
@@ -21102,7 +21126,7 @@ def _tool_edit_page(request: Request, slug: str, screenshot_captured: str = "", 
     <span style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
       <h2 style="font-size:16px;font-weight:600;margin:0;">{_esc(tool_labels.KEY_FEATURES)}</h2>
     </span>
-    <span class="disclosure-caret">&#9654;</span>
+    <span class="disclosure-caret"></span>
   </summary>
   <p style="font-size:13px;color:var(--muted);margin:12px 0 0;">The governed replacement for Features above, one curated list per category this tool belongs to&mdash;see
   <a href="/admin/tools/software/features" target="_blank" rel="noopener">Software features</a>. Check a row on to link this tool to that feature; availability/AI/verified date only matter once checked.</p>
@@ -23129,8 +23153,7 @@ _READER_SHELL_CSS = """
 .rr-cat:hover{background:var(--navy-wash);}
 .rr-cat-on{background:var(--navy-wash);color:var(--navy);font-weight:600;}
 .rr-cat-count{font-size:12px;color:var(--muted);}
-.rr-cat-chev{display:inline-block;width:0;height:0;border-style:solid;border-width:4px 0 4px 6px;
-  border-color:transparent transparent transparent var(--muted);margin-right:6px;transition:transform .15s;}
+.rr-cat-chev{margin-right:6px;}
 .rr-cat-chev.rr-open{transform:rotate(90deg);}
 .rr-src-list{display:none;flex-direction:column;gap:2px;margin:2px 0 4px 22px;}
 .rr-src-list.rr-open{display:flex;}
@@ -24553,7 +24576,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         # byline and a chevron; the answer, sources and admin buttons are the
         # disclosure body. Same fold element the Search past questions section uses.
         return f"""<details class="ask-pq-row">
-  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{meta_html}</span></summary>
+  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true"></span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{meta_html}</span></summary>
   <div class="ask-pq-body">
     <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
     {src_html}
@@ -24584,7 +24607,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # empty state it is always open and its summary is inert, so that state
     # reads exactly as it did when this was a plain section.
     past_questions_section = f"""<details id="past-questions" class="ask-section ask-pq" open style="margin-top:0;margin-bottom:28px;">
-  <summary class="ask-section-label"><span class="ask-pq-caret" aria-hidden="true">&#9656;</span>Search past questions</summary>
+  <summary class="ask-section-label"><span class="ask-pq-caret" aria-hidden="true"></span>Search past questions</summary>
   <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Search before running your query.</p>
   <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
@@ -24747,7 +24770,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         <div class="ask-dd" id="ask-dd-top">
           <div class="ask-dd-row">
             <div class="ask-dd-col">
-              <label class="ask-dd-lbl"><span class="ask-dd-h">Depth</span><button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
+              <label class="ask-dd-lbl"><span class="ask-dd-h">Depth</span><button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true"></span></button></label>
               <div class="ask-dd-panel" data-dd="depth" hidden>
                 <div class="ask-tags" role="radiogroup" aria-label="Depth">
                   {tier_tags}
@@ -24755,7 +24778,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
               </div>
             </div>
             <div class="ask-dd-col">
-              <label class="ask-dd-lbl"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true">&#9662;</span></button></label>
+              <label class="ask-dd-lbl"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true"></span></button></label>
               <div class="ask-dd-panel" data-dd="sources" hidden>
                 <div class="ask-tags">
                   {source_tags}
@@ -24865,7 +24888,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
   grid-template-areas:{_intro_areas_thread};}}
 .ask-pq>summary{{list-style:none;display:flex;align-items:center;gap:8px;pointer-events:none;cursor:default;}}
 .ask-pq>summary::-webkit-details-marker{{display:none;}}
-.ask-pq>summary .ask-pq-caret{{display:none;font-size:12px;transition:transform .12s;}}
+.ask-pq>summary .ask-pq-caret{{display:none;}}
 .ask-pq:not([open])>summary{{margin-bottom:0;}}
 .fpa-thread-open .ask-pq>summary{{pointer-events:auto;cursor:pointer;}}
 .fpa-thread-open .ask-pq>summary .ask-pq-caret{{display:inline-block;}}
@@ -24971,7 +24994,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-dd-btn[aria-expanded="true"]{{border-color:var(--navy);}}
 .ask-dd-k{{flex-shrink:0;}}
 .ask-dd-v{{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--navy);}}
-.ask-dd-caret{{flex-shrink:0;color:var(--muted);}}
+.ask-dd-caret{{flex-shrink:0;}}
 .ask-dd-panel{{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;}}
 .ask-dd-panel[hidden]{{display:none;}}
 .ask-dd-panel .ask-tags{{flex-direction:column;flex-wrap:nowrap;gap:2px;}}
@@ -24991,7 +25014,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-pq-sum{{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;}}
 .ask-pq-sum::-webkit-details-marker{{display:none;}}
 @media(hover:hover){{.ask-pq-sum:hover{{background:var(--accent-light);border-radius:8px;}}}}
-.ask-pq-rc{{font-size:12px;color:var(--navy);transition:transform .12s;flex-shrink:0;}}
 .ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{{transform:rotate(90deg);}}
 .ask-pq-q{{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}}
@@ -25057,7 +25079,6 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu-send:focus-visible{{outline:2px solid var(--navy);outline-offset:2px;}}
 .ask-turn-row{{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;font:inherit;padding:11px 14px;min-height:44px;box-sizing:border-box;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;}}
 @media(hover:hover){{.ask-turn-row:hover{{border-color:var(--navy);}}}}
-.ask-turn-row .ask-pq-rc{{font-size:12px;color:var(--navy);}}
 .ask-turn-row[aria-expanded="true"] .ask-pq-rc{{transform:rotate(90deg);}}
 .ask-turn-rq{{font-weight:600;font-size:13.5px;color:var(--navy);min-width:0;flex:1;}}
 .ask-turn.has-row>.ask-q-bubble{{display:none;}}
@@ -25172,7 +25193,7 @@ function fuSummary() {{
   var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active').join(', ') || 'No sources';
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
   var sum = document.querySelector('.fu-sum');
-  if (sum) sum.innerHTML = '<span class="fu-sum-t"></span><span aria-hidden="true">\u25be</span>';
+  if (sum) sum.innerHTML = '<span class="fu-sum-t"></span><span class="disclosure-caret" aria-hidden="true"></span>';
   if (sum) sum.firstChild.textContent = [depthLabel(tier, selectedTier), srcs].filter(Boolean).join(' \u00b7 ');
   ddLabels();
 }}
@@ -25568,7 +25589,7 @@ function collapseTurn(turn) {{
   turn.classList.add('ask-turn', 'has-row');
   var row = document.createElement('button');
   row.type = 'button'; row.className = 'ask-turn-row'; row.setAttribute('aria-expanded', 'false');
-  row.innerHTML = '<span class="ask-pq-rc" aria-hidden="true">&#9656;</span><span class="ask-turn-rq"></span>';
+  row.innerHTML = '<span class="ask-pq-rc" aria-hidden="true"></span><span class="ask-turn-rq"></span>';
   row.querySelector('.ask-turn-rq').textContent = b.textContent;
   row.addEventListener('click', function() {{
     var o = turn.classList.toggle('open');
@@ -26512,7 +26533,7 @@ def ask_history(request: Request, page: int = 1):
       <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])} &middot; ${total:.3f} total</div>
     </div>
     <div style="margin-top:8px;">{_hist_chips(first, counts=(sum(rating_counts.get(t["id"], (0, 0))[0] for t in turns), sum(rating_counts.get(t["id"], (0, 0))[1] for t in turns)))}</div>
-    <span class="convo-chip"><span class="disclosure-caret">&#9654;</span>&nbsp;{label}</span>
+    <span class="convo-chip"><span class="disclosure-caret"></span>&nbsp;{label}</span>
   </summary>
   <div style="padding:0 18px 6px;">
     {"".join(_turn_block(t) for t in turns)}
@@ -26556,7 +26577,6 @@ def ask_history(request: Request, page: int = 1):
 {_ASK_CTL_CSS}
 {_ASK_CHIP_CSS}
 .convo-chip{{display:inline-flex;align-items:center;margin-top:10px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:4px 12px;}}
-.convo-chip .disclosure-caret{{font-size:11px;}}
 </style>
 </div>"""
     return HTMLResponse(_page("Your FP&A Buddy history—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
@@ -27872,7 +27892,7 @@ def admin_system_database(request: Request):
 <span style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--navy);font-weight:600;">{_esc(gname)}</span>
 <span style="font-size:12px;color:var(--muted);">{len(names)} {"table" if len(names) == 1 else "tables"}, {total_rows:,} rows</span>
 </span>
-<span class="disclosure-caret">&#9654;</span>
+<span class="disclosure-caret"></span>
 </summary>
 <div style="padding:0 18px 14px;">
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
@@ -29464,7 +29484,7 @@ def _pricing_edit(r, cat) -> str:
         f'inputmode="decimal" style="width:100%;min-width:0;padding:4px 6px;border:1px solid var(--line);'
         f'border-radius:6px;font:inherit;"></label>' for k, lbl in _PRICE_COLS)
     return (f'<details><summary style="cursor:pointer;color:var(--accent);font-size:13px;display:inline-flex;align-items:center;gap:5px;">'
-            f'Edit <span class="disclosure-caret" style="font-size:12px;">&#9654;</span></summary>'
+            f'Edit <span class="disclosure-caret"></span></summary>'
             f'<form method="post" action="/admin/system/ai/pricing/save" style="margin-top:8px;display:grid;'
             f'gap:6px;min-width:200px;"><input type="hidden" name="model_id" value="{_esc(mid)}">{inputs}'
             f'<label style="font-size:12px;display:block;">Source note<input name="source_note" '
@@ -29512,7 +29532,7 @@ def _model_pricing_card_html(rows: list[dict], status: dict, role_info: dict) ->
         notes = _pricing_notes_text(r, cat)
         notes_html = ("" if not notes else
                       '<details style="margin-top:6px;"><summary style="cursor:pointer;color:var(--accent);font-size:12.5px;display:inline-flex;'
-                      'align-items:center;gap:5px;">Notes <span class="disclosure-caret" style="font-size:11px;">&#9654;</span></summary>'
+                      'align-items:center;gap:5px;">Notes <span class="disclosure-caret"></span></summary>'
                       + "".join(f'<div style="font-size:13px;color:var(--ink-soft);margin-top:4px;">{_esc(n)}</div>' for n in notes)
                       + '</details>')
         body.append(
@@ -30117,6 +30137,7 @@ _LIVE_CHECK_THEMES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Outbound links open in a new tab",
         "Reading column holds its tables and grids",
         "Table actions column is headed Actions",
+        "Select caret is the shared style",
         "One table format",
     )),
     ("Site structure and content", (
@@ -30634,7 +30655,7 @@ def admin_checks(request: Request):
         f'</form>'
         f'<details style="margin:8px 0 0;">'
         f'<summary style="cursor:pointer;font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;">'
-        f'Set the PR link <span class="disclosure-caret" style="font-size:11px;">&#9654;</span></summary>'
+        f'Set the PR link <span class="disclosure-caret"></span></summary>'
         f'<form method="post" action="/admin/checks/ci-quota" style="margin:10px 0 0;display:flex;'
         f'gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;">'
         f'{_keep_input}'
@@ -31476,7 +31497,7 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Both capture paths below post to <code>/save</code> with your save token baked in, so they work from any page without logging in.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
-<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>Desktop&mdash;the bookmarklet</summary>
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret"></span>Desktop&mdash;the bookmarklet</summary>
 <div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
 <p style="margin:0 0 10px;">A bookmarklet is an ordinary browser bookmark whose &ldquo;URL&rdquo; is a tiny program instead of a web address. Clicking it runs the program on whatever page you're reading&mdash;it grabs that page's address and saves it to the archive.</p>
 <ol style="margin:0 0 10px;padding-left:20px;">
@@ -31490,7 +31511,7 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
 </details>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
-<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>iPhone / iPad&mdash;Share-Sheet shortcut</summary>
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret"></span>iPhone / iPad&mdash;Share-Sheet shortcut</summary>
 <div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
 <p style="margin:0 0 10px;">One-time setup in the <strong>Shortcuts</strong> app (~5 minutes); afterwards &ldquo;Save to CFO Library&rdquo; appears in Safari's share sheet.</p>
 <ol style="margin:0 0 10px;padding-left:20px;">
@@ -31514,7 +31535,7 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
 <p style="color:var(--muted);font-size:13.5px;margin:0 0 12px;">Same idea, same no-login token, a second destination: these post to <code>/save-later</code> and land in the Reader's Read Later list instead of the archive&mdash;no enrichment, no tags, just a quick queue for something to read later.</p>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
-<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>Desktop&mdash;the bookmarklet</summary>
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret"></span>Desktop&mdash;the bookmarklet</summary>
 <div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
 <p style="margin:0 0 10px;">Same mechanism as the archive bookmarklet above&mdash;an ordinary browser bookmark whose &ldquo;URL&rdquo; is a tiny program. Clicking it grabs the current page's address (and title) and saves it straight to Read Later&mdash;no prompt, one click.</p>
 <ol style="margin:0 0 10px;padding-left:20px;">
@@ -31528,7 +31549,7 @@ def _reader_admin_quadrants(task_counts: dict) -> list[str]:
 </details>
 
 <details style="margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 20px;">
-<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>iPhone / iPad&mdash;Share-Sheet shortcut</summary>
+<summary style="cursor:pointer;font-family:var(--font-head);font-weight:600;font-size:16px;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret"></span>iPhone / iPad&mdash;Share-Sheet shortcut</summary>
 <div style="font-size:14px;color:var(--ink-soft);line-height:1.7;margin-top:12px;">
 <p style="margin:0 0 10px;">One-time setup in the <strong>Shortcuts</strong> app (~5 minutes); afterwards &ldquo;Save to Read Later&rdquo; appears in Safari's share sheet, alongside &ldquo;Save to CFO Library&rdquo; if you set that one up too.</p>
 <ol style="margin:0 0 10px;padding-left:20px;">
@@ -33740,7 +33761,7 @@ def admin_ask_report(request: Request, user: str = ""):
   <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(_display_time.local_stamp(first["created_at"], tz_name))}</td>
   <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(first))}</td>
   <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(first.get("question") or "") > 160 else ''}
-    <span id="chip-{_esc(gid)}" style="margin-left:8px;font-size:11px;font-weight:700;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:2px 10px;white-space:nowrap;"><span class="disclosure-caret" style="font-size:10px;">&#9654;</span> {len(turns)} turns</span></td>
+    <span id="chip-{_esc(gid)}" style="margin-left:8px;font-size:11px;font-weight:700;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:2px 10px;white-space:nowrap;"><span class="disclosure-caret"></span> {len(turns)} turns</span></td>
   <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;color:var(--muted);">{_esc(", ".join(models))}</td>
   <td class="admin-table-cell" data-label="Cost" style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${total:.4f}{rw_note}</td>
 </tr>"""
@@ -34735,7 +34756,7 @@ def admin_ask_feedback(request: Request, rating: str = "", reviewed: str = ""):
                                                 r.get("stop_reason") or "")
         answer_html = (
             f'<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);display:flex;align-items:baseline;gap:5px;">'
-            f'<span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Answer ({len(answer):,} chars)&mdash;expand</summary>'
+            f'<span class="disclosure-caret"></span>Answer ({len(answer):,} chars)&mdash;expand</summary>'
             f'<div class="ask-hist-answer" style="margin:8px 0 0;">{a_html}</div></details>'
             if len(answer) > 300 else
             f'<div class="ask-hist-answer" style="margin:8px 0 0;">{a_html}</div>'
@@ -34901,7 +34922,7 @@ def admin_community_gaps(request: Request, reviewed: str = ""):
             return ""
         body_html = (
             f'<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted);display:flex;align-items:baseline;gap:5px;">'
-            f'<span class="disclosure-caret" style="font-size:11px;">&#9654;</span>{_esc(label)} ({len(text):,} chars)&mdash;expand</summary>'
+            f'<span class="disclosure-caret"></span>{_esc(label)} ({len(text):,} chars)&mdash;expand</summary>'
             f'<p style="font-size:13.5px;color:var(--ink-soft);line-height:1.55;white-space:pre-wrap;margin:6px 0 0;">{_esc(text)}</p></details>'
             if len(text) > 300 else
             f'<div style="margin-top:10px;"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;">{_esc(label)}</div>'
@@ -35285,7 +35306,7 @@ def admin_users(request: Request, msg: str = ""):
 {banner}
 
 <details style="margin:0 0 24px;border:1px solid var(--line);border-radius:12px;padding:14px 18px;background:var(--bg);">
-  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret">&#9654;</span>How to set up a new MCP user (someone connecting their own Claude to this site)</summary>
+  <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:8px;"><span class="disclosure-caret"></span>How to set up a new MCP user (someone connecting their own Claude to this site)</summary>
   <div style="margin-top:16px;">
     {_MCP_USER_SETUP_HTML}
   </div>
@@ -39453,7 +39474,7 @@ def admin_voice_page(request: Request):
 {reset_btn}
 <span id="{field_id}-status" style="font-size:13px;color:var(--muted);"></span></div>
 <details style="margin-top:14px;">
-<summary style="cursor:pointer;font-size:13px;color:var(--muted);display:flex;align-items:baseline;gap:5px;"><span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Default voice guide (the text this field was originally seeded from&mdash;leaving the field above blank no longer falls back to this; generation refuses instead)</summary>
+<summary style="cursor:pointer;font-size:13px;color:var(--muted);display:flex;align-items:baseline;gap:5px;"><span class="disclosure-caret"></span>Default voice guide (the text this field was originally seeded from&mdash;leaving the field above blank no longer falls back to this; generation refuses instead)</summary>
 <pre style="white-space:pre-wrap;font:12px/1.6 ui-monospace,monospace;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:10px;color:var(--muted);">{_esc(default_value)}</pre>
 </details>
 </div>"""
@@ -41593,7 +41614,7 @@ def admin_emails_page(request: Request):
 <span id="{section_id}-status" style="font-size:13px;color:var(--muted);"></span></div>
 
 <details style="margin-top:18px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px 16px;">
-<summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:5px;"><span class="disclosure-caret" style="font-size:11px;">&#9654;</span>Built-in default (read-only reference)</summary>
+<summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:5px;"><span class="disclosure-caret"></span>Built-in default (read-only reference)</summary>
 <div style="margin-top:12px;font-size:13px;color:var(--ink-soft);">
 <p style="margin:0 0 4px;"><strong>Subject:</strong></p>
 <pre style="white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 12px;font:13px/1.5 var(--font-body);">{_esc(row["subject_default"])}</pre>
