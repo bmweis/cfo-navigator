@@ -67,7 +67,7 @@ def site(monkeypatch):
 
 
 def _section(html):
-    return html[html.index('id="past-questions"'):html.index("</details>\n", html.index('id="past-questions"'))]
+    return html[html.index('id="past-questions"'):html.index("</section>", html.index('id="past-questions"'))]
 
 
 def test_follow_up_turns_are_never_standalone_rows(site):
@@ -85,7 +85,7 @@ def test_default_state_lists_all_questions_with_an_honest_heading(site):
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     assert "Unrated first question" in sec and "Helpful first question" in sec
     assert "Follow-up turn question" not in sec
-    assert re.search(r'<h2 class="ask-pq-heading">All questions</h2>', sec)
+    assert re.search(r'<span class="ask-pq-heading">All questions \(\d+\)</span>', sec)
     assert 'aria-pressed="false">Helpful only' in sec
 
 
@@ -94,7 +94,7 @@ def test_helpful_only_filters_relabels_and_shows_pressed(site):
     sec = _section(client("reader").get("/tools/fpa-buddy?helpful=1").text)
     assert "Helpful first question" in sec and "Unrated first question" not in sec
     assert "Follow-up turn question" not in sec
-    assert '<h2 class="ask-pq-heading">Helpful questions only</h2>' in sec
+    assert re.search(r'<span class="ask-pq-heading">Helpful questions only \(\d+\)</span>', sec)
     assert 'aria-pressed="true">Helpful only' in sec
     # Search keeps the filter; the toggle flips it back off
     assert re.search(r'name="helpful" value="1" class="ask-ctl ask-ctl-sm ask-ctl-w">Search', sec)
@@ -134,7 +134,7 @@ def test_resume_and_search_use_the_compact_class(site):
     html = client("reader").get("/tools/fpa-buddy").text
     assert re.search(r'class="ask-ctl ask-ctl-sm ask-ctl-w"[^>]*onclick="resumeConvoById', html)
     assert "ask-ctl ask-ctl-sm ask-ctl-w\" onclick=\"event.stopPropagation();resumeConvo" in html
-    assert ".ask-ctl-sm{min-height:28px" in html and ".ask-ctl-w{min-width:128px" in html
+    assert ".ask-ctl-sm{padding:0 12px" in html and ".ask-ctl-w{min-width:128px" in html
 
 
 def test_browser_heights_widths_and_touch_target(site):

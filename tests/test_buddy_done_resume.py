@@ -90,6 +90,9 @@ def own_html(monkeypatch):
             os.remove(db + ext)
 
 
+from tests.test_buddy_phone_fixes import _wait_recent as T_wait_recent
+
+
 def _open(html, width, height=900, path="/tools/fpa-buddy"):
     launched = _launch()
     if launched is None:
@@ -106,6 +109,7 @@ def _open(html, width, height=900, path="/tools/fpa-buddy"):
     pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
     pg.goto(ORIGIN + path)
     pg.wait_for_selector("#ask-q")
+    pg.evaluate("var d = document.getElementById('pq-all'); if (d) d.open = true")
     return pw, browser, pg, site
 
 
@@ -192,7 +196,7 @@ def test_done_while_a_follow_up_loads_drops_the_late_answer_but_it_lands_in_rece
     assert pg.locator("#ask-thread").inner_html().strip() == ""
     assert pg.inner_text("#ask-done-note") == "Your answer will appear in Recent."
     site.release()
-    pg.wait_for_selector("#ask-recent .ask-recent-item")
+    T_wait_recent(pg)
     pg.wait_for_function("!document.getElementById('ask-done-note')")
     assert pg.locator("#ask-thread").inner_html().strip() == ""         # not drawn on screen
     assert pg.locator("#fu").count() == 0
@@ -215,7 +219,7 @@ def _hits_within_44(pg, sel):
 
 def test_recent_rows_carry_a_visible_resume_button_lower_right(view):
     pg, site, w = view
-    pg.wait_for_selector(".ask-recent-item")
+    T_wait_recent(pg)
     item, btn = _box(pg, ".ask-recent-item"), _box(pg, ".ask-recent-item .ask-ctl")
     assert pg.inner_text(".ask-recent-item .ask-ctl").strip() == "Resume"
     assert abs(btn["h"] - 28) < 0.6                 # compact: 28px visible, 44px touch target
@@ -225,7 +229,7 @@ def test_recent_rows_carry_a_visible_resume_button_lower_right(view):
 
 def test_resume_button_opens_the_thread_and_hides_recent(view):
     pg, site, w = view
-    pg.wait_for_selector(".ask-recent-item")
+    T_wait_recent(pg)
     pg.click(".ask-recent-item .ask-ctl")
     pg.wait_for_selector("#fu-q")
     assert "Earlier question" in pg.inner_text("#ask-thread")
@@ -266,7 +270,7 @@ def test_resume_param_opens_the_thread_once_and_a_reload_collapses(own_html, wid
 def test_resume_param_for_someone_elses_conversation_shows_the_empty_state(own_html):
     pw, browser, pg, site = _open(own_html.get("/tools/fpa-buddy").text, 390, path="/tools/fpa-buddy?resume=c666")
     try:
-        pg.wait_for_selector(".ask-recent-item")
+        T_wait_recent(pg)
         assert pg.locator("#ask-thread").inner_html().strip() == ""
         assert "resume" not in pg.evaluate("location.search")
     finally:
@@ -278,11 +282,11 @@ def test_resume_param_for_someone_elses_conversation_shows_the_empty_state(own_h
 
 def test_done_and_resume_match_the_depth_and_sources_control_height(view):
     pg, site, w = view
-    pg.wait_for_selector(".ask-recent-item")
+    T_wait_recent(pg)
     dd = _box(pg, "#ask-dd-top [data-dd='depth'].ask-dd-btn")["h"]
     resume = _box(pg, ".ask-recent-item .ask-ctl")["h"]
     _ask(pg)
     done = _box(pg, "#fu-done")["h"]
-    # Dropdowns stay 44px; Done and Resume are the compact 28px button with a
-    # 44px touch target (the sitewide control-height item will reconcile the rest).
-    assert dd >= 44 and abs(done - 28) < 0.6 and abs(resume - 28) < 0.6
+    # One button height now: the dropdown buttons, Done and Resume are all the 28px token,
+    # each with a 44px touch target.
+    assert abs(dd - 28) < 0.6 and abs(done - 28) < 0.6 and abs(resume - 28) < 0.6
