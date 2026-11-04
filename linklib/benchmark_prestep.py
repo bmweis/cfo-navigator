@@ -172,6 +172,7 @@ class Prestep:
     shifts: list = field(default_factory=list)               # computed shift lines sent to the model (figures.compute_shifts)
     shifts_suppressed: int = 0                               # shifts below the threshold, left out silently
     shifts_skipped: list = field(default_factory=list)       # cells skipped because a report prints two values
+    shifts_unpaired: dict = field(default_factory=dict)      # candidates that gave no line, by short reason
 
     def log(self) -> dict:
         if not self.active and not self.split_fallback:
@@ -198,6 +199,7 @@ class Prestep:
             "shifts": [{"line": x["line"], "kind": x["kind"], "size": x["size"], "threshold": x["threshold"],
                         "directional": x["directional"]} for x in self.shifts],
             "shifts_suppressed": self.shifts_suppressed, "shifts_skipped": self.shifts_skipped,
+            "shifts_unpaired": self.shifts_unpaired,
             "left_out_detail": dict(sorted(self.left_out_detail.items(), key=lambda kv: -kv[1])),
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
             "remaining_usd": None if self.remaining_usd is None else round(self.remaining_usd, 4),
@@ -1241,6 +1243,10 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
 
 MAX_SHIFT_LINES = 4
 
+NO_SHIFTS_NOTE = ("COMPUTED SHIFTS: none. The system found no change over time above the threshold in the stored "
+                  "reports. Write no \"What shifted\" section, no \"what changed\" claim, and no up, down or change "
+                  "figure of your own. Do not subtract one report's number from another's.")
+
 
 def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
     """Compute the turn's shifts (figures.compute_shifts) from an all-editions, recent-window lookup of
@@ -1249,9 +1255,11 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
     threshold (smaller moves are left out silently)."""
     rows: list[dict] = []
     seen: set = set()
+    looked = False
     for s in subs:
         if s.intent != "benchmark" or not s.metrics:
             continue
+        looked = True
         seg = fg.usable_segment(lib, s.segment)
         for m in s.metrics:
             try:
@@ -1265,14 +1273,15 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
                 if k not in seen:
                     seen.add(k)
                     rows.append(r)
-    if not rows:
+    if not looked:
         return ""
-    out = fg.compute_shifts(rows, lib.shift_rules())
+    out = fg.compute_shifts(rows, lib.shift_rules()) if rows else {"shifts": [], "suppressed": 0, "skipped": [], "unpaired": {}}
+    ps.shifts_unpaired = out.get("unpaired", {})
     ps.shifts = out["shifts"][:MAX_SHIFT_LINES]
     ps.shifts_suppressed = out["suppressed"] + max(len(out["shifts"]) - MAX_SHIFT_LINES, 0)
     ps.shifts_skipped = out["skipped"]
     if not ps.shifts:
-        return ""
+        return NO_SHIFTS_NOTE
     return ("COMPUTED SHIFTS (worked out by the system from the stored reports above; these lines are exact):\n"
             + "\n".join(f"  {i}. {x['line']}" for i, x in enumerate(ps.shifts, 1))
             + "\nUnder a short heading \"What shifted\", write at most the two largest of these lines, each ending "

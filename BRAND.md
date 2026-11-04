@@ -484,7 +484,7 @@ graffiti marks on admin tables, forms, or the chat UI.
   hover fill, `#fca5a5` reject border. This is a semantic status color communicating
   "irreversible/dangerous," the same category as `--alert`, not a decorative button color —
   see `AUX_COLORS` in `linklib/brand_check.py` for the exact values.
-- **One button height** (2026-11, Brian's call: one height everywhere, icon-only included). Every button-like
+- **One button height** (2026-11, Brian asked for one standard height, icon-only included; 28px is the majority height measured and is one line to change, `--control-h`). Every button-like
   control renders at the token `--control-h` (**28px**). Padding, font size and radius may differ by style,
   the height may not. It is one shared rule in `webapp/app.py`'s `_CSS` (`.btn`, `.btn-ghost`, `.admin-only`,
   `.ask-ctl`, `.ask-dd-btn`, `.fu-send`, `.tcat-btn`, `.ccat-btn`, `.ger-mode`, `.ctl`) whose height, min and max
