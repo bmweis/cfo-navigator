@@ -537,7 +537,7 @@ def _row_line(r: dict) -> str:
     if r.get("cited_source"):
         parts.append(f"republished: this report cites {r['cited_source']} as its source (count it with that source)")
     kind = fg.row_table_kind(r)
-    if kind in fg.TABLE_KIND_LABELS:
+    if kind in ("headcount_count", "headcount_share"):  # spend rows (the bulk) carry no tag: keeps the character budget
         parts.insert(0, "table: " + fg.TABLE_KIND_LABELS[kind])
     tag = f"match: {r['match']}"
     if r.get("basis_group") in ("revenue", "arr"):
@@ -1320,7 +1320,7 @@ def table_kinds_note(picked: list[dict]) -> str:
         return ""
     return ("Separate tables by kind of figure: " + "; ".join(fg.TABLE_KIND_LABELS[k] for k in kinds)
             + ". A count of people and a percent never share a column, and a percent of headcount is never a spend row. "
-              "Each row's line says which table it belongs in.")
+              "A row's line says 'table: ...' for the two headcount kinds; a row with no table tag is spend.")
 
 
 def band_order_note(picked: list[dict]) -> str:
