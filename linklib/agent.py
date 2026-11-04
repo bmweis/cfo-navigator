@@ -1153,7 +1153,8 @@ def answer_question(
             _log.exception("answer strip failed; answer left as written")
         try:
             from .answer_lint import lint_answer
-            lint = lint_answer(text, shifts=list(getattr(prestep, "shifts", []) or []))
+            lint = lint_answer(text, shifts=list(getattr(prestep, "shifts", []) or []),
+                               rows=[r for sb in (getattr(prestep, "subs", []) or []) for r in (getattr(sb, "picked", []) or [])])
             if dropped_markers:
                 lint.append({"phrase": "marker with no source",
                              "snippet": "Dropped from the answer, no Sources entry: " + ", ".join(dropped_markers)})
