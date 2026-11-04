@@ -10483,10 +10483,25 @@ class Library:
             params + [limit]).fetchall()
         return [dict(r) for r in rows]
 
+    def count_public_ask_questions(self, query: str = "", helpful_only: bool = False,
+                                    viewer_id: int | None = None, see_private: bool = False) -> int:
+        """How many rows `list_public_ask_questions` would return with no limit: the count in the
+        "All questions (N)" label. Same filters, same visibility rule."""
+        sql = "SELECT COUNT(*) FROM ask_questions aq WHERE aq.turn_index=0"
+        vis_sql, params = self.ask_visibility_clause(viewer_id, see_private)
+        sql += vis_sql
+        if helpful_only:
+            sql += " AND EXISTS (SELECT 1 FROM ask_feedback f WHERE f.question_id = aq.id AND f.rating = 'helpful')"
+        q = query.strip()
+        if q:
+            sql += " AND (aq.question LIKE ? OR aq.answer LIKE ?)"
+            params += [f"%{q}%", f"%{q}%"]
+        return int(self.conn.execute(sql, params).fetchone()[0])
+
     def list_public_ask_questions(self, query: str = "", limit: int = 200,
                                    helpful_only: bool = False,
                                    viewer_id: int | None = None,
-                                   see_private: bool = False) -> list[dict]:
+                                   see_private: bool = False, offset: int = 0) -> list[dict]:
         """Non-hidden Q&A for the community browse view, newest first, optionally
         text-filtered on question/answer. First turns only (`turn_index = 0`):
         a follow-up has no meaning without its thread, so it is never a
@@ -10524,8 +10539,8 @@ class Library:
             base += " AND (aq.question LIKE ? OR aq.answer LIKE ?)"
             like = f"%{q}%"
             params += [like, like]
-        base += " ORDER BY aq.created_at DESC LIMIT ?"
-        params.append(limit)
+        base += " ORDER BY aq.created_at DESC, aq.id DESC LIMIT ? OFFSET ?"
+        params += [limit, max(0, int(offset))]
         rows = self.conn.execute(base, params).fetchall()
         return [dict(r) for r in rows]
 
