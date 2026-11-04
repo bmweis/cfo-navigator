@@ -629,6 +629,13 @@ of the admin hub triangle it was matched to: ink about 12 by 13px; §7). No page
    The shared `select{...}` caret properties and `line-height:1.4` are `!important` on purpose: most selects
    carry inline `background:#fff` and `padding` shorthands that would reset the image and right padding.
    `line-height:1.4` keeps a select the height a native one is.
+   **A dropdown panel overlays the page; a disclosure group pushes it.** The panel under a Buddy Depth or
+   Sources button is absolutely positioned under its own button at that button's width (`z-index` above later
+   content), so opening it moves nothing below. It closes on a tap outside, Escape, or a second tap on the
+   button, and stays inside the viewport (it flips above the button, or scrolls inside itself). A triangle
+   group (the first indicator above) opens in the page flow and pushes content down, as always. The one
+   exception is the sticky follow-up bubble's own Depth and Sources panels, which stay in flow: an overlay
+   there would have to open upward over the follow-up input and Ask button.
 
 Text arrows inside link labels (`&rarr;`, `&larr;`), the Reader expand and collapse icons, and the up and down
 buttons that reorder feeds are actions, not indicators of either kind. The sort arrows in the Reader feeds table

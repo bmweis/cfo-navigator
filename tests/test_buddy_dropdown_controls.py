@@ -59,25 +59,26 @@ def test_button_labels_fit_without_truncation_on_a_phone(live):
           return v.scrollWidth <= v.clientWidth; }""", dd)
 
 
-def test_top_panel_is_its_controls_width_and_in_flow(live):
+def test_top_panel_is_its_controls_width_and_overlays(live):
     pg = live
     pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
     btn, panel = _box(pg, "#ask-dd-top [data-dd='sources'].ask-dd-btn"), _box(pg, "#ask-dd-top .ask-dd-panel[data-dd='sources']")
     assert abs(panel["l"] - btn["l"]) < 1 and abs(panel["r"] - btn["r"]) < 1   # the control's own width and left edge
     assert panel["t"] >= btn["b"]                           # opens under the button that opened it
-    assert panel["b"] <= _box(pg, "#ask-q")["t"]            # pushes the text box down, never covers it
+    assert panel["t"] < _box(pg, "#ask-q")["b"]             # overlays the page below; test_buddy_phone_search_sources proves nothing moves
     assert panel["r"] <= pg.evaluate("window.innerWidth")
 
 
 def test_sources_panel_stays_open_while_ticking_and_closes_outside_or_escape(live):
     pg = live
+    pg.evaluate("window.scrollTo(0, 0)")
     pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
     pg.click("#ask-dd-top .ask-tag[data-source='open_web']")
     pg.click("#ask-dd-top .ask-tag[data-source='library']")
     assert pg.is_visible("#ask-dd-top .ask-dd-panel[data-dd='sources']")
     assert pg.inner_text("#ask-dd-top [data-dd='sources'] .ask-dd-v") == "2 of 3"
     assert sorted(pg.evaluate("activeSources()")) == ["feed", "open_web"]
-    pg.click("#ask-q")
+    pg.mouse.click(5, 5)   # the panel now overlays the text box, so click clear of it
     assert pg.is_hidden("#ask-dd-top .ask-dd-panel[data-dd='sources']")
     pg.click("#ask-dd-top [data-dd='sources'].ask-dd-btn")
     pg.keyboard.press("Escape")

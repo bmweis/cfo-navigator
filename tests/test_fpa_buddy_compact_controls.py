@@ -65,10 +65,9 @@ def test_depth_and_sources_are_two_dropdowns_with_panels_in_flow(env):
     assert block.index('data-dd="depth"') < block.index('data-dd="sources"')
     assert block.count('class="ask-dd-panel"') == 2
     assert block.count(" hidden>") == 2
-    # Panels sit in page flow: never absolutely positioned, so they cannot
-    # cover the question box, the Ask button or the follow-up input.
+    # Panels are overlays (absolute, under their own button) so opening one moves nothing.
     css = re.search(r"\.ask-dd-panel\{[^}]*\}", html).group(0)
-    assert "position" not in css
+    assert "position:absolute" in css and "z-index" in css
     assert "ask-controls" not in html and "fu-pop" not in html
 
 
