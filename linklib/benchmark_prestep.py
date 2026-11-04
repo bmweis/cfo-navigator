@@ -173,6 +173,7 @@ class Prestep:
     shifts_suppressed: int = 0                               # shifts below the threshold, left out silently
     shifts_skipped: list = field(default_factory=list)       # cells skipped because a report prints two values
     shifts_unpaired: dict = field(default_factory=dict)      # candidates that gave no line, by short reason
+    shifts_outliers: list = field(default_factory=list)      # flag-only: a shift endpoint far from other publishers' values
 
     def log(self) -> dict:
         if not self.active and not self.split_fallback:
@@ -199,7 +200,7 @@ class Prestep:
             "shifts": [{"line": x["line"], "kind": x["kind"], "size": x["size"], "threshold": x["threshold"],
                         "directional": x["directional"]} for x in self.shifts],
             "shifts_suppressed": self.shifts_suppressed, "shifts_skipped": self.shifts_skipped,
-            "shifts_unpaired": self.shifts_unpaired,
+            "shifts_unpaired": self.shifts_unpaired, "shifts_outliers": self.shifts_outliers,
             "left_out_detail": dict(sorted(self.left_out_detail.items(), key=lambda kv: -kv[1])),
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
             "remaining_usd": None if self.remaining_usd is None else round(self.remaining_usd, 4),
@@ -535,6 +536,9 @@ def _row_line(r: dict) -> str:
         parts.append("also printed in " + "; ".join(r["also_printed_in"]) + " (one source, not two)")
     if r.get("cited_source"):
         parts.append(f"republished: this report cites {r['cited_source']} as its source (count it with that source)")
+    kind = fg.row_table_kind(r)
+    if kind in ("headcount_count", "headcount_share"):  # spend rows (the bulk) carry no tag: keeps the character budget
+        parts.insert(0, "table: " + fg.TABLE_KIND_LABELS[kind])
     tag = f"match: {r['match']}"
     if r.get("basis_group") in ("revenue", "arr"):
         parts.insert(0, "basis group: " + fg.BASIS_LABELS[r["basis_group"]] + (" (OTHER BASIS)" if r.get("other_basis") else ""))
@@ -1211,6 +1215,9 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
         order = _order_note(s_.picked)
         if order:
             s_.notes.append(order)
+        for extra in (band_order_note(s_.picked), table_kinds_note(s_.picked)):
+            if extra:
+                s_.notes.append(extra)
     # The text block sent before the question: lookup notes, the plan, the notice.
     lines: list[str] = []
     seen_notes: set[str] = set()
@@ -1277,6 +1284,7 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
         return ""
     out = fg.compute_shifts(rows, lib.shift_rules()) if rows else {"shifts": [], "suppressed": 0, "skipped": [], "unpaired": {}}
     ps.shifts_unpaired = out.get("unpaired", {})
+    ps.shifts_outliers = out.get("outliers", [])
     ps.shifts = out["shifts"][:MAX_SHIFT_LINES]
     ps.shifts_suppressed = out["suppressed"] + max(len(out["shifts"]) - MAX_SHIFT_LINES, 0)
     ps.shifts_skipped = out["skipped"]
@@ -1299,6 +1307,32 @@ def _order_note(picked: list[dict]) -> str:
     if len(seen) < 2:
         return ""
     return "Table row order, newest data period first: " + "; ".join(seen[:8]) + ". Follow this order in every table."
+
+
+def table_kinds_note(picked: list[dict]) -> str:
+    """When the sent rows hold more than one kind of figure, say each kind is its own table."""
+    kinds = []
+    for r in picked:
+        k = fg.row_table_kind(r)
+        if k in fg.TABLE_KIND_LABELS and k not in kinds:
+            kinds.append(k)
+    if len(kinds) < 2:
+        return ""
+    return ("Separate tables by kind of figure: " + "; ".join(fg.TABLE_KIND_LABELS[k] for k in kinds)
+            + ". A count of people and a percent never share a column, and a percent of headcount is never a spend row. "
+              "A row's line says 'table: ...' for the two headcount kinds; a row with no table tag is spend.")
+
+
+def band_order_note(picked: list[dict]) -> str:
+    """Size bands in the order a table lists them: smallest to largest."""
+    seen: list[str] = []
+    for r in sorted(picked, key=lambda r: fg.band_sort_key(r["band"])):
+        b = (r["band"] or "").strip()
+        if b and fg.parse_band(b) is not None and b not in seen:
+            seen.append(b)
+    if len(seen) < 2:
+        return ""
+    return "Band order inside a table, smallest to largest: " + "; ".join(seen[:8]) + "."
 
 
 def dedupe_docs(docs: list[dict]) -> list[dict]:

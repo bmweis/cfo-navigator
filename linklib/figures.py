@@ -837,6 +837,105 @@ def _band_key(text) -> tuple:
     return (b["kind"], b["lo"], b["hi"])
 
 
+
+_PERIOD_WORDS = re.compile(r"\b(?:at|end|of|the|in|as|q[1-4]|(?:19|20)\d{2}|full|time|equivalent|fte|ftes|percent|pct)\b|[%,;()]")
+_SEG_NOISE = {"public", "index", "overall", "median", "company", "companies", "constituents", "the", "of", "a", "and"}
+
+
+def _denom_key(text) -> str:
+    """The denominator without its wording: "full-time equivalent employees at end of Q2 2022",
+    "full-time employees" and "FTE employees" are one ("employees"); "revenue" and "percent of
+    revenue" are one. A different base ("arr", "headcount") stays different."""
+    t = _PERIOD_WORDS.sub(" ", _lc(text))
+    return " ".join(_stem(w) for w in re.findall(r"[a-z0-9]+", t))
+
+
+def _seg_key(text) -> str:
+    """A segment without the report's wording around it: "public index, top 10 median" and
+    "public; top 10 companies" are one ("top 10"); "all 112 companies" and "all 144 companies" are one
+    ("all"). A real difference ("fintech", "top 10" vs "all") stays."""
+    t = re.sub(r"\ball\s+\d+\b|\(?\b\d+-company\s+index\)?|\boverall\b", " all ", _lc(text))
+    words = [w for w in re.findall(r"[a-z0-9]+", t) if w not in _SEG_NOISE]
+    return " ".join(dict.fromkeys(words)) if "all" in words else " ".join(words)
+
+
+def _unit_key(unit) -> str:
+    return "%" if _is_percent(unit) else _lc(unit)
+
+
+_KEY_FIELDS = ((0, "metric name"), (1, "band"), (4, "segment"), (5, "statistic"))
+
+
+def _single_edition_reason(key: tuple, by_series: dict, groups: dict) -> str:
+    """"single edition" only when the publisher stored one edition of this exact figure and nothing else
+    that could be its other edition. When the same publisher has another edition of a figure that differs
+    in exactly one of metric name, band, segment or statistic, say which."""
+    years = {_year_num(r["report_year"]) for rows in by_series.values() for r in rows}
+    for other_key, other_series in groups.items():
+        if other_key is key or other_key == key:
+            continue
+        if not set(other_series) & set(by_series):
+            continue
+        other_years = {_year_num(r["report_year"]) for ser, rows in other_series.items() if ser in by_series for r in rows}
+        if not other_years - years:
+            continue
+        differ = [i for i in range(len(key)) if key[i] != other_key[i]]
+        if len(differ) == 1 and differ[0] in dict(_KEY_FIELDS):
+            return f"editions exist but {dict(_KEY_FIELDS)[differ[0]]} differs"
+    return "single edition"
+
+
+def _bands_overlap(a, b) -> bool:
+    """Two printed bands cover mostly the same sizes ("$25M-$50M" and "$20M-$50M"), or are the same text."""
+    pa, pb = parse_band(a), parse_band(b)
+    if pa is None or pb is None:
+        return _lc(a) == _lc(b)
+    if pa["kind"] != pb["kind"]:
+        return False
+    lo, hi = max(pa["lo"], pb["lo"]), min(pa["hi"], pb["hi"])
+    if hi < lo:
+        return False
+    narrow = min(pa["hi"] - pa["lo"], pb["hi"] - pb["lo"])
+    return narrow == 0 or (hi - lo) >= 0.5 * narrow
+
+
+def _endpoint_outliers(shifts: list[dict], ok: list[dict], rules: dict | None) -> list[str]:
+    """Flag-only. For each computed shift inside one publisher's series, an endpoint that differs from
+    every OTHER publisher's value for the same metric, period year, band basis, band and statistic by
+    more than twice the shift threshold is recorded with the other values. Nothing is changed or hidden:
+    the shift line still goes to the model; this is a note for the admin row."""
+    notes: list[str] = []
+    for sh in shifts:
+        if sh["directional"]:
+            continue
+        thr = sh["threshold"]
+        for side in ("from", "to"):
+            e = sh[side]
+            cands = [r for r in ok if r["report"] == e["report"] and r["source"] == e["source"]
+                     and r["data_period"] == e["period"] and r["value"] == e["value"]
+                     and _lc(r["metric"]) and (r["metric"] == sh["metric"]) and _lc(r["statistic"]) == _lc(sh["statistic"] or "")]
+            if not cands:
+                continue
+            ep = cands[0]
+            others = [r for r in ok
+                      if _lc(r.get("series") or r["source"]) != _lc(ep.get("series") or ep["source"])
+                      and (name_key(r["metric"]) or frozenset({_lc(r["metric"])})) == (name_key(ep["metric"]) or frozenset({_lc(ep["metric"])}))
+                      and _year_num(r["data_period"]) == _year_num(ep["data_period"]) > 0
+                      and _basis_key(r["band_basis"]) == _basis_key(ep["band_basis"])
+                      and _lc(r["statistic"]) == _lc(ep["statistic"])
+                      and _unit_key(r["unit"]) == _unit_key(ep["unit"])
+                      and _bands_overlap(r["band"], ep["band"])]
+            if not others:
+                continue
+            if all(abs(r["value_num"] - ep["value_num"]) > 2 * thr for r in others if r.get("value_num") is not None) \
+                    and any(r.get("value_num") is not None for r in others):
+                vals = "; ".join(f"{_ends(r)} {r['value']}" for r in others[:4])
+                notes.append(f"endpoint outlier vs other publishers: {sh['metric']} at {sh['band'] or 'no band'} "
+                             f"({sh['statistic'] or 'statistic not stated'}), {_ends(ep)} {ep['value']}; others for the same period, "
+                             f"band and statistic: {vals}")
+    return notes
+
+
 def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
     """{shifts, suppressed, skipped, unpaired}. `unpaired` counts, by short reason, every candidate that
     produced no line ("single edition", "same data period", "not an exact or adjacent-band figure", ...).
@@ -869,10 +968,13 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
             if label not in skipped:
                 skipped.append(label)
             continue
+        if _lc(r.get("data_period")).startswith("change"):
+            _why("a change figure, not a level")
+            continue
         ok.append(r)
     base = lambda r: (name_key(r["metric"]) or frozenset({_lc(r["metric"])}), _band_key(r["band"]), bool(r.get("band_context")),
                       _basis_key(r["band_basis"]),
-                      _lc(r["segment"]), _lc(r["statistic"]), _lc(r["denominator"]), _lc(r["unit"]),
+                      _seg_key(r["segment"]), _lc(r["statistic"]), _denom_key(r["denominator"]), _unit_key(r["unit"]),
                       r.get("basis_group") or "")
     groups: dict[tuple, dict[str, list[dict]]] = {}
     for r in ok:
@@ -942,11 +1044,12 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
             else:
                 _why("same data period in both editions")
         elif not made and not tried:
-            _why("single edition")
+            _why(_single_edition_reason(key, by_series, groups))
     shifts.sort(key=lambda s: (-s["_norm"], s["line"]))
     for s in shifts:
         s.pop("_norm", None)
-    return {"shifts": shifts, "suppressed": suppressed, "skipped": skipped, "unpaired": unpaired}
+    outliers = _endpoint_outliers(shifts, ok, rules)
+    return {"shifts": shifts, "suppressed": suppressed, "skipped": skipped, "unpaired": unpaired, "outliers": outliers}
 
 
 # --- find_figures --------------------------------------------------------------
@@ -1046,6 +1149,40 @@ def is_total_fte_row(row: dict) -> bool:
         _TOTAL_FTE_KEY = name_key("Total employees")
     return bool(_TOTAL_FTE_KEY) and name_key(row.get("metric") or "") == _TOTAL_FTE_KEY \
         and not _PER_HEAD_NAME.search(_lc(row.get("metric")))
+
+
+_HEAD_DENOM = re.compile(r"\b(?:headcount|head count|employees?|ftes?|staff)\b")
+
+
+def row_table_kind(row: dict) -> str:
+    """Which table a stored row belongs in: "headcount_count" (a number of people), "headcount_share"
+    (a percent of headcount: "Engineering headcount mix 32%"), "spend_share" (a percent of revenue or ARR)
+    or "other". A share of headcount is never a spend row, and a count is never in a percent column."""
+    unit = row.get("unit") or ""
+    denom = _lc(row.get("denominator"))
+    name = _lc(row.get("metric"))
+    if _is_percent(unit):
+        if _HEAD_DENOM.search(denom) or ("headcount" in name and "mix" in name) or ("headcount" in name and not re.search(r"revenue|arr", denom)):
+            return "headcount_share"
+        if re.search(r"revenue|arr", denom) or expense_line_of(row.get("metric") or "", row.get("denominator") or "", unit):
+            return "spend_share"
+        return "other"
+    if _lc(unit) in ("count", "fte", "ftes", "employees", "people", "") and _HEAD_DENOM.search(name):
+        return "headcount_count"
+    return "other"
+
+
+TABLE_KIND_LABELS = {"headcount_count": "headcount counts (a number of people)",
+                     "headcount_share": "headcount mix (a percent of headcount)",
+                     "spend_share": "spend (a percent of revenue or ARR)"}
+
+
+def band_sort_key(band) -> tuple:
+    """Smallest size first; a band that cannot be read sorts last, by its text."""
+    p = parse_band(band)
+    if p is None:
+        return (1, 0.0, 0.0, _lc(band))
+    return (0, p["lo"], p["hi"] if p["hi"] != float("inf") else 1e18, "")
 
 
 _PER_HEAD_NAME = re.compile(r"\bper\b|/|%|percent|growth|attrition|turnover")

@@ -92,6 +92,7 @@ _ROW_MARKER_AFTER_PIPE = re.compile(r"^\s*\|.*\|\s*(?:\[\d{1,2}\]\s*)+$")
 
 
 _WHAT_SHIFTED = re.compile(r"^\s*(?:#{1,6}\s*|\*\*)?what shifted\b", re.I)
+_LEFT_OUT = re.compile(r"^\s*(?:\*\*|_)?left out\b", re.I)
 _HEADING = re.compile(r"^\s*(?:#{1,6}\s+\S|\*\*[^*]+\*\*\s*$)")
 
 
@@ -114,7 +115,7 @@ def what_shifted_problems(text: str, shifts: list | None) -> list[dict]:
             if not shifts:
                 out.append({"phrase": "what shifted without computed lines", "snippet": line.strip()[:200]})
             continue
-        if inside and _HEADING.match(line):
+        if inside and (_HEADING.match(line) or _LEFT_OUT.match(line)):
             inside = False
         if not inside or not line.strip() or not shifts:
             continue
@@ -125,10 +126,51 @@ def what_shifted_problems(text: str, shifts: list | None) -> list[dict]:
     return out
 
 
-def lint_answer(text: str, shifts: list | None = None) -> list[dict]:
+_ROW_NUM = re.compile(r"(?<![\w.])\$?\d[\d,]*(?:\.\d+)?%?")
+
+
+def label_problems(text: str, rows: list[dict] | None) -> list[dict]:
+    """Flag-only label check on table rows. A row that names a sent report's publisher and year and
+    shows a figure that report does not print for that metric, but another sent edition of the same
+    publisher does, has the wrong edition label ("High Alpha 2025 | 200" when 200 is the 2024 figure).
+    Nothing is changed; the admin row shows it. Rows with no sent figure to compare are not judged."""
+    if not rows:
+        return []
+    by_pub: dict[str, dict[str, set[str]]] = {}
+    for r in rows:
+        pub = str(r.get("source") or "").strip().lower()
+        yr = str(r.get("report_year") or "").strip()
+        if not pub or not yr:
+            continue
+        val = str(r.get("value") or "").strip().rstrip("%")
+        by_pub.setdefault(pub, {}).setdefault(yr, set()).add(val)
+    out: list[dict] = []
+    for line in (text or "").split("\n"):
+        if not line.strip().startswith("|"):
+            continue
+        low = line.lower()
+        nums = {n.strip("$,%").replace(",", "") for n in _ROW_NUM.findall(re.sub(r"\[\d+\]", "", line))}
+        for pub, years in by_pub.items():
+            if pub not in low:
+                continue
+            named = [y for y in years if re.search(rf"(?<!\d){re.escape(y)}(?!\d)", line)]
+            if not named:
+                continue
+            for y in named:
+                other = set().union(*(v for yy, v in years.items() if yy != y)) if len(years) > 1 else set()
+                mine = years[y]
+                shown = nums & (mine | other)
+                if shown and not (shown & mine) and (shown & other):
+                    out.append({"phrase": "table label does not match the figure",
+                                "snippet": line.strip()[:200]})
+                    break
+    return out
+
+
+def lint_answer(text: str, shifts: list | None = None, rows: list | None = None) -> list[dict]:
     """[{phrase, snippet}] for each likely breach; [] for a clean answer. `shifts` (the computed shift lines
     the turn was given; [] when none) turns on the check that a "up N points" claim matches one of them."""
-    flags: list[dict] = list(what_shifted_problems(text, shifts))
+    flags: list[dict] = list(what_shifted_problems(text, shifts)) + label_problems(text, rows)
     # A citation marker after a table row's closing pipe breaks the row in a renderer that does not repair it.
     for line in (text or "").split("\n"):
         if _ROW_MARKER_AFTER_PIPE.match(line):
