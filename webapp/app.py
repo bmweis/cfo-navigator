@@ -24480,6 +24480,12 @@ _ASK_PQ_CSS = (
     ".ask-pq-list[open]>.ask-pq-listsum .disclosure-caret{transform:rotate(90deg);}"
     ".ask-pq-listsum .ask-pq-heading{margin:0;}"
     ".ask-pq-more{margin:6px 0 0;font-size:14px;}"
+    # The search row: one line when it fits; on a phone the input takes a full line and
+    # Search and Helpful only share the next one at equal width.
+    ".ask-pq-form{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}"
+    ".ask-pq-form input[type=search]{flex:1 1 200px;min-width:0;box-sizing:border-box;}"
+    "@media(max-width:640px){.ask-pq-form input[type=search]{flex:1 1 100%;}"
+    ".ask-pq-form .ask-ctl{flex:1 1 0;}}"
 )
 
 
@@ -24687,9 +24693,9 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     past_questions_section = f"""<section id="past-questions" class="ask-section ask-pq" style="margin-top:0;margin-bottom:28px;">
   <div class="ask-section-label">Search past questions</div>
   <p style="color:var(--muted);margin:-4px 0 14px;font-size:14px;line-height:1.5;">Search before running your query.</p>
-  <form method="get" action="/tools/fpa-buddy" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">
+  <form method="get" action="/tools/fpa-buddy" class="ask-pq-form" style="margin-bottom:12px;">
     <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
-      style="flex:1 1 200px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
+      style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
     <button type="submit" name="helpful" value="{pq_keep}" class="ask-ctl ask-ctl-sm ask-ctl-w">Search</button>
     <button type="submit" name="helpful" value="{pq_flip}" class="ask-ctl ask-ctl-sm ask-ctl-w" aria-pressed="{"true" if helpful_only else "false"}">Helpful only</button>
   </form>
@@ -24851,16 +24857,16 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         <div class="ask-dd" id="ask-dd-top">
           <div class="ask-dd-row">
             <div class="ask-dd-col">
-              <label class="ask-dd-lbl"><span class="ask-dd-h">Depth</span><button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true"></span></button></label>
-              <div class="ask-dd-panel" data-dd="depth" hidden>
+              <label class="ask-dd-lbl"><span class="ask-dd-h">Depth</span><button type="button" class="ask-dd-btn" data-dd="depth" aria-expanded="false" aria-controls="ask-dd-p-depth" onclick="toggleDd(this)"><span class="ask-dd-k">Depth:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true"></span></button></label>
+              <div class="ask-dd-panel" id="ask-dd-p-depth" data-dd="depth" hidden>
                 <div class="ask-tags" role="radiogroup" aria-label="Depth">
                   {tier_tags}
                 </div>
               </div>
             </div>
             <div class="ask-dd-col">
-              <label class="ask-dd-lbl"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true"></span></button></label>
-              <div class="ask-dd-panel" data-dd="sources" hidden>
+              <label class="ask-dd-lbl"><span class="ask-dd-h">Sources</span><button type="button" class="ask-dd-btn" data-dd="sources" aria-expanded="false" aria-controls="ask-dd-p-sources" onclick="toggleDd(this)"><span class="ask-dd-k">Sources:</span><span class="ask-dd-v"></span><span class="ask-dd-caret" aria-hidden="true"></span></button></label>
+              <div class="ask-dd-panel" id="ask-dd-p-sources" data-dd="sources" hidden>
                 <div class="ask-tags">
                   {source_tags}
                 </div>
@@ -25057,10 +25063,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-tag.active{{background:var(--seafoam);border-color:var(--seafoam);color:var(--navy-deep);}}
 .ask-tag.active svg{{opacity:1;}}
 
-/* Depth and Sources: two dropdown buttons in one row; the open panel sits in
-   page flow directly under that row at the row's full width, so it can never
-   cover the question box or the Ask button and can't pass its container's
-   edge. Panels hold the same .ask-tag buttons as before (single-select for
+/* Depth and Sources: two dropdown buttons in one row; the open panel is an overlay
+   (absolute, under its own button at that button's width, above later content),
+   so opening it moves nothing. It flips above the button, or scrolls inside itself,
+   when the viewport has no room (placeDd). The sticky follow-up bubble is the one
+   exception: its panels stay in flow under the bubble's controls, because an overlay
+   there would have to open upward over the follow-up input and Ask button.  Panels hold the same .ask-tag buttons as before (single-select for
    Depth, multi-select for Sources), restyled as list rows. The follow-up
    bubble holds a clone of this whole block. */
 .ask-dd-row{{display:flex;align-items:flex-start;gap:8px;}}
@@ -25069,7 +25077,10 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-dd-k{{flex-shrink:0;}}
 .ask-dd-v{{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--navy);}}
 .ask-dd-caret{{flex-shrink:0;}}
-.ask-dd-panel{{margin-top:8px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;}}
+.ask-dd-col{{position:relative;}}
+.ask-dd-panel{{position:absolute;left:0;right:0;top:100%;z-index:30;margin-top:4px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px;
+  box-shadow:0 8px 24px rgba(11,31,77,.16);overflow-y:auto;overscroll-behavior:contain;}}
+.ask-dd-panel.ask-dd-up{{top:auto;bottom:100%;margin-top:0;margin-bottom:4px;}}
 .ask-dd-panel[hidden]{{display:none;}}
 .ask-dd-panel .ask-tags{{flex-direction:column;flex-wrap:nowrap;gap:2px;}}
 .ask-dd-panel .ask-tag{{width:100%;border-color:transparent;background:transparent;border-radius:8px;min-height:40px;padding:8px 10px;font-weight:500;color:var(--ink);}}
@@ -25080,7 +25091,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
    controls get narrow on a phone, so there a panel never goes below 220px; the
    right-hand (Sources) panel then lines up with its control's right edge instead,
    so it can't pass the bubble. */
-.fu .ask-dd-panel{{width:max(100%,220px);box-sizing:border-box;}}
+.fu .ask-dd-panel{{position:static;width:max(100%,220px);box-sizing:border-box;margin-top:8px;box-shadow:none;max-height:none!important;overflow:visible;}}
 .fu .ask-dd-col:last-of-type .ask-dd-panel{{margin-left:min(0px,calc(100% - 220px));}}
 
 {_ASK_PQ_CSS}
@@ -25276,7 +25287,20 @@ function toggleDd(btn) {{
   var dd = btn.closest('.ask-dd');
   btn.setAttribute('aria-expanded', 'true');
   var panel = dd.querySelector('.ask-dd-panel[data-dd="' + btn.getAttribute('data-dd') + '"]');
-  if (panel) panel.hidden = false;
+  if (panel) {{ panel.hidden = false; placeDd(panel); }}
+}}
+// Keep an open panel on screen: top box opens downward, flips above its button when
+// there is no room below and more above, and the panel scrolls inside itself past that.
+// The follow-up bubble's panels stay in flow (CSS), so they are left alone here.
+function placeDd(panel) {{
+  var col = panel.parentElement, r = col.getBoundingClientRect(), vh = window.innerHeight;
+  if (panel.closest('.fu')) return;
+  panel.classList.remove('ask-dd-up');
+  panel.style.maxHeight = '';
+  var below = vh - r.bottom - 12, above = r.top - 12;
+  var up = panel.scrollHeight + 4 > below && above > below;
+  if (up) panel.classList.add('ask-dd-up');
+  panel.style.maxHeight = Math.max(120, Math.floor((up ? above : below) - 4)) + 'px';
 }}
 document.addEventListener('click', function(e) {{
   if (!e.target.closest('.ask-dd')) closeDds();
@@ -26255,9 +26279,9 @@ def fpa_buddy_questions(request: Request, pq: str = "", helpful: str = "", page:
 <div class="tool-prose">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>{heading} ({total})</h1>
-<form method="get" action="/tools/fpa-buddy/questions" style="display:flex;gap:8px;margin:14px 0;flex-wrap:wrap;align-items:center;">
+<form method="get" action="/tools/fpa-buddy/questions" class="ask-pq-form" style="margin:14px 0;">
   <input type="search" name="pq" value="{_esc(pq)}" placeholder="Search past questions&hellip;"
-    style="flex:1 1 200px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
+    style="padding:10px 14px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:16px;background:#fff;">
   <button type="submit" name="helpful" value="{keep}" class="ask-ctl ask-ctl-sm ask-ctl-w">Search</button>
   <button type="submit" name="helpful" value="{flip}" class="ask-ctl ask-ctl-sm ask-ctl-w" aria-pressed="{"true" if helpful_only else "false"}">Helpful only</button>
 </form>

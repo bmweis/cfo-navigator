@@ -161,7 +161,9 @@ def test_browser_heights_widths_and_touch_target(site):
             resume = box('.ask-pq-foot .ask-ctl')
             assert abs(search["height"] - 28) < 0.6 and abs(helpful["height"] - 28) < 0.6
             assert abs(search["width"] - helpful["width"]) < 0.6   # neighbours share one width
-            assert abs(search["width"] - 128) < 0.6 and abs(helpful["width"] - 128) < 0.6
+            assert search["width"] >= 127.4                        # at least the shared 128px; on a phone they split the line
+            if w >= 1000:
+                assert abs(search["width"] - 128) < 0.6
             assert abs(search["y"] - helpful["y"]) < 0.6           # side by side, one row
             # no label wraps or clips inside 128px
             assert pg.evaluate("""()=>[...document.querySelectorAll('#past-questions form button')]
