@@ -828,27 +828,50 @@ def _ends(r: dict) -> str:
     return f"{r['source']}, {r['report']}".strip(", ") + (f", {r['data_period']}" if r["data_period"] else "")
 
 
+def _band_key(text) -> tuple:
+    """One key for a printed band, so "$20-50M" and "$20M-$50M" are the same band. A band that cannot
+    be read keeps its lower-cased text ("" = no band)."""
+    b = parse_band(text)
+    if b is None:
+        return ("text", _lc(text))
+    return (b["kind"], b["lo"], b["hi"])
+
+
 def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
-    """{shifts, suppressed, skipped}. `rows` come from an all-editions, recent-window lookup.
+    """{shifts, suppressed, skipped, unpaired}. `unpaired` counts, by short reason, every candidate that
+    produced no line ("single edition", "same data period", "not an exact or adjacent-band figure", ...).
+    A figure the report prints against no size band (a public index, "top 10") is its own series: it
+    pairs only with the same index in another edition. `rows` come from an all-editions, recent-window lookup.
     shifts: largest first, each {metric, band, statistic, unit, kind, threshold, delta, size, from, to,
     directional, line}. A change inside one publisher's series is preferred (earliest to newest edition
     in the window); a pair across publishers is used only when no publisher has two editions, and is
     labelled directional. A cell that holds different values inside one report is skipped and named in
     `skipped`. A republisher's row is one series with the source it cites (row["series"])."""
     skipped: list[str] = []
+    unpaired: dict[str, int] = {}
+
+    def _why(reason: str) -> None:
+        unpaired[reason] = unpaired.get(reason, 0) + 1
+
     ok: list[dict] = []
     for r in rows:
-        if r["match"] not in ("exact", "adjacent_band") or r.get("band_context") or r.get("other_basis"):
+        if r["match"] not in ("exact", "adjacent_band"):
+            _why("not an exact or adjacent-band figure")
+            continue
+        if r.get("other_basis"):
+            _why("other basis")
             continue
         if r.get("value_num") is None:
+            _why("value is not a plain number")
             continue
         if any(g.startswith("values differ within the report") for g in r["gaps"]):
-            label = f"{r['metric']} at {r['band'] or 'no band'} in {_ends(r)}: the report prints different values for the same figure"
+            label = f"{r['metric']} at {r['band'] or 'no band'} in {_ends(r)}: the report prints different values for the same figure, so no shift was computed for it"
             if label not in skipped:
                 skipped.append(label)
             continue
         ok.append(r)
-    base = lambda r: (name_key(r["metric"]) or frozenset({_lc(r["metric"])}), _lc(r["band"]), _basis_key(r["band_basis"]),
+    base = lambda r: (name_key(r["metric"]) or frozenset({_lc(r["metric"])}), _band_key(r["band"]), bool(r.get("band_context")),
+                      _basis_key(r["band_basis"]),
                       _lc(r["segment"]), _lc(r["statistic"]), _lc(r["denominator"]), _lc(r["unit"]),
                       r.get("basis_group") or "")
     groups: dict[tuple, dict[str, list[dict]]] = {}
@@ -888,6 +911,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
 
     for key, by_series in groups.items():
         made = False
+        tried = False
         for series_rows in by_series.values():
             by_ed: dict[int, dict] = {}
             for r in series_rows:
@@ -903,6 +927,8 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
             a, b = by_ed[ys[0]], by_ed[ys[-1]]
             ya, yb = _year_num(a["data_period"]), _year_num(b["data_period"])
             if ya > 0 and yb > 0 and yb <= ya:
+                _why("same data period in both editions")
+                tried = True
                 continue          # the same data period printed twice is not a change
             made = True
             _emit(a, b, False)
@@ -913,10 +939,14 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
             a, b = newest[-2], newest[-1]
             if _year_num(a["data_period"]) < _year_num(b["data_period"]):
                 _emit(a, b, True)
+            else:
+                _why("same data period in both editions")
+        elif not made and not tried:
+            _why("single edition")
     shifts.sort(key=lambda s: (-s["_norm"], s["line"]))
     for s in shifts:
         s.pop("_norm", None)
-    return {"shifts": shifts, "suppressed": suppressed, "skipped": skipped}
+    return {"shifts": shifts, "suppressed": suppressed, "skipped": skipped, "unpaired": unpaired}
 
 
 # --- find_figures --------------------------------------------------------------
