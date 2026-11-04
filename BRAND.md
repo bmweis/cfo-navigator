@@ -484,10 +484,25 @@ graffiti marks on admin tables, forms, or the chat UI.
   hover fill, `#fca5a5` reject border. This is a semantic status color communicating
   "irreversible/dangerous," the same category as `--alert`, not a decorative button color —
   see `AUX_COLORS` in `linklib/brand_check.py` for the exact values.
+- **One button height** (2026-11, Brian asked for one standard height, icon-only included; 28px is the majority height measured and is one line to change, `--control-h`). Every button-like
+  control renders at the token `--control-h` (**28px**). Padding, font size and radius may differ by style,
+  the height may not. It is one shared rule in `webapp/app.py`'s `_CSS` (`.btn`, `.btn-ghost`, `.admin-only`,
+  `.ask-ctl`, `.ask-dd-btn`, `.fu-send`, `.tcat-btn`, `.ccat-btn`, `.ger-mode`, `.ctl`) whose height, min and max
+  height and vertical padding are `!important`, so an inline style cannot change them. **Touch target:** the
+  visible button is 28px and an invisible `::after` extends the hit area to 44px, as `.ask-ctl-sm` always did.
+  **Icon-only buttons** use `.ctl` (the feed order arrows): 28px tall, 28px wide, icon inside, hit area 34 by
+  44 (wider would overlap the neighbour). **Selects and text inputs inside an admin table** (`.table-frame td`,
+  the feeds tables) share the token so a row of controls lines up; a form field outside a table keeps its own
+  height, because it is something you type in, not a row control. **Exceptions** are in
+  `brand_check.BUTTON_HEIGHT_ALLOWLIST`, each with a reason: the phone menu button in the header (`nav-toggle`),
+  the on/off switch (`sw`), the 14px list-row disclosure chevron (`tl-col-item-toggle`), and the two
+  Sail, Don't Row game pills. The primary `.btn` and the Buddy Depth and Sources buttons used to be 36 to 46px
+  and 44px; they are 28px now. "Button height is the shared standard" on `/admin/checks` fails on a rule or an
+  inline style that sets its own button height. To change the height everywhere, edit the one token.
 - **Inline row-action buttons** — a third, smaller button style for compact per-row actions inside
   a list or card (e.g. "Quick edit" / "Full edit" / "Delete" / "Generate" on a Toolbox card, "Edit
   tags" on the reader). `--muted` text, `--line` border (not navy), radius 6px, ~12px font,
-  `padding:3px 10px`. Hover fills `--navy-wash` (`--accent-light`) with `--ink` text. Quieter than
+  `--control-h` tall (see "One button height"). Hover fills `--navy-wash` (`--accent-light`) with `--ink` text. Quieter than
   the primary/secondary pair by design — these sit inside dense rows where a full navy or
   navy-outline button would compete with the row's own content, not label the row's primary action.
 - **Inputs** — white surface, `--line` border, radius 10px. Focus = navy border + soft seafoam
@@ -1304,6 +1319,8 @@ colors for status only," §6, still holds everywhere else).
   --font-wordmark:'Permanent Marker',cursive;
   /* Dropdown caret: one size sitewide (BRAND.md section 5, "One select caret, one size"). */
   --indicator-size:14px;
+  /* Button height: one number for every button-like control (BRAND.md section 5, "One button height"). */
+  --control-h:28px;
 }
 ```
 <!-- END GENERATED TOKENS -->
@@ -1367,6 +1384,13 @@ charts, and JS-built markup) and fails if new content drifts off-brand:
   a CSS-border triangle or chevron, a hand-drawn SVG chevron, an indicator with its own size or a turn other
   than 90 degrees (a dropdown chevron never turns), and a missing shared rule or token. Documented exceptions
   only, each with a reason in `SELECT_CARET_ALLOWLIST` (today: the two feeds-table sort arrows).
+- **Button height is the shared standard (2026-11)** — §5's "One button height", enforced by
+  `brand_check.button_height_problems()`. Flags a CSS rule for a button class that sets its own `height`,
+  `min-height` or `max-height` or a non-zero vertical `padding`, an inline `style` on a button that sets a
+  height, and a missing token or shared rule. Documented exceptions only, each with a reason in
+  `BUTTON_HEIGHT_ALLOWLIST`. It does not flag an inline vertical `padding` or `font-size` (the shared rule
+  forces the height over them, and `tests/test_button_height.py` measures the rendered boxes), a button drawn
+  by JavaScript from pieces, or a button class missing from `BUTTON_HEIGHT_CLASSES`.
 - **Reading column holds its tables and grids (2026-10)** — §5's rule, enforced by
   `linklib.brand_check.reading_column_problems()`, with its own `/admin/checks` row and
   `tests/test_reading_column_rule.py`. A **source** scan, for the same reason as outbound

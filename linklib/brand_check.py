@@ -805,6 +805,111 @@ def select_caret_problems(src: str) -> list[str]:
     return problems
 
 
+
+# One button height (BRAND.md section 5, "One button height"): every button-like control renders at --control-h,
+# set by one shared rule in webapp/app.py's _CSS. This scan fails on anything that fights that rule. Each
+# allowlist entry needs a reason; keys are a class name (no dot) or "inline:<class>".
+BUTTON_HEIGHT_ALLOWLIST: dict[str, str] = {
+    "nav-toggle": "The phone menu button in the site header. It is header chrome sized by the header bar, not a "
+                  "button in page content, and it is icon-only with its own 40px hit area.",
+    "sw": "The on/off switch (role=switch). It is a 38x22 track with a knob, not a labelled button.",
+    "sdr-rank-pill": "Sail, Don't Row (the /play game) rank selector. Game interface with its own pill sizing, "
+                     "not a site button.",
+    "sdr-boat-pill": "Sail, Don't Row (the /play game) boat selector. Game interface with its own pill sizing, "
+                     "not a site button.",
+    "tl-col-item-toggle": "A 14px disclosure chevron inside a list row. It marks an expandable row, like the "
+                          "disclosure triangle, and is sized by the shared indicator rule.",
+}
+# Classes whose elements are buttons for this rule. A new button class goes here and in the shared rule.
+BUTTON_HEIGHT_CLASSES = ("btn", "btn-ghost", "admin-only", "admin-only-page", "ask-ctl", "ask-ctl-sm", "ask-ctl-w",
+                         "ask-dd-btn", "fu-send", "tcat-btn", "ccat-btn", "ger-mode", "ctl", "fs-remove", "fs-remove-off",
+                         "ask-ex-toggle", "admin-header-add-btn")
+_BH_RULE_RE = re.compile(r"([^{};]+)\{([^{}]*)\}")
+_BH_HEIGHT_PROP_RE = re.compile(r"(?<![\w-])(?:height|min-height|max-height)\s*:", re.I)
+_BH_PADDING_RE = re.compile(r"(?<![\w-])padding(-top|-bottom|-block(?:-start|-end)?)?\s*:\s*([^;]+)", re.I)
+_BH_TAG_RE = re.compile(r"<(?:button|a|input)\b[^>]*>", re.I)
+
+
+def _bh_selector_is_button(sel: str) -> bool:
+    """True when the subject of any comma part (its last compound, after a descendant or child combinator)
+    carries a button class. `.fu-send svg` styles an icon inside a button, not the button."""
+    for part in sel.split(","):
+        toks = re.split(r"\s*[\s>+~]\s*", part.strip())
+        subject = toks[-1] if toks else ""
+        for c in BUTTON_HEIGHT_CLASSES:
+            if re.search(r"\.%s(?![\w-])" % re.escape(c), subject):
+                return True
+    return False
+
+
+def _bh_vertical_padding_nonzero(prop_suffix: str | None, value: str) -> bool:
+    toks = value.replace("!important", "").split()
+    if not toks:
+        return False
+    if prop_suffix:   # padding-top / padding-bottom / padding-block...
+        return toks[0] not in ("0", "0px")
+    return toks[0] not in ("0", "0px")   # shorthand: the first value is the vertical one
+
+
+def button_height_problems(src: str) -> list[str]:
+    """Anything that gives a button-like control its own height, outside the one shared rule.
+
+    **Fails on:** a CSS rule for a button class (`BUTTON_HEIGHT_CLASSES`) that sets `height`, `min-height` or
+    `max-height`, or a non-zero vertical `padding`, other than the shared rule that uses `--control-h`; an inline
+    `style` on a `<button>`, a submit or button input, or an element carrying a button class that sets
+    `height`, `min-height` or `max-height`. **Required:** the `--control-h` token and the shared rule that sets
+    `height:var(--control-h)!important`. An element whose class is in `BUTTON_HEIGHT_ALLOWLIST` is skipped.
+
+    **Not caught:** an inline vertical `padding` or `font-size` on a button (the shared rule forces the height
+    and vertical padding with `!important`, so they cannot change the rendered height; the rendered-height
+    test in tests/test_button_height.py measures that), a button drawn by JavaScript from pieces that never
+    put the markup in one string, a button with a class not listed in `BUTTON_HEIGHT_CLASSES`, and the 44px
+    touch target (an invisible `::after`, not a height).
+    """
+    problems: list[str] = []
+    text = src.replace("{{", "{").replace("}}", "}")
+    css = _SEL_CSS_COMMENT_RE.sub("", text)
+    shared = False
+    for m in _BH_RULE_RE.finditer(css):
+        sel = " ".join(l.strip() for l in m.group(1).split("\n") if l.strip() and "<" not in l).strip()
+        body = m.group(2)
+        if not _bh_selector_is_button(sel):
+            continue
+        compact = re.sub(r"\s+", "", body)
+        if "height:var(--control-h)!important" in compact:
+            shared = True
+            continue
+        line = css[:m.start()].count("\n") + 1
+        if any(a in sel for a in BUTTON_HEIGHT_ALLOWLIST if not a.startswith("inline:")):
+            continue
+        if _BH_HEIGHT_PROP_RE.search(body):
+            problems.append(f"rule '...{sel[-50:]}' sets its own button height (near line {line})")
+        for pm in _BH_PADDING_RE.finditer(body):
+            if _bh_vertical_padding_nonzero(pm.group(1), pm.group(2)):
+                problems.append(f"rule '...{sel[-50:]}' sets vertical padding on a button (near line {line})")
+                break
+    for m in _BH_TAG_RE.finditer(text):
+        tag = m.group(0)
+        if tag.lower().startswith("<input") and not re.search(r'type\s*=\s*["\'](?:submit|button)', tag, re.I):
+            continue
+        cm = re.search(r'class\s*=\s*"([^"]*)"', tag)
+        classes = cm.group(1).split() if cm else []
+        is_button = tag.lower().startswith(("<button", "<input")) or any(c in BUTTON_HEIGHT_CLASSES for c in classes)
+        if not is_button or any(c in BUTTON_HEIGHT_ALLOWLIST for c in classes) \
+                or re.search(r'role\s*=\s*["\']switch', tag, re.I):
+            continue   # a role=switch is the on/off switch (allowlist key "sw"), not a labelled button
+        for sm in _SEL_STYLE_RE.finditer(tag):
+            style = sm.group(1) or sm.group(2) or ""
+            if _BH_HEIGHT_PROP_RE.search(style):
+                line = text[:m.start()].count("\n") + 1
+                problems.append(f"inline style on a button sets its own height (line {line})")
+    if "--control-h:" not in css:
+        problems.append("the --control-h token is missing")
+    if not shared:
+        problems.append("the shared button-height rule is missing")
+    return problems
+
+
 def actions_header_problems(src: str) -> list[str]:
     """Table headers that break the "Actions" rule.
 

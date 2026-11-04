@@ -140,9 +140,21 @@ def phone(buddy_html):
     pw.stop()
 
 
+def _wait_recent(pg):
+    """Recent conversations loads collapsed: open it, then wait for its rows."""
+    pg.wait_for_selector("#recent-list", state="attached")
+    pg.evaluate("document.getElementById('recent-list').open = true")
+    pg.wait_for_selector(".ask-recent-item", state="visible")
+
+
+def _open_past(pg):
+    pg.evaluate("var d = document.getElementById('pq-all'); if (d) d.open = true")
+
+
 def _open(pg):
     pg.goto(ORIGIN + "/tools/fpa-buddy")
-    pg.wait_for_selector(".ask-recent-item")
+    _wait_recent(pg)
+    _open_past(pg)
 
 
 def _ask(pg, text):
@@ -175,7 +187,7 @@ def test_conversation_id_goes_into_the_url_and_a_reload_expands_nothing(phone):
     _ask(pg, "Test question")
     assert pg.evaluate("new URL(location.href).searchParams.get('c')") == "c99"
     pg.reload()
-    pg.wait_for_selector(".ask-recent-item")
+    _wait_recent(pg)
     assert pg.locator("#fu").count() == 0
     assert pg.locator("#ask-thread .ask-q-bubble").count() == 0
     assert pg.evaluate("convoId") is None
@@ -209,7 +221,7 @@ def test_someone_elses_or_unknown_conversation_in_the_url_shows_no_bubble(phone,
     and an id that is not in the reader's own list highlights nothing."""
     pg, _ = phone
     pg.goto(ORIGIN + "/tools/fpa-buddy?c=" + cid)
-    pg.wait_for_selector(".ask-recent-item")
+    _wait_recent(pg)
     pg.wait_for_timeout(300)
     assert pg.locator("#fu").count() == 0
     assert pg.evaluate("convoId") is None

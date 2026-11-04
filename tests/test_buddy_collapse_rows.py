@@ -9,6 +9,7 @@ Chromium exists (CI).
 from tests import test_buddy_phone_fixes as T
 
 ORIGIN, _ask, _open = T.ORIGIN, T._ask, T._open
+T_wait_recent = T._wait_recent
 # Re-bound by assignment so pytest finds the fixtures here.
 buddy_html, phone = T.buddy_html, T.phone
 
@@ -42,7 +43,7 @@ def test_past_question_row_opens_from_the_keyboard(phone):
 def test_a_reload_with_c_expands_nothing_and_highlights_the_row(phone):
     pg, _ = phone
     pg.goto(ORIGIN + "/tools/fpa-buddy?c=c9")
-    pg.wait_for_selector(".ask-recent-item")
+    T_wait_recent(pg)
     assert pg.locator("#ask-thread").inner_text().strip() == ""
     assert pg.locator("#fu").count() == 0
     assert pg.locator("#ask-thread .ask-answer").count() == 0
@@ -107,7 +108,8 @@ def test_the_send_button_is_an_icon_with_a_44px_hit_area_and_a_disabled_state(ph
     assert btn.get_attribute("aria-label") == "Ask follow-up" and btn.get_attribute("title") == "Ask follow-up"
     assert btn.locator("svg").count() == 1 and btn.inner_text().strip() == ""
     box = btn.bounding_box()
-    assert box["width"] >= 44 and box["height"] >= 44
+    assert abs(box["height"] - 28) < 0.6 and abs(box["width"] - 28) < 0.6      # one button height, 44px hit area below
+    assert pg.evaluate("parseFloat(getComputedStyle(document.getElementById('fu-btn'), '::after').height)") >= 44
     assert pg.is_disabled("#fu-btn")                       # empty field
     pg.fill("#fu-q", "Something")
     assert not pg.is_disabled("#fu-btn")

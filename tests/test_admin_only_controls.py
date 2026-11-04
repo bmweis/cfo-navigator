@@ -27,9 +27,9 @@ def test_one_definition_outlined_no_fill():
     body = _rule("admin-only")
     assert "background:transparent" in body
     assert "border:1px solid var(--seafoam-deep)" in body and "color:var(--seafoam-deep)" in body
-    assert "var(--seafoam);" not in body and "height:28px" in body and "border-radius:6px" in body
+    assert "var(--seafoam);" not in body and "height:" not in body.replace("line-height", "") and "border-radius:6px" in body
     page = _rule("admin-only-page")
-    assert "height:42px" in page and "border-radius:10px" in page
+    assert "height:" not in page and "border-radius:10px" in page      # height is the one shared --control-h rule
 
 
 def test_delete_red_hover_only_on_hover_devices():

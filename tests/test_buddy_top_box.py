@@ -122,9 +122,10 @@ def test_send_is_an_up_arrow_icon_inside_the_box_with_a_44px_hit_area(member_pg)
     b = _box(pg, "#ask-btn")
     assert pg.get_attribute("#ask-btn", "aria-label") == "Ask" and pg.get_attribute("#ask-btn", "title") == "Ask"
     assert pg.inner_text("#ask-btn").strip() == ""
-    assert abs(b["w"] - 44) < 1 and abs(b["h"] - 44) < 1
+    assert abs(b["w"] - 28) < 1 and abs(b["h"] - 28) < 1        # one button height; the hit area is the ::after
+    assert pg.evaluate("parseFloat(getComputedStyle(document.getElementById('ask-btn'), '::after').height)") >= 44
     dot = _box(pg, "#ask-btn .fu-send-dot")
-    assert abs(dot["w"] - 36) < 1
+    assert abs(dot["w"] - 28) < 1
     t = _box(pg, "#ask-q")
     assert t["l"] <= b["l"] and b["r"] <= t["r"] and t["t"] <= b["t"] and b["b"] <= t["b"]
     assert t["r"] - b["r"] < 12 and t["b"] - b["b"] < 12                 # bottom-right corner
