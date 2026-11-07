@@ -42,7 +42,7 @@ def test_fresh_page_has_entry_card_and_both_lists(live):
 
 def test_running_turn_hides_the_entry_card_and_lists(live):
     pg = live()
-    pg.evaluate("window.fetch = (function(f){ return function(u,o){ if (String(u)==='/ask') return new Promise(function(){}); return f(u,o); }; })(window.fetch)")
+    pg.evaluate("window.fetch = (function(f){ return function(u,o){ if (String(u)==='/ask') return new Promise(function(){}); return f(u,o); }; })(window.fetch); 0")
     pg.fill("#ask-q", "A question")
     pg.click("#ask-btn")
     pg.wait_for_selector("#ask-thread .ask-loading")
@@ -69,10 +69,11 @@ def test_finished_conversation_is_chat_only_then_new_conversation_returns(live):
 
 def test_failed_first_turn_brings_the_entry_card_back_with_the_question(live):
     pg = live()
-    pg.evaluate("window.__fail = true")
+    pg.evaluate("window.__fail = true; window.__askRecover = {pollMs: 40, graceMs: 40, maxMs: 300}; 0")
     pg.fill("#ask-q", "Will fail")
     pg.click("#ask-btn")
     pg.wait_for_selector("#ask-thread .ask-loading", state="detached", timeout=20000)
+    pg.wait_for_function("document.querySelector('#ask-q').value === 'Will fail'")
     assert _vis(pg, ".fpa-intro-area-question")
     assert pg.input_value("#ask-q") == "Will fail"
 
