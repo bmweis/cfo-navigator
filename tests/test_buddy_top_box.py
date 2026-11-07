@@ -109,12 +109,12 @@ def test_start_a_new_conversation_label_sits_directly_above_the_text_box(member_
 
 def test_a_depth_panel_opens_directly_under_its_own_button(admin_pg):
     pg = admin_pg
+    q_top = _box(pg, "#ask-q")["t"]
     pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
     btn, panel = _box(pg, "#ask-dd-top [data-dd='depth'].ask-dd-btn"), _box(pg, "#ask-dd-top .ask-dd-panel[data-dd='depth']")
     assert panel["t"] >= btn["b"] and panel["t"] - btn["b"] < 24
-    assert panel["b"] <= _box(pg, "#ask-q")["t"]
-    if pg.viewport_size["width"] <= 640:                                 # Sources header stays below it
-        assert panel["b"] <= _box(pg, "#ask-dd-top .ask-dd-col:nth-child(2) .ask-dd-h")["t"]
+    # The panel is an overlay (phone-search-sources PR): it covers what is below instead of moving it.
+    assert abs(_box(pg, "#ask-q")["t"] - q_top) < 1
 
 
 def test_send_is_an_up_arrow_icon_inside_the_box_with_a_44px_hit_area(member_pg):
@@ -233,10 +233,10 @@ def test_footnote_sits_under_the_box_and_takes_two_lines_on_a_phone(admin_pg):
     phone = pg.evaluate("innerWidth") < 500
     assert foot["h"] / line_h < (2.2 if phone else 3.2)                   # two lines on a phone; the narrower half-width desktop column may take a third
     assert pg.evaluate("document.documentElement.scrollWidth <= innerWidth")
-    # Open: the panel still opens directly under the button, the footnote follows it.
+    # Open: the panel opens directly under the button and overlays the footnote; nothing moves.
     pg.click("#ask-dd-top [data-dd='depth'].ask-dd-btn")
     panel, foot2 = _box(pg, "#ask-dd-top .ask-dd-panel[data-dd='depth']"), _box(pg, "#ask-dd-foot")
-    assert panel["t"] - btn["b"] < 24 and foot2["t"] >= panel["b"]
+    assert panel["t"] - btn["b"] < 24 and abs(foot2["t"] - foot["t"]) < 1
 
 
 def test_each_panel_is_its_controls_width_and_starts_at_its_left_edge(admin_pg):
