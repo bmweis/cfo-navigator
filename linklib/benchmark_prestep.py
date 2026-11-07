@@ -537,7 +537,7 @@ def _row_line(r: dict) -> str:
     if r.get("cited_source"):
         parts.append(f"republished: this report cites {r['cited_source']} as its source (count it with that source)")
     kind = fg.row_table_kind(r)
-    if kind in ("headcount_count", "headcount_share"):  # spend rows (the bulk) carry no tag: keeps the character budget
+    if kind in ("headcount_count", "headcount_share", "margin"):  # spend rows (the bulk) carry no tag: keeps the character budget
         parts.insert(0, "table: " + fg.TABLE_KIND_LABELS[kind])
     tag = f"match: {r['match']}"
     if r.get("basis_group") in ("revenue", "arr"):
@@ -864,8 +864,8 @@ def status_notes(candidates: list[dict], also_stored: list[dict], sent: set) -> 
             if sh:
                 continue
             if n:
-                cells.append(f"{label} / {title}: left out. In a table cell write only \"left out\" (no count, no note); "
-                             "never \"not printed\".")
+                cells.append(f"{label} / {title}: left out. Leave it out of every table (no row, and nothing written in a cell); "
+                             "the closing line names it; never \"not printed\" for it.")
             else:
                 cells.append(f"{label} / {title}: not printed (no stored row at this size).")
     if not cells:
@@ -1215,7 +1215,7 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
         order = _order_note(s_.picked)
         if order:
             s_.notes.append(order)
-        for extra in (band_order_note(s_.picked), table_kinds_note(s_.picked)):
+        for extra in (band_order_note(s_.picked), table_kinds_note(s_.picked), derived_counts_note(s_.picked)):
             if extra:
                 s_.notes.append(extra)
     # The text block sent before the question: lookup notes, the plan, the notice.
@@ -1319,8 +1319,10 @@ def table_kinds_note(picked: list[dict]) -> str:
     if len(kinds) < 2:
         return ""
     return ("Separate tables by kind of figure: " + "; ".join(fg.TABLE_KIND_LABELS[k] for k in kinds)
-            + ". A count of people and a percent never share a column, and a percent of headcount is never a spend row. "
-              "A row's line says 'table: ...' for the two headcount kinds; a row with no table tag is spend.")
+            + ". A count of people and a percent never share a column, a percent of headcount is never a spend row, and "
+              "gross margin and other margins are never rows of the spend table. Give headcount counts and headcount mix "
+              "as two tables next to each other. A row's line says 'table: ...' for the headcount and margin kinds; "
+              "a row with no table tag is spend.")
 
 
 def band_order_note(picked: list[dict]) -> str:
@@ -1332,7 +1334,18 @@ def band_order_note(picked: list[dict]) -> str:
             seen.append(b)
     if len(seen) < 2:
         return ""
-    return "Band order inside a table, smallest to largest: " + "; ".join(seen[:8]) + "."
+    return ("Row order in every table: rows with no size band (a public index) first, then bands smallest to largest ("
+            + "; ".join(seen[:8]) + "), and inside one band the newest edition first.")
+
+
+def derived_counts_note(picked: list[dict]) -> str:
+    """Derived headcount counts (share x total) for the headcount mix table, one line each, labelled derived."""
+    lines = fg.derive_headcount_counts(picked)
+    if not lines:
+        return ""
+    return ("DERIVED HEADCOUNT COUNTS for the headcount mix table (give each with its share, in a column labelled "
+            "derived, and name the total and where it comes from; do not work out any other count yourself): "
+            + " | ".join(lines))
 
 
 def dedupe_docs(docs: list[dict]) -> list[dict]:

@@ -863,7 +863,23 @@ def _unit_key(unit) -> str:
     return "%" if _is_percent(unit) else _lc(unit)
 
 
-_KEY_FIELDS = ((0, "metric name"), (1, "band"), (4, "segment"), (5, "statistic"))
+_PEOPLE_WORDS = {"count", "number", "total", "n", "fte", "employee", "headcount", "people", "person", "staff", "worker", "head"}
+
+
+def _series_denom(r: dict) -> str:
+    """The denominator as part of a series key. For a count (not a percent) a denominator that only restates
+    what is counted ("full-time employees" for a metric named "Employees", or the bare word "count") says
+    nothing a second edition could differ on, so it is no part of the key. A percent keeps its real base
+    ("revenue", "arr", "employees") because that is a different figure."""
+    dk = _denom_key(r.get("denominator"))
+    if _is_percent(r.get("unit")):
+        return dk
+    metric_words = {_stem(w) for w in re.findall(r"[a-z0-9]+", _lc(r.get("metric")))}
+    words = set(dk.split())
+    return "" if words <= ({_stem(w) for w in _PEOPLE_WORDS} | {_stem(w + "s") for w in _PEOPLE_WORDS} | metric_words) else dk
+
+
+_KEY_FIELDS = ((0, "metric name"), (1, "band"), (4, "segment"), (5, "statistic"), (6, "denominator"), (7, "unit"))
 
 
 def _single_edition_reason(key: tuple, by_series: dict, groups: dict) -> str:
@@ -936,6 +952,30 @@ def _endpoint_outliers(shifts: list[dict], ok: list[dict], rules: dict | None) -
     return notes
 
 
+def _within_report_pair(series_rows: list[dict]):
+    """The best pair is one report's own history: when the newest edition of a publisher's series prints
+    the same figure for two or more data periods (Q2 2022, 2023, 2024, 2025 in one table), its earliest to
+    its latest period is the same respondents and the same definition. Returns (earlier, later) or None.
+    A period printed twice with different values never reaches here (compute_shifts skips those rows)."""
+    by_rep: dict[str, list[dict]] = {}
+    for r in series_rows:
+        by_rep.setdefault(r.get("report_slug") or r["report"], []).append(r)
+    best = None
+    for rep_rows in by_rep.values():
+        years: dict[int, dict] = {}
+        for r in rep_rows:
+            y = _year_num(r["data_period"])
+            if y > 0:
+                years.setdefault(y, r)
+        if len(years) < 2:
+            continue
+        ed = max(_year_num(r["report_year"]) for r in rep_rows)
+        if best is None or ed > best[0]:
+            ys = sorted(years)
+            best = (ed, years[ys[0]], years[ys[-1]])
+    return None if best is None else (best[1], best[2])
+
+
 def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
     """{shifts, suppressed, skipped, unpaired}. `unpaired` counts, by short reason, every candidate that
     produced no line ("single edition", "same data period", "not an exact or adjacent-band figure", ...).
@@ -974,7 +1014,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
         ok.append(r)
     base = lambda r: (name_key(r["metric"]) or frozenset({_lc(r["metric"])}), _band_key(r["band"]), bool(r.get("band_context")),
                       _basis_key(r["band_basis"]),
-                      _seg_key(r["segment"]), _lc(r["statistic"]), _denom_key(r["denominator"]), _unit_key(r["unit"]),
+                      _seg_key(r["segment"]), _lc(r["statistic"]), _series_denom(r), _unit_key(r["unit"]),
                       r.get("basis_group") or "")
     groups: dict[tuple, dict[str, list[dict]]] = {}
     for r in ok:
@@ -982,7 +1022,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
     shifts: list[dict] = []
     suppressed = 0
 
-    def _emit(a: dict, b: dict, directional: bool) -> None:
+    def _emit(a: dict, b: dict, directional: bool, within_report: bool = False) -> None:
         nonlocal suppressed
         thr, kind = shift_rule(b["unit"], b.get("canonical_metric", ""), rules)
         delta = b["value_num"] - a["value_num"]
@@ -1001,7 +1041,9 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
         v = lambda x: _num(x["value_num"]) + ("%" if _is_percent(x["unit"]) else (f" {x['unit']}" if x["unit"] else ""))
         line = (f"{b['metric']} at {b['band'] or 'no band'} ({b['statistic'] or 'statistic not stated'}): {direction} {_num(size)} "
                 f"{unit_txt}, from {v(a)} ({_ends(a)}) to {v(b)} ({_ends(b)}); "
-                + ("different surveys, directional only" if directional else f"one series: {a['series'] or a['source']}")
+                + ("different surveys, directional only" if directional else
+                   (f"one series: {a['series'] or a['source']}, the same report's own history (same respondents and definition)"
+                    if within_report else f"one series: {a['series'] or a['source']}"))
                 + "; derived from stored reports")
         shifts.append({"metric": b["metric"], "band": b["band"], "statistic": b["statistic"], "unit": unit, "kind": kind,
                        "threshold": thr, "delta": round(delta, 4), "size": round(size, 4), "directional": directional,
@@ -1015,6 +1057,12 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
         made = False
         tried = False
         for series_rows in by_series.values():
+            within = _within_report_pair(series_rows)
+            if within is not None:
+                a, b = within
+                made = True
+                _emit(a, b, False, within_report=True)
+                continue
             by_ed: dict[int, dict] = {}
             for r in series_rows:
                 y = _year_num(r["report_year"])
@@ -1164,6 +1212,8 @@ def row_table_kind(row: dict) -> str:
     if _is_percent(unit):
         if _HEAD_DENOM.search(denom) or ("headcount" in name and "mix" in name) or ("headcount" in name and not re.search(r"revenue|arr", denom)):
             return "headcount_share"
+        if re.search(r"\bmargin\b|\bprofit", name) and not expense_line_of(row.get("metric") or "", row.get("denominator") or "", unit):
+            return "margin"
         if re.search(r"revenue|arr", denom) or expense_line_of(row.get("metric") or "", row.get("denominator") or "", unit):
             return "spend_share"
         return "other"
@@ -1174,15 +1224,49 @@ def row_table_kind(row: dict) -> str:
 
 TABLE_KIND_LABELS = {"headcount_count": "headcount counts (a number of people)",
                      "headcount_share": "headcount mix (a percent of headcount)",
+                     "margin": "margins (a result, never in the spend table)",
                      "spend_share": "spend (a percent of revenue or ARR)"}
 
 
+def derive_headcount_counts(rows: list[dict], cap: int = 12) -> list[str]:
+    """Derived counts for the headcount mix table: a function's share of headcount times the total headcount
+    the SAME report prints for the same size band, statistic and data period, rounded to a whole person.
+    Each line names the share, the total and where both come from, and says it is derived. Nothing is stored
+    or changed; a share with no total in the same report, band, period and statistic gets no line (it is
+    shown as a share only). Medians do not multiply into a median count; the line says so."""
+    totals: dict[tuple, dict] = {}
+    for r in rows:
+        if r.get("value_num") is None or not is_total_fte_row(r) or row_table_kind(r) != "headcount_count":
+            continue
+        k = (r.get("report_slug"), _band_key(r["band"]), _lc(r["statistic"]), _year_num(r["data_period"]))
+        totals.setdefault(k, r)
+    out: list[str] = []
+    seen: set = set()
+    for r in rows:
+        if r.get("value_num") is None or row_table_kind(r) != "headcount_share" or is_total_fte_row(r):
+            continue
+        k = (r.get("report_slug"), _band_key(r["band"]), _lc(r["statistic"]), _year_num(r["data_period"]))
+        t = totals.get(k)
+        if t is None or (k, r["metric"]) in seen:
+            continue
+        seen.add((k, r["metric"]))
+        count = int(r["value_num"] * t["value_num"] / 100 + 0.5)
+        out.append(f"{r['metric']} at {r['band'] or 'no band'} ({r['statistic'] or 'statistic not stated'}): about {count} people "
+                   f"(derived, not in report: {_num(r['value_num'])}% x {_num(t['value_num'])} total, rounded; share from {_ends(r)}, "
+                   f"total from {_ends(t)}; a product of two medians, not a median count)")
+        if len(out) >= cap:
+            break
+    return out
+
+
 def band_sort_key(band) -> tuple:
-    """Smallest size first; a band that cannot be read sorts last, by its text."""
+    """Smallest first, by the band's upper edge and then its lower edge: $5-25M, $20-50M, then a cover-all
+    band such as <$100M, and an open top (>$100M) last. A band that cannot be read sorts after the readable
+    ones, by its text."""
     p = parse_band(band)
     if p is None:
         return (1, 0.0, 0.0, _lc(band))
-    return (0, p["lo"], p["hi"] if p["hi"] != float("inf") else 1e18, "")
+    return (0, p["hi"] if p["hi"] != float("inf") else 1e18, p["lo"], "")
 
 
 _PER_HEAD_NAME = re.compile(r"\bper\b|/|%|percent|growth|attrition|turnover")

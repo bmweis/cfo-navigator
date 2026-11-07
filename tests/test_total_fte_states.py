@@ -106,7 +106,7 @@ def test_b_stored_but_cut_row_says_left_out_never_not_printed():
     notes = bp.status_notes([a, b, c], [], {("ec", 2), ("bk", 3)})      # ec's gross margin was cut
     text = "\n".join(notes)
     assert "Gross Margin / Example Capital, Example Capital 2026 (2026): left out." in text
-    assert "write only \"left out\"" in text and "never \"not printed\"" in text
+    assert "Leave it out of every table" in text and "never \"not printed\"" in text
     line = [x for x in notes if x.strip().startswith("Gross Margin / Example Capital")][0]
     assert "not printed (" not in line
 
@@ -132,7 +132,7 @@ def test_b_end_to_end_cut_row_reaches_the_lookup_notes(lib):
 
 
 def test_b_rules_carry_the_three_states_and_the_newest_period_pair():
-    assert "write only \"left out\"" in answer_rules.ANSWER_RULES
+    assert "leave that row out of the table" in answer_rules.ANSWER_RULES
     assert "Lead with the newest period sent" in answer_rules.ANSWER_RULES
     assert "line-item status" in answer_rules.SHAPE_RULES
 

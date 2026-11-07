@@ -236,7 +236,7 @@ def test_e_status_notes_never_put_a_count_or_label_mix_in_a_cell():
                 "source": src, "report": f"{src} 2026", "report_year": "2026"}
     a, b = row("ec", 1, "Sales and Marketing expense % of Revenue"), row("ec", 2, "R&D expense % of Revenue")
     notes = "\n".join(bp.status_notes([a, b], [], {("ec", 2)}))
-    assert "left out. In a table cell write only \"left out\"" in notes
+    assert "left out. Leave it out of every table" in notes
     assert "more row" not in notes and "(R&D left out)" not in notes
 
 
