@@ -67,7 +67,7 @@ TREND = (
 DERIVED_CHANGE = re.compile(
     r"\b(?:a\s+)?(?:drop|decline|fall|decrease|increase|rise|gain)\s+of\s+\$?\d"
     r"|\b(?:down|up)\s+\$?\d[\d.,]*\s*(?:%|points?|pts|pp|percentage points)?"
-    r"|\b\d[\d.,]*%\s+(?:higher|lower|more|less|above|below)\b", re.I)
+    r"|\b\d[\d.,]*%\s+(?:(?:higher|lower|more|less)\b|(?:above|below)\b(?!\s*(?:\$|\d|the\s+\$)))", re.I)
 DERIVED_LABEL = "derived, not in report"
 # A computed shift line is labelled this way instead (figures.compute_shifts).
 DERIVED_LABELS = (DERIVED_LABEL, "derived from stored reports")
@@ -86,7 +86,10 @@ def _numbers_near(words: list[str], start: int, end: int) -> bool:
 # "up 6 points" / "down 3.5 pp": a claimed change that must match a computed shift line.
 _SHIFT_CLAIM = re.compile(r"\b(?:up|down|rose|fell|increased|decreased|gained|dropped)\s+(?:by\s+)?(\d+(?:\.\d+)?)\s*(?:percentage\s+points?|points?|pts|pp)\b", re.I)
 # Two numbers in one table cell ("33% + 40%").
-_TWO_VALUES_CELL = re.compile(r"\d[\d.,]*\s*%?\s*\+\s*\d[\d.,]*\s*%?")
+_TWO_VALUES_CELL = re.compile(r"\d[\d.,]*\s*%?\s*\+\s*\d[\d.,]*\s*%?|\d[\d.,]*\s*%\s*/\s*\d[\d.,]*\s*%?")
+
+# A number that names a group or a period, not a figure: "top-10", "top 10", "Q2", "10-company".
+_LABEL_NUMBERS = re.compile(r"\btop[- ]\d+\b|\bQ\d\b|\b\d+-company\b|\b[A-Za-z]+-\d+\b", re.I)
 
 _ROW_MARKER_AFTER_PIPE = re.compile(r"^\s*\|.*\|\s*(?:\[\d{1,2}\]\s*)+$")
 
@@ -119,10 +122,50 @@ def what_shifted_problems(text: str, shifts: list | None) -> list[dict]:
             inside = False
         if not inside or not line.strip() or not shifts:
             continue
-        for n in _NUMBER.findall(re.sub(r"\[\d+\]", "", line)):
+        for n in _NUMBER.findall(_LABEL_NUMBERS.sub(" ", re.sub(r"\[\d+\]", "", line))):
             if n.strip("$,%").rstrip(".") not in allowed:
                 out.append({"phrase": "number in what shifted with no computed line", "snippet": line.strip()[:200]})
                 break
+    return out
+
+
+def _cells(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+_LEFT_OUT_CELL = re.compile(r"^left out\b", re.I)
+
+
+def left_out_cell_problems(text: str) -> list[dict]:
+    """A table row with a cell that says "left out": the answer rules keep such a figure out of the table (the
+    closing line names it). Flag only."""
+    return [{"phrase": "left out in a table cell", "snippet": line.strip()[:200]}
+            for line in (text or "").split("\n")
+            if line.strip().startswith("|") and any(_LEFT_OUT_CELL.match(c) for c in _cells(line))]
+
+
+def table_order_problems(text: str) -> list[dict]:
+    """Flag-only. Inside one table, consecutive rows that carry a readable size band (and name the same line
+    item, or have the band as their first cell) must run smallest band to largest. Rows with no band are not
+    judged. Order is code's job where code writes the table; this catches the model's tables."""
+    from linklib import figures as fg
+    out: list[dict] = []
+    prev = None
+    for line in (text or "").split("\n") + [""]:
+        if not line.strip().startswith("|"):
+            prev = None
+            continue
+        cells = _cells(line)
+        if not cells or set("".join(cells)) <= set("-: "):
+            continue
+        band = next((c for c in cells if fg.parse_band(c) is not None), None)
+        if band is None:
+            continue
+        key = fg.band_sort_key(band)
+        label = cells[0].lower() if fg.parse_band(cells[0]) is None else ""
+        if prev is not None and (label == prev[1]) and key < prev[0]:
+            out.append({"phrase": "table rows out of size order", "snippet": line.strip()[:200]})
+        prev = (key, label)
     return out
 
 
@@ -170,7 +213,8 @@ def label_problems(text: str, rows: list[dict] | None) -> list[dict]:
 def lint_answer(text: str, shifts: list | None = None, rows: list | None = None) -> list[dict]:
     """[{phrase, snippet}] for each likely breach; [] for a clean answer. `shifts` (the computed shift lines
     the turn was given; [] when none) turns on the check that a "up N points" claim matches one of them."""
-    flags: list[dict] = list(what_shifted_problems(text, shifts)) + label_problems(text, rows)
+    flags: list[dict] = (list(what_shifted_problems(text, shifts)) + label_problems(text, rows)
+                         + left_out_cell_problems(text) + table_order_problems(text))
     # A citation marker after a table row's closing pipe breaks the row in a renderer that does not repair it.
     for line in (text or "").split("\n"):
         if _ROW_MARKER_AFTER_PIPE.match(line):
