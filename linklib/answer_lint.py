@@ -99,6 +99,28 @@ _LEFT_OUT = re.compile(r"^\s*(?:\*\*|_)?left out\b", re.I)
 _HEADING = re.compile(r"^\s*(?:#{1,6}\s+\S|\*\*[^*]+\*\*\s*$)")
 
 
+_BAND_TEXT = re.compile(r"[<>]?\$\d[\d.,]*\s*[MKBmkb]?\s*(?:-|\u2013|to)\s*\$?\d[\d.,]*\s*[MKBmkb]?(?:\s*(?:ARR|revenue))?|\$\d[\d.,]*\s*[MKBmkb]\+?(?:\s*(?:ARR|revenue))?", re.I)
+_SCOPE_SENTENCE = re.compile(r"\b(?:no|not|none|without|neither|nor|never|cannot|does not|do not|has no|have no|is no)\b", re.I)
+_INFERENCE = re.compile(r"\b(?:may|might|could|likely|probably|would)\b[^.\n]{0,50}?\b(?:run|be|sit|come in|land)?\s*(?:somewhat |slightly |a bit |much )?(?:higher|lower|above|below)\b", re.I)
+
+
+def inference_problems(text: str) -> list[dict]:
+    """Flag-only. A sentence with no figure that infers where the user's own company would land against the medians
+    ("a sales-heavy company may run higher on S&M than these medians show"). Table rows and sentences with a
+    figure are not judged. Known false positive: a hedge about a stored figure ("may be higher in the 2023 report")
+    with no number in the sentence."""
+    out: list[dict] = []
+    for line in (text or "").split("\n"):
+        if line.strip().startswith("|"):
+            continue
+        for sent in _SENTENCE.split(line):
+            if _NUMBER.search(re.sub(r"\[\d+\]", "", sent)):
+                continue
+            if _INFERENCE.search(sent) and re.search(r"\b(?:your|yours|a|an|the)\b[^.]{0,40}\b(?:company|business|team|org|motion|model|firm)\b|\byou\b", sent, re.I):
+                out.append({"phrase": "inference about the user's own situation with no source", "snippet": sent.strip()[:200]})
+    return out
+
+
 def what_shifted_problems(text: str, shifts: list | None) -> list[dict]:
     """Flags for the "What shifted" section: it may hold only the computed lines. Any number in it that
     no computed line carries is flagged (recorded, never stripped); so is a section written when there
@@ -122,7 +144,10 @@ def what_shifted_problems(text: str, shifts: list | None) -> list[dict]:
             inside = False
         if not inside or not line.strip() or not shifts:
             continue
-        for n in _NUMBER.findall(_LABEL_NUMBERS.sub(" ", re.sub(r"\[\d+\]", "", line))):
+        scope = _YEAR.sub(" ", _BAND_TEXT.sub(" ", _LABEL_NUMBERS.sub(" ", re.sub(r"\[\d+\]", "", line))))
+        if _SCOPE_SENTENCE.search(scope) and not re.search(r"%|\bpoints?\b|\bpts\b", scope):
+            continue        # "The archive has no mix data before 2022 and none split to $20-$30M ARR": a scope caveat, not a figure
+        for n in _NUMBER.findall(scope):
             if n.strip("$,%").rstrip(".") not in allowed:
                 out.append({"phrase": "number in what shifted with no computed line", "snippet": line.strip()[:200]})
                 break
@@ -267,11 +292,53 @@ def label_problems(text: str, rows: list[dict] | None) -> list[dict]:
     return out
 
 
+_PCT_CELL = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%")
+
+
+def function_share_problems(text: str, rows: list[dict] | None) -> list[dict]:
+    """Flag-only label check on a headcount mix table row: the first cell names a function and a percent in the row
+    is a share the sent figures print for a DIFFERENT function and for no row of this one ("CS and support | 20%" when 20%
+    is Sales and CS and support is 13%). Compares only against the sent rows; a share that no sent row prints is not
+    judged. Nothing is changed."""
+    if not rows:
+        return []
+    from . import figures as fg
+    shares: dict[str, set[float]] = {}
+    for r in rows:
+        if fg.row_table_kind(r) != "headcount_share" or r.get("value_num") is None:
+            continue
+        fn = fg.function_key(fg.share_function(r))
+        if fn:
+            shares.setdefault(fn, set()).add(round(float(r["value_num"]), 1))
+    if len(shares) < 2:
+        return []
+    out: list[dict] = []
+    for line in (text or "").split("\n"):
+        if not line.strip().startswith("|"):
+            continue
+        cells = _cells(line)
+        if not cells:
+            continue
+        fn = fg.function_key(re.sub(r"\[\d+\]|\*", "", cells[0]))
+        if fn not in shares:
+            continue
+        for m in _PCT_CELL.finditer(re.sub(r"\[\d+\]", "", " ".join(cells[1:]))):
+            v = round(float(m.group(1)), 1)
+            if v in shares[fn]:
+                continue
+            others = [g for g, vals in shares.items() if g != fn and v in vals]
+            if others:
+                out.append({"phrase": "function label does not match its share",
+                            "snippet": f"{cells[0]} shows {m.group(1)}%, which the sent figures print for {others[0]}, not {fn}: {line.strip()[:160]}"})
+                break
+    return out
+
+
 def lint_answer(text: str, shifts: list | None = None, rows: list | None = None) -> list[dict]:
     """[{phrase, snippet}] for each likely breach; [] for a clean answer. `shifts` (the computed shift lines
     the turn was given; [] when none) turns on the check that a "up N points" claim matches one of them."""
     flags: list[dict] = (list(what_shifted_problems(text, shifts)) + change_claim_problems(text, shifts) + label_problems(text, rows)
-                         + left_out_cell_problems(text) + table_order_problems(text))
+                         + left_out_cell_problems(text) + table_order_problems(text) + function_share_problems(text, rows) + inference_problems(text))
     # A citation marker after a table row's closing pipe breaks the row in a renderer that does not repair it.
     for line in (text or "").split("\n"):
         if _ROW_MARKER_AFTER_PIPE.match(line):
