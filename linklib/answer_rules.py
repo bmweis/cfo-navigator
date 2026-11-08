@@ -161,3 +161,32 @@ SHAPE_RULES = (
     "- Then one line on what the data does not cover.\n"
     "- Show every row you were sent; a figure the notes say was left out has no row. This shape takes up to four small tables "
     "(headcount counts, headcount mix, spend, margins); the two-table limit above does not apply to it.\n")
+
+
+# Added to the lookup notes when the system builds the spend and/or margins table (linklib.table_render).
+def table_placeholder_note(kinds: list[str]) -> str:
+    names = {"spend": "the spend table ({{table:spend}})", "margins": "the margins table ({{table:margins}})"}
+    built = " and ".join(names[k] for k in kinds if k in names)
+    return (f"TABLES THE SYSTEM BUILDS: {built}. The system builds each from the stored rows and puts it where you write its "
+            "placeholder. Write the placeholder on a line of its own, once, where the table belongs. Do not write those rows "
+            "as a table or a list yourself and do not repeat a table's rows in a sentence; use sentences for the headline "
+            "figures and what the table cannot show. You still see the rows so you can write about them. The table rules "
+            "above (columns, row order, cells, citations in cells) apply only to tables you write yourself.")
+
+
+def shape_rules(kinds: list[str]) -> str:
+    """SHAPE_RULES with the spend and margins instructions replaced by placeholders when the system builds them."""
+    if not kinds:
+        return SHAPE_RULES
+    start = SHAPE_RULES.find("  (b) Spend.")
+    end = SHAPE_RULES.find("  (c) What shifted.")
+    if start < 0 or end < 0:
+        return SHAPE_RULES
+    parts = []
+    if "spend" in kinds:
+        parts.append("{{table:spend}} (the system builds the spend table: percent of revenue or ARR by line item)")
+    if "margins" in kinds:
+        parts.append("{{table:margins}} (the system builds the margins table; gross margin and cost of revenue stay out of the spend table)")
+    repl = ("  (b) Spend and margins. Write " + " and ".join(parts) + ", each on a line of its own. Add one or two sentences "
+            "on what the tables cannot show; do not list their rows.\n")
+    return SHAPE_RULES[:start] + repl + SHAPE_RULES[end:]

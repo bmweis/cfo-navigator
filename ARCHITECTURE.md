@@ -12030,3 +12030,29 @@ Not shipped: raising `TURN_ROWS_CAP` from 80 to 120. On the id-36 fixture one me
 - **Per-report edit page (`/admin/reader/figures/<slug>/edit`, follow-up to #765).** The report list on `/admin/reader/figures` is read-only: Report (slug beneath), Source, Year, Rows stored, Loaded, Landing URL (short link and how it resolved, or "Not set"), Republished from (with its metric text, or a dash) and an Edit link under a column headed Actions. Below 700px the table becomes labelled cards (`.fg-reports`, the `.bk-stack` pattern). The old inline `POST .../landing` and `POST .../cited-source` routes are gone (no redirect). `GET/POST .../<slug>/edit` (`_figures_edit_page`, `admin_figures_edit_save`, `.page-standard`, form capped at 900px) edits Source, Report title, Year (four digits), Landing URL, Republished from and Only for metrics containing in one save through `Library.save_benchmark_report_edit` (one transaction; a refused value writes nothing and re-renders with the typed values at 400; one audit row names the changed fields). **The slug is shown read-only**: stored figures, the digest `?digest=` link and the zip loader all key on it. **Edits stick across a reload:** the loader (`replace_benchmark_report`) rewrites `source`, `report` and `report_year` from the CSV every time, so the page stores the three name fields in new columns `source_override`, `report_override`, `year_override` (idempotent `ALTER TABLE`), which the loader's upsert never lists. An override is stored only when it differs from the CSV value, so clearing a box or typing the file value back returns to the file. `Library.effective_report` / `list_benchmark_reports` return the effective value in `source`/`report`/`report_year` and the file's under `*_loaded`; `figures.apply_report_overrides` applies the same values to stored figure rows when `find_figures` and `coverage` read them (rows stay verbatim in the table), so Sources titles, edition windows and the republished-from matching follow the edit. Landing URL and Republished from were already loader-proof (`landing_url_manual`, `cited_source`). Nothing is cached, so there is nothing to refresh on save.
 
 **FP&A Buddy live conversation is a chat surface (2026-11).** `fpa-thread-open` on `#fpa-page` (a MutationObserver on `#ask-thread`) now hides the whole entry card, the similar-questions card, the past-questions section and Recent conversations; `.fpa-live-actions` ("New conversation" = `doneThread()`, "Past questions" link) shows instead. `fpa-retry` (set by `done('none')` on a failed first turn, cleared by `doneThread`, `resetConvo` and a new top ask) re-shows the entry card so a failed ask stays retryable. `#ask-sim` is a direct child of `.fpa-intro-layout` in a `sim` grid row that exists only under `.has-sim` (`simLayout(on)`), so the example panel's height does not change; Recent conversations is rendered above `#pq-all`. The follow-up bubble is unchanged. See CLAUDE.md and `tests/test_buddy_chat_surface.py`.
+
+
+### Code-rendered tables, step 1: spend and gross margin (2026-11)
+
+`linklib/table_render.py` builds the spend and margins tables from the figure rows that were really sent; the model writes
+`{{table:spend}}` and `{{table:margins}}` where each belongs and never sees a table. **Order in `agent.answer_question`:**
+`extract_citations` -> `drop_unresolved_markers` -> `trim_to_full_sentence` (a trailing placeholder counts as a complete
+ending; a half-typed `{{...` is dropped) -> strip -> lint -> **render**. Rendering is last, so the strip and the lint only
+ever see what the model wrote; the stored answer, `result_json`, CSV and both markdown renderers (live JS `mdToHtml`, Python
+`answer_render._try_table`) read the final markdown and need no change. **Rows:** `Prestep.table_rows` is every picked row
+whose figure key made it into a document (`_figure_docs` returns each document's `keys`); `Prestep.table_kinds` says which
+tables the turn builds (a spend row = `row_table_kind` "spend_share" and not cost of revenue/gross margin; a margins row =
+"margin", or cost of revenue, COGS, hosting). Only when a kind is present do the placeholder note
+(`answer_rules.table_placeholder_note`) and the placeholder form of the shape rules (`answer_rules.shape_rules`) reach the
+model, so any other turn behaves as before. **Citation bridge:** each figures document's `sent` dict carries
+`identity` (slug, source, report, year); `benchmark_prestep.table_cite(citations, sent_docs)` returns a row's `[n]`, reusing
+the entry the prose already cited and otherwise appending an entry of the same shape with the next number, so every marker in
+a table resolves to a Sources entry and numbering stays contiguous. `extract_citations` and the stored citations shape are
+unchanged. **Fallbacks** (`render_tables`, recorded on the admin row at `prestep.tables.fallback`): a missing placeholder
+appends the table once at the end; a repeated one is dropped; an unknown one or one with no rows is removed. `tables.selfcheck`
+(flag-only) lists any rendered Value cell that is not a sent row's value. **Rules:** public (band-less) rows first, then bands
+smallest to largest by upper then lower edge, newest edition first inside a band, then median before other statistics; spend
+line items S&M, R&D, G&A, customer success, total opex, then others; a "target"/"plan"/estimate figure reads "target" in the
+Statistic column; the heading names the bases present; a range line per line item, basis and statistic is computed from the
+sent points whose bands overlap (at least two sources, each endpoint named and cited, targets and other bases never in it);
+the margins Segment column only appears when more than one segment does. Headcount counts and mix stay model-written (step 2).

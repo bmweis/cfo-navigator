@@ -36,7 +36,8 @@ import re
 from dataclasses import dataclass, field
 
 from . import figures as fg
-from .answer_rules import SHAPE_RULES
+from . import table_render
+from .answer_rules import shape_rules, table_placeholder_note
 from .citation_label import make_label
 
 _log = logging.getLogger(__name__)
@@ -179,6 +180,9 @@ class Prestep:
     shifts_unpaired: dict = field(default_factory=dict)      # candidates that gave no line, by short reason
     shifts_unpaired_groups: dict = field(default_factory=dict)   # reason -> up to 10 group names (publisher, metric, the two editions)
     shifts_outliers: list = field(default_factory=list)      # flag-only: a shift endpoint far from other publishers' values
+    table_rows: list = field(default_factory=list, repr=False)   # rows really sent in the figures documents (the code-built tables read these)
+    table_kinds: list = field(default_factory=list)          # which tables the code builds this turn: "spend", "margins"
+    tables: dict = field(default_factory=dict)               # what the renderer did: rendered / fallback / selfcheck (admin row)
 
     def log(self) -> dict:
         if not self.active and not self.split_fallback:
@@ -206,7 +210,7 @@ class Prestep:
                         "directional": x["directional"]} for x in self.shifts],
             "shifts_suppressed": self.shifts_suppressed, "shifts_skipped": self.shifts_skipped,
             "shifts_unpaired": self.shifts_unpaired, "shifts_unpaired_groups": self.shifts_unpaired_groups, "shifts_outliers": self.shifts_outliers,
-            "table_rows_shaped": self.table_rows_shaped,
+            "table_rows_shaped": self.table_rows_shaped, "tables": self.tables,
             "left_out_detail": dict(sorted(self.left_out_detail.items(), key=lambda kv: -kv[1])),
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
             "remaining_usd": None if self.remaining_usd is None else round(self.remaining_usd, 4),
@@ -588,11 +592,13 @@ def _figure_docs(rows: list[dict], budget: int, reports: dict, included: set | N
         head = grp[0]
         lines = [FIGURES_HEADER, f"Metric: {', '.join(sorted({g['metric'] for g in grp}))}"]
         kept = 0
+        kept_keys: list = []
         for g in grp:
             line = _row_line(g)
             if used + sum(len(x) for x in lines) + len(line) > budget and kept:
                 break
             lines.append(line)
+            kept_keys.append((g["report_slug"], g["figure_key"]))
             if included is not None:
                 included.add((g["report_slug"], g["figure_key"]))
             kept += 1
@@ -614,12 +620,12 @@ def _figure_docs(rows: list[dict], budget: int, reports: dict, included: set | N
             lines.insert(1, "No link on file for this report. Cite it by name.")
         body = "\n".join(lines)
         used += len(body)
-        sent = {"title": title, "url": link, "type": "library", "figures": True,
+        sent = {"title": title, "url": link, "type": "library", "figures": True, "identity": list(ident),
                 "label": make_label(source=head["source"], title=head["report"], year=head["report_year"],
                                     url=link, kind="report")}
         if rep.get("article_id") and link:
             sent["article_id"] = rep["article_id"]
-        docs.append({"title": title, "body": body, "sent": sent, "rows": kept})
+        docs.append({"title": title, "body": body, "sent": sent, "rows": kept, "keys": kept_keys})
         if used >= budget:
             rest = [g for k2, g2 in list(by_report.items())[len(docs):] for g in g2]
             left_out += len(rest)
@@ -1294,6 +1300,15 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
     holder = next((s for s in todo if s.picked), None)
     if holder is not None:
         holder.docs += fdocs
+    sent_keys = {k for d in fdocs for k in d.get("keys", [])}
+    uniq_rows: dict = {}
+    for s in todo:
+        for r in s.picked:
+            k = (r["report_slug"], r["figure_key"])
+            if k in sent_keys and k not in uniq_rows:
+                uniq_rows[k] = r
+    ps.table_rows = list(uniq_rows.values())
+    ps.table_kinds = table_render.kinds_present(ps.table_rows)
     ps.left_out_detail = {}
     for s in todo:
         for t, c in s.left_out_by_report.items():
@@ -1328,7 +1343,9 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
                     "table or paragraph, and add nothing about left-out rows anywhere else):\n" + closing)
     shape_used = any(m in fg.SHAPE_LABELS for s in ps.subs for m in s.metrics)
     if shape_used:
-        plan.append(SHAPE_RULES)
+        plan.append(shape_rules(ps.table_kinds))
+    if ps.table_kinds:
+        plan.append(table_placeholder_note(ps.table_kinds))
     ps.plan_text = "\n".join(
         ([("BENCHMARK LOOKUP NOTES:\n" + "\n".join(lines))] if lines else [])
         + (["\n".join(plan)] if plan else [])
@@ -1448,6 +1465,29 @@ def derived_counts_note(picked: list[dict]) -> str:
     return ("DERIVED HEADCOUNT COUNTS for the headcount mix table (give each with its share, in a column labelled "
             "derived, and name the total and where it comes from; do not work out any other count yourself): "
             + " | ".join(lines))
+
+
+def table_cite(citations: list, sent_docs: list[dict]):
+    """cite(row) -> the [n] the Sources list uses for the row's report document, or None when that report was not
+    sent. A report the prose already cited keeps its number; one it did not is appended to `citations` (same
+    entry shape extract_citations builds, next number), so every table row's marker resolves to a Sources entry."""
+    by_ident = {tuple(d["identity"]): d for d in sent_docs if d.get("identity")}
+
+    def cite(row: dict):
+        d = by_ident.get(_row_identity(row))
+        if d is None:
+            return None
+        for c in citations:
+            if c.get("figures") and c.get("title") == d["title"] and c.get("url") == d["url"]:
+                return c["n"]
+        entry = {"n": len(citations) + 1, "title": d["title"], "url": d["url"], "type": d["type"]}
+        for k in ("article_id", "provider", "label"):
+            if d.get(k):
+                entry[k] = d[k]
+        entry["figures"] = True
+        citations.append(entry)
+        return entry["n"]
+    return cite
 
 
 def dedupe_docs(docs: list[dict]) -> list[dict]:
