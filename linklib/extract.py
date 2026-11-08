@@ -463,15 +463,17 @@ def _failed_page(exc: Exception) -> PageData:
     page = PageData(title="", content="", fetch_error=_describe_fetch_error(exc))
     resp = getattr(exc, "response", None)
     if resp is not None:
-        page.http_status = resp.status_code
-        page.final_url = resp.url
-        page.redirected = bool(resp.history)
+        # getattr: test doubles for requests.Response may carry only status/text.
+        page.http_status = getattr(resp, "status_code", 0)
+        page.final_url = getattr(resp, "url", "") or ""
+        page.redirected = bool(getattr(resp, "history", None))
         try:
             body = resp.text
         except Exception:
             body = ""
+        hdrs = getattr(resp, "headers", None) or {}
         page.challenge = (looks_like_bot_challenge(body)
-                          or (resp.headers.get("cf-mitigated", "").lower() == "challenge"))
+                          or (hdrs.get("cf-mitigated", "").lower() == "challenge"))
     return page
 
 
