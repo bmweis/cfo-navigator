@@ -12056,3 +12056,8 @@ line items S&M, R&D, G&A, customer success, total opex, then others; a "target"/
 Statistic column; the heading names the bases present; a range line per line item, basis and statistic is computed from the
 sent points whose bands overlap (at least two sources, each endpoint named and cited, targets and other bases never in it);
 the margins Segment column only appears when more than one segment does. Headcount counts and mix stay model-written (step 2).
+
+
+#### Code-rendered tables, step 2: total headcount and headcount mix
+
+`linklib/table_render.py` builds four tables from the rows that were really sent (placeholders `{{table:headcount}}`, `{{table:mix}}`, `{{table:spend}}`, `{{table:margins}}`, rendered after strip and lint). `pick_rows` (linklib/benchmark_prestep.py) keeps a publisher's headcount mix whole through `mix_units`, which adds the unit's extra rows to the row cap. `figures.mix_function_ok` and the widened `_SHARE_PREFIX` decide which share rows name a function. `render_tables` records `fallback`, `selfcheck` (flag-only: every number cell equals a sent row's value or a derived count; `mix_selfcheck` ties each function label to its own share) and `not_in_table` on the admin row; `cite_shifts` adds the endpoint report markers to computed shift lines. `answer_rules.shape_rules` and `table_placeholder_note` name the two new placeholders. No schema change.

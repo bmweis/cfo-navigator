@@ -1093,9 +1093,9 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
         shifts.append({"metric": b["metric"], "band": b["band"], "segment": b["segment"], "statistic": b["statistic"], "unit": unit, "kind": kind,
                        "metric_from": a["metric"], "line_item_differs": _lc(a["metric"]) != _lc(b["metric"]),
                        "threshold": thr, "delta": round(delta, 4), "size": round(size, 4), "directional": directional,
-                       "from": {"source": a["source"], "report": a["report"], "year": a["report_year"], "period": a["data_period"],
+                       "from": {"report_slug": a.get("report_slug", ""), "source": a["source"], "report": a["report"], "year": a["report_year"], "period": a["data_period"],
                                 "value": a["value"]},
-                       "to": {"source": b["source"], "report": b["report"], "year": b["report_year"], "period": b["data_period"],
+                       "to": {"report_slug": b.get("report_slug", ""), "source": b["source"], "report": b["report"], "year": b["report_year"], "period": b["data_period"],
                               "value": b["value"]},
                        "line": line, "_norm": size / thr})
 
@@ -1337,8 +1337,9 @@ def _edition_key(r: dict) -> tuple:
     return (series, int(cm.group(1)) if cm else _year_num(r.get("report_year")))
 
 
-_SHARE_PREFIX = re.compile(r"^\s*(?:percent of employees by department|headcount mix by department|headcount share|headcount mix|"
-                           r"share of headcount|headcount)\s*[:,\-]?\s*", re.I)
+_SHARE_PREFIX = re.compile(r"^\s*(?:percent of employees by department|headcount distribution by function|headcount mix by department|"
+                           r"headcount share|headcount mix|share of headcount|headcount)\s*[:,\-]?\s*", re.I)
+_SHARE_NOT_A_FUNCTION = re.compile(r"\bsums?\b|not assigned|unassigned|\bpoints\b|\btotal of\b", re.I)
 
 
 def share_function(r: dict) -> str:
@@ -1346,10 +1347,18 @@ def share_function(r: dict) -> str:
     "sales"; a row named "Percent of employees by department" with the function in its segment gives the segment.
     "" when neither says."""
     metric = str(r.get("metric") or "")
-    cand = re.sub(r"\s*\((?:implied)\)\s*$", "", _SHARE_PREFIX.sub("", metric)).strip()
+    cand = re.sub(r"\s+share$", "", re.sub(r"\s*\((?:implied)\)\s*$", "", _SHARE_PREFIX.sub("", metric)).strip(), flags=re.I).strip()
     if cand and cand != metric.strip():
         return cand
     return str(r.get("segment") or "").strip() or ("" if cand == metric.strip() else cand)
+
+
+def mix_function_ok(r: dict) -> bool:
+    """True when a headcount-share row is one function's share the data names: not a sum, a total or a
+    "points not assigned" row, and a function can be read from its metric name or its segment."""
+    if _SHARE_NOT_A_FUNCTION.search(str(r.get("metric") or "")) or _SHARE_NOT_A_FUNCTION.search(str(r.get("segment") or "")):
+        return False
+    return bool(share_function(r))
 
 
 def function_key(text) -> str:
