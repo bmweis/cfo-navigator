@@ -177,6 +177,7 @@ class Prestep:
     shifts_suppressed: int = 0                               # shifts below the threshold, left out silently
     shifts_skipped: list = field(default_factory=list)       # cells skipped because a report prints two values
     shifts_unpaired: dict = field(default_factory=dict)      # candidates that gave no line, by short reason
+    shifts_unpaired_groups: dict = field(default_factory=dict)   # reason -> up to 10 group names (publisher, metric, the two editions)
     shifts_outliers: list = field(default_factory=list)      # flag-only: a shift endpoint far from other publishers' values
 
     def log(self) -> dict:
@@ -204,7 +205,7 @@ class Prestep:
             "shifts": [{"line": x["line"], "kind": x["kind"], "size": x["size"], "threshold": x["threshold"],
                         "directional": x["directional"]} for x in self.shifts],
             "shifts_suppressed": self.shifts_suppressed, "shifts_skipped": self.shifts_skipped,
-            "shifts_unpaired": self.shifts_unpaired, "shifts_outliers": self.shifts_outliers,
+            "shifts_unpaired": self.shifts_unpaired, "shifts_unpaired_groups": self.shifts_unpaired_groups, "shifts_outliers": self.shifts_outliers,
             "table_rows_shaped": self.table_rows_shaped,
             "left_out_detail": dict(sorted(self.left_out_detail.items(), key=lambda kv: -kv[1])),
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
@@ -1372,15 +1373,28 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
         return ""
     out = fg.compute_shifts(rows, lib.shift_rules()) if rows else {"shifts": [], "suppressed": 0, "skipped": [], "unpaired": {}}
     ps.shifts_unpaired = out.get("unpaired", {})
+    ps.shifts_unpaired_groups = out.get("unpaired_groups", {})
     ps.shifts_outliers = out.get("outliers", [])
-    ps.shifts = out["shifts"][:MAX_SHIFT_LINES]
-    ps.shifts_suppressed = out["suppressed"] + max(len(out["shifts"]) - MAX_SHIFT_LINES, 0)
-    ps.shifts_skipped = out["skipped"]
+    bench = [x for x in subs if x.intent == "benchmark" and x.metrics]
+    ask_text = " ".join(x.text for x in bench)
+    chosen, note = fg.rank_shifts(out["shifts"], MAX_SHIFT_LINES, asked_band=next((x.band for x in bench if x.band), ""),
+                                  asked_segment=next((x.segment for x in bench if x.segment), ""), text=ask_text,
+                                  quartile_asked=bool(fg.QUARTILE_ASK.search(ask_text)))
+    ps.shifts = chosen
+    ps.shifts_suppressed = out["suppressed"] + note["over_cap"]
+    ps.shifts_skipped = list(out["skipped"])
+    if len(ps.shifts_skipped) > 10:
+        ps.shifts_skipped = ps.shifts_skipped[:10] + [f"and {len(out['skipped']) - 10} more"]
+    if note["quartile_left_out"]:
+        ps.shifts_skipped.append(f"{note['quartile_left_out']} quartile shift(s) left out: the question did not ask for a quartile")
+    for sh in chosen:
+        if sh.get("line_item_differs"):
+            ps.shifts_outliers.append(f"endpoint basis differs: {sh['metric_from']} (from) vs {sh['metric']} (to) in one computed line; check they are the same line item")
     if not ps.shifts:
         return NO_SHIFTS_NOTE
     return ("COMPUTED SHIFTS (worked out by the system from the stored reports above; these lines are exact):\n"
             + "\n".join(f"  {i}. {x['line']}" for i, x in enumerate(ps.shifts, 1))
-            + "\nUnder a short heading \"What shifted\", write at most the two largest of these lines, each ending "
+            + "\nUnder a short heading \"What shifted\", write at most the first two of these lines (they are in the order to print), each ending "
               "\"(derived from stored reports)\", with the figures shown. No cause and no forecast. Never work out, add or "
               "mention any other change over time yourself.")
 

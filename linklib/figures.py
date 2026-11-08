@@ -839,7 +839,8 @@ def _band_key(text) -> tuple:
 
 
 _PERIOD_WORDS = re.compile(r"\b(?:at|end|of|the|in|as|q[1-4]|(?:19|20)\d{2}|full|time|equivalent|fte|ftes|percent|pct)\b|[%,;()]")
-_SEG_NOISE = {"public", "index", "overall", "median", "company", "companies", "constituents", "the", "of", "a", "and"}
+_SEG_NOISE = {"public", "index", "overall", "median", "company", "companies", "constituents", "the", "of", "a", "and",
+              "excluded", "excl", "only"}
 
 
 def _denom_key(text) -> str:
@@ -879,26 +880,47 @@ def _series_denom(r: dict) -> str:
     return "" if words <= ({_stem(w) for w in _PEOPLE_WORDS} | {_stem(w + "s") for w in _PEOPLE_WORDS} | metric_words) else dk
 
 
+UNPAIRED_NAMES_PER_REASON = 10
 _KEY_FIELDS = ((0, "metric name"), (1, "band"), (4, "segment"), (5, "statistic"), (6, "denominator"), (7, "unit"))
 
 
-def _single_edition_reason(key: tuple, by_series: dict, groups: dict) -> str:
-    """"single edition" only when the publisher stored one edition of this exact figure and nothing else
-    that could be its other edition. When the same publisher has another edition of a figure that differs
-    in exactly one of metric name, band, segment or statistic, say which."""
+def _key_text(i: int, v) -> str:
+    if i == 0:
+        return " ".join(sorted(v)) if isinstance(v, (set, frozenset)) else str(v)
+    if i == 1 and isinstance(v, tuple) and v and v[0] != "text":
+        return f"{v[0]} {v[1]}-{v[2]}"
+    return str(v[1] if isinstance(v, tuple) and len(v) == 2 and v[0] == "text" else v) or "(none)"
+
+
+def _single_edition_reason(key: tuple, by_series: dict, groups: dict) -> tuple[str, str]:
+    """(reason, detail). "single edition" only when the publisher stored one edition of this exact figure and
+    nothing else that could be its other edition. When the same publisher has another edition of a figure that
+    differs in exactly one of metric name, band, segment, statistic, denominator or unit, say which, and name the
+    publisher, the metric and the two values with the editions they come from (detail, for the admin row)."""
     years = {_year_num(r["report_year"]) for rows in by_series.values() for r in rows}
     for other_key, other_series in groups.items():
         if other_key is key or other_key == key:
             continue
-        if not set(other_series) & set(by_series):
+        shared = set(other_series) & set(by_series)
+        if not shared:
             continue
         other_years = {_year_num(r["report_year"]) for ser, rows in other_series.items() if ser in by_series for r in rows}
         if not other_years - years:
             continue
         differ = [i for i in range(len(key)) if key[i] != other_key[i]]
         if len(differ) == 1 and differ[0] in dict(_KEY_FIELDS):
-            return f"editions exist but {dict(_KEY_FIELDS)[differ[0]]} differs"
-    return "single edition"
+            i = differ[0]
+            ser = sorted(shared)[0]
+            src = (by_series[ser][0].get("series") or by_series[ser][0]["source"])
+            ed_a = sorted({_year_num(r["report_year"]) for r in by_series[ser]})
+            ed_b = sorted({_year_num(r["report_year"]) for r in other_series[ser]})
+            name = by_series[ser][0]["metric"]
+            detail = (f"{src}: {name} ({dict(_KEY_FIELDS)[i]}): '{_key_text(i, key[i])}' in {'/'.join(map(str, ed_a))} "
+                      f"vs '{_key_text(i, other_key[i])}' in {'/'.join(map(str, ed_b))}")
+            return f"editions exist but {dict(_KEY_FIELDS)[i]} differs", detail
+    rows = [r for v in by_series.values() for r in v]
+    r0 = rows[0] if rows else {}
+    return "single edition", f"{r0.get('series') or r0.get('source', '')}: {r0.get('metric', '')} ({r0.get('band') or 'no band'}) only in {'/'.join(str(y) for y in sorted(years))}"
 
 
 def _bands_overlap(a, b) -> bool:
@@ -976,6 +998,16 @@ def _within_report_pair(series_rows: list[dict]):
     return None if best is None else (best[1], best[2])
 
 
+_ESTIMATE = re.compile(r"\b(?:estimates?|estimated|forecasts?|forecasted|targets?|plans?|planned|budgets?|projected|projections?|guidance|outlook)\b"
+                       r"|\b(?:19|20)\d{2}\s?[ep]\b|\b[ep]\s?(?:19|20)\d{2}\b", re.I)
+
+
+def is_estimate(r: dict) -> bool:
+    """A row whose data period (or metric name) says it is an estimate, forecast, target, plan or budget
+    ("2026E", "2026 estimate", "2023 targets"). Never an endpoint of a shift: actual to estimate is not a change."""
+    return bool(_ESTIMATE.search(str(r.get("data_period") or "")) or _ESTIMATE.search(str(r.get("metric") or "")))
+
+
 def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
     """{shifts, suppressed, skipped, unpaired}. `unpaired` counts, by short reason, every candidate that
     produced no line ("single edition", "same data period", "not an exact or adjacent-band figure", ...).
@@ -988,9 +1020,14 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
     `skipped`. A republisher's row is one series with the source it cites (row["series"])."""
     skipped: list[str] = []
     unpaired: dict[str, int] = {}
+    unpaired_groups: dict[str, list[str]] = {}
 
-    def _why(reason: str) -> None:
+    def _why(reason: str, detail: str = "") -> None:
         unpaired[reason] = unpaired.get(reason, 0) + 1
+        if detail:
+            names = unpaired_groups.setdefault(reason, [])
+            if detail not in names and len(names) < UNPAIRED_NAMES_PER_REASON:
+                names.append(detail)
 
     ok: list[dict] = []
     for r in rows:
@@ -1010,6 +1047,12 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
             continue
         if _lc(r.get("data_period")).startswith("change"):
             _why("a change figure, not a level")
+            continue
+        if is_estimate(r):
+            est_label = f"{r['metric']} in {_ends(r)}: {r['data_period']} is an estimate, so it was not used as a shift endpoint"
+            if est_label not in skipped:
+                skipped.append(est_label)
+            _why("endpoint is an estimate")
             continue
         ok.append(r)
     base = lambda r: (name_key(r["metric"]) or frozenset({_lc(r["metric"])}), _band_key(r["band"]), bool(r.get("band_context")),
@@ -1047,7 +1090,8 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
                    (f"one series: {a['series'] or a['source']}, the same report's own history (same respondents and definition)"
                     if within_report else f"one series: {a['series'] or a['source']}"))
                 + "; derived from stored reports")
-        shifts.append({"metric": b["metric"], "band": b["band"], "statistic": b["statistic"], "unit": unit, "kind": kind,
+        shifts.append({"metric": b["metric"], "band": b["band"], "segment": b["segment"], "statistic": b["statistic"], "unit": unit, "kind": kind,
+                       "metric_from": a["metric"], "line_item_differs": _lc(a["metric"]) != _lc(b["metric"]),
                        "threshold": thr, "delta": round(delta, 4), "size": round(size, 4), "directional": directional,
                        "from": {"source": a["source"], "report": a["report"], "year": a["report_year"], "period": a["data_period"],
                                 "value": a["value"]},
@@ -1094,12 +1138,67 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
             else:
                 _why("same data period in both editions")
         elif not made and not tried:
-            _why(_single_edition_reason(key, by_series, groups))
+            _why(*_single_edition_reason(key, by_series, groups))
     shifts.sort(key=lambda s: (-s["_norm"], s["line"]))
     for s in shifts:
         s.pop("_norm", None)
     outliers = _endpoint_outliers(shifts, ok, rules)
-    return {"shifts": shifts, "suppressed": suppressed, "skipped": skipped, "unpaired": unpaired, "outliers": outliers}
+    return {"shifts": shifts, "suppressed": suppressed, "skipped": skipped, "unpaired": unpaired, "outliers": outliers,
+            "unpaired_groups": unpaired_groups}
+
+
+QUARTILE_ASK = re.compile(r"quartile|percentile|\bp\s?(?:10|25|75|90)\b|top\s+(?:25|10|decile)|bottom\s+(?:25|10)|upper\s+(?:half|quartile)|lower\s+quartile", re.I)
+_QUARTILE_STATS = re.compile(r"^(?:p\s?\d{1,2}|top[\s_-]?quartile|bottom[\s_-]?quartile|(?:upper|lower)[\s_-]?quartile|q[13]|top[\s_-]?decile|bottom[\s_-]?decile)$")
+_GENERIC_SEG = {"", "all", "overall", "total", "top 10", "all companies"}
+
+
+def is_quartile_stat(statistic) -> bool:
+    return bool(_QUARTILE_STATS.match(_lc(statistic).strip()))
+
+
+def _stat_rank(statistic) -> int:
+    t = _lc(statistic)
+    return 0 if t == "median" else (1 if t in ("mean", "average", "avg") else 2)
+
+
+def shift_tier(sh: dict, asked_band: str = "", asked_segment: str = "", text: str = "") -> int:
+    """1 = the headline series for the asked metric: no segment (or an index/overall one, or the segment asked) and a band
+    that is the asked size, no band, or unreadable. 2 = a segment or cohort the question names. 3 = any other cohort."""
+    seg = _seg_key(sh.get("segment") or "")
+    band = sh.get("band") or ""
+    asked_seg = _seg_key(asked_segment or "")
+    seg_generic = (not seg) or seg in _GENERIC_SEG or seg == "all"
+    seg_asked = bool(asked_seg) and (seg == asked_seg or asked_seg in seg)
+    band_ok = (not band) or parse_band(band) is None or (bool(asked_band) and _bands_overlap(band, asked_band)) or not asked_band
+    if (seg_generic or seg_asked) and band_ok:
+        return 1
+    t = _lc(text)
+    named = (bool(seg) and seg in t) or (bool(band) and _lc(band) in t)
+    return 2 if named else 3
+
+
+def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segment: str = "", text: str = "",
+                quartile_asked: bool = False) -> tuple[list[dict], dict]:
+    """(the shifts to print, in the order to print them, and a note dict). The CODE chooses and orders; the model
+    prints the first two of the list. Order: tier (headline series, then a named cohort, then other cohorts), median
+    before mean before other, then size. A bottom or top quartile shift is left out unless the question asked for a
+    quartile. The best shift of each different metric comes before a second one of the same metric, so a spend line
+    cannot push the headcount line off the list. Returns note {"quartile_left_out": n}."""
+    pool, quart = [], 0
+    for sh in shifts:
+        if is_quartile_stat(sh.get("statistic")) and not quartile_asked:
+            quart += 1
+            continue
+        pool.append(sh)
+    ordered = sorted(pool, key=lambda sh: (shift_tier(sh, asked_band, asked_segment, text), _stat_rank(sh.get("statistic")),
+                                           -(sh.get("size") or 0) / (sh.get("threshold") or 1), sh["line"]))
+    seen: set = set()
+    first, rest = [], []
+    for sh in ordered:
+        fam = name_key(sh["metric"]) or frozenset({_lc(sh["metric"])})
+        (rest if fam in seen else first).append(sh)
+        seen.add(fam)
+    return (first + rest)[:cap], {"quartile_left_out": quart, "over_cap": max(len(first) + len(rest) - cap, 0)}
 
 
 # --- find_figures --------------------------------------------------------------
@@ -1238,6 +1337,36 @@ def _edition_key(r: dict) -> tuple:
     return (series, int(cm.group(1)) if cm else _year_num(r.get("report_year")))
 
 
+_SHARE_PREFIX = re.compile(r"^\s*(?:percent of employees by department|headcount mix by department|headcount share|headcount mix|"
+                           r"share of headcount|headcount)\s*[:,\-]?\s*", re.I)
+
+
+def share_function(r: dict) -> str:
+    """The function a headcount share row is about, as printed: "headcount share: sales" and "headcount share Sales" give
+    "sales"; a row named "Percent of employees by department" with the function in its segment gives the segment.
+    "" when neither says."""
+    metric = str(r.get("metric") or "")
+    cand = re.sub(r"\s*\((?:implied)\)\s*$", "", _SHARE_PREFIX.sub("", metric)).strip()
+    if cand and cand != metric.strip():
+        return cand
+    return str(r.get("segment") or "").strip() or ("" if cand == metric.strip() else cand)
+
+
+def function_key(text) -> str:
+    """One key for a function name: "CS & Support", "CS and support" and "cs support" are one."""
+    t = re.sub(r"\((?:implied)\)", " ", _lc(text).replace("&", " and "))
+    return " ".join(w for w in re.findall(r"[a-z0-9]+", t) if w not in ("and", "the", "of"))
+
+
+def share_label(r: dict) -> str:
+    """The metric name with the function it is about, for a line that has to say which function a number belongs to:
+    a row whose function sits in its segment ("Percent of employees by department", segment "Sales") reads
+    "Percent of employees by department: Sales"."""
+    metric = str(r.get("metric") or "")
+    fn = share_function(r)
+    return metric if (not fn or function_key(fn) in function_key(metric)) else f"{metric}: {fn}"
+
+
 def derive_headcount_counts(rows: list[dict], cap: int = 12) -> list[str]:
     """Derived counts for the headcount mix table: a function's share of headcount times the total headcount
     the SAME edition prints for the same size band and data period, rounded to a whole person. A share row a
@@ -1264,13 +1393,14 @@ def derive_headcount_counts(rows: list[dict], cap: int = 12) -> list[str]:
         cands = [x for x in (totals.get(k) or []) if x.get("report_slug") == r.get("report_slug") or r.get("cited_source")]
         t = next((x for x in cands if _lc(x["statistic"]) == _lc(r["statistic"])), None) \
             or next((x for x in cands if _lc(x["statistic"]) == "median"), None) or (cands[0] if cands else None)
-        if t is None or (k, r["metric"]) in seen:
+        label = share_label(r)
+        if t is None or (k, label) in seen:
             continue
-        seen.add((k, r["metric"]))
+        seen.add((k, label))
         count = int(r["value_num"] * t["value_num"] / 100 + 0.5)
         stats = (f"a {_lc(r['statistic'])} share times a {_lc(t['statistic'])} total" if _lc(r["statistic"]) != _lc(t["statistic"])
                  else f"a product of two {_lc(t['statistic']) or 'printed'} figures")
-        lines.append(f"{r['metric']} at {r['band'] or 'no band'} ({r['statistic'] or 'statistic not stated'}): about {count} people "
+        lines.append(f"{label} at {r['band'] or 'no band'} ({r['statistic'] or 'statistic not stated'}): about {count} people "
                      f"(derived, not in report: {_num(r['value_num'])}% x {_num(t['value_num'])} total, rounded; share from {_ends(r)}, "
                      f"total from {_ends(t)}; {stats}, not a median count)")
         if len(lines) >= cap:
