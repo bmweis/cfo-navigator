@@ -129,6 +129,48 @@ def what_shifted_problems(text: str, shifts: list | None) -> list[dict]:
     return out
 
 
+_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+# "down from 200 in Q2 2024", "fell from 78% to 73%", "increased from 20 to 30": a change the model worked out.
+_CHANGE_FROM = re.compile(
+    r"\b(?:down|up|fell|fall(?:s|en)?|rose|risen?|increased?|decreased?|declined?|dropped?|grew|grown|shr[ua]nk|gained|climbed|slipped|"
+    r"moved|changed|shifted)\b[^.\n|]{0,60}?\bfrom\b"
+    r"|\bfrom\s+\$?\d[\d.,]*\s*%?[^.\n|]{0,40}?\bto\s+\$?\d", re.I)
+
+
+def change_claim_problems(text: str, shifts: list | None) -> list[dict]:
+    """Flag-only, whole answer. A sentence that states a change over time between two figures ("down from
+    200 in Q2 2024", "fell from 78% to 73%") when no computed shift line carries those two figures: the model
+    never works a change out itself, only a computed line (derived from stored reports) is a change. Skipped:
+    table rows, the "What shifted" section (its own check), a sentence that carries a derived label, and a
+    sentence whose figures are both the ends of a computed shift. `shifts` None = not known, no check."""
+    if shifts is None:
+        return []
+    pairs = [(str((x.get("from") or {}).get("value", "")).strip().rstrip("%").replace(",", ""),
+              str((x.get("to") or {}).get("value", "")).strip().rstrip("%").replace(",", "")) for x in shifts]
+    out: list[dict] = []
+    inside = False
+    for line in (text or "").split("\n"):
+        if _WHAT_SHIFTED.match(line):
+            inside = True
+            continue
+        if inside and (_HEADING.match(line) or _LEFT_OUT.match(line)):
+            inside = False
+        if inside or line.strip().startswith("|"):
+            continue
+        for sent in _SENTENCE.split(line):
+            low = sent.lower()
+            if not _CHANGE_FROM.search(sent) or any(lab in low for lab in DERIVED_LABELS):
+                continue
+            clean = _YEAR.sub(" ", _LABEL_NUMBERS.sub(" ", re.sub(r"\[\d+\]", "", sent)))
+            nums = [n.strip("$,%").rstrip(".").replace(",", "") for n in _NUMBER.findall(clean)]
+            if len(nums) < 2:
+                continue
+            if any(a in nums and b in nums for a, b in pairs):
+                continue
+            out.append({"phrase": "change written by the model with no computed line", "snippet": sent.strip()[:200]})
+    return out
+
+
 def _cells(line: str) -> list[str]:
     return [c.strip() for c in line.strip().strip("|").split("|")]
 
@@ -158,7 +200,9 @@ def table_order_problems(text: str) -> list[dict]:
         cells = _cells(line)
         if not cells or set("".join(cells)) <= set("-: "):
             continue
-        band = next((c for c in cells if fg.parse_band(c) is not None), None)
+        # A band is a money range ("$20-50M ARR", "<$100M ARR"); a bare number or a percent in another column
+        # ("131", "26.9%") parses as one but is a value, and ordering rows by it is the false positive id 53 showed.
+        band = next((c for c in cells if "$" in c and fg.parse_band(c) is not None), None)
         if band is None:
             continue
         key = fg.band_sort_key(band)
@@ -187,6 +231,19 @@ def label_problems(text: str, rows: list[dict] | None) -> list[dict]:
             continue
         val = str(r.get("value") or "").strip().rstrip("%")
         by_pub.setdefault(pub, {}).setdefault(yr, set()).add(val)
+        # A cell the same report is printed in elsewhere is that report's figure too, under either name:
+        # "High Alpha 2025, also printed in Jurassic Capital 2026" is a right label for the one cell.
+        for other in r.get("also_printed_in") or []:
+            m = re.search(r"(?<!\d)((?:19|20)\d{2})(?!\d)", str(other))
+            name = str(other).split(",")[0].strip().lower()
+            if name and m:
+                by_pub.setdefault(name, {}).setdefault(m.group(1), set()).add(val)
+        # A republisher's row that cites its original counts for the original's edition it names.
+        cited = str(r.get("cited_source") or "")
+        cm = re.search(r"(?<!\d)((?:19|20)\d{2})(?!\d)", cited)
+        series = str(r.get("series") or "").strip().lower()
+        if cited and cm and series and series != pub:
+            by_pub.setdefault(series, {}).setdefault(cm.group(1), set()).add(val)
     out: list[dict] = []
     for line in (text or "").split("\n"):
         if not line.strip().startswith("|"):
@@ -213,7 +270,7 @@ def label_problems(text: str, rows: list[dict] | None) -> list[dict]:
 def lint_answer(text: str, shifts: list | None = None, rows: list | None = None) -> list[dict]:
     """[{phrase, snippet}] for each likely breach; [] for a clean answer. `shifts` (the computed shift lines
     the turn was given; [] when none) turns on the check that a "up N points" claim matches one of them."""
-    flags: list[dict] = (list(what_shifted_problems(text, shifts)) + label_problems(text, rows)
+    flags: list[dict] = (list(what_shifted_problems(text, shifts)) + change_claim_problems(text, shifts) + label_problems(text, rows)
                          + left_out_cell_problems(text) + table_order_problems(text))
     # A citation marker after a table row's closing pipe breaks the row in a renderer that does not repair it.
     for line in (text or "").split("\n"):

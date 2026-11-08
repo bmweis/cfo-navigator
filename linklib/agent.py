@@ -1149,6 +1149,9 @@ def answer_question(
         try:
             from .answer_strip import strip_answer
             text, stripped = strip_answer(text)
+            from .answer_strip import drop_left_out_without_table
+            text, no_table = drop_left_out_without_table(text)
+            stripped = list(stripped) + no_table
         except Exception:
             _log.exception("answer strip failed; answer left as written")
         try:

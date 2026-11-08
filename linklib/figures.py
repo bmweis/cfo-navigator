@@ -1039,8 +1039,10 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
         unit_txt = "points" if kind == "points" else "percent"
         direction = "up" if delta > 0 else "down"
         v = lambda x: _num(x["value_num"]) + ("%" if _is_percent(x["unit"]) else (f" {x['unit']}" if x["unit"] else ""))
+        ya, yb = _year_num(a["data_period"]), _year_num(b["data_period"])
+        span = f", a {yb - ya}-year span" if ya > 0 and yb > ya else ""
         line = (f"{b['metric']} at {b['band'] or 'no band'} ({b['statistic'] or 'statistic not stated'}): {direction} {_num(size)} "
-                f"{unit_txt}, from {v(a)} ({_ends(a)}) to {v(b)} ({_ends(b)}); "
+                f"{unit_txt}, from {v(a)} ({_ends(a)}) to {v(b)} ({_ends(b)}){span}; "
                 + ("different surveys, directional only" if directional else
                    (f"one series: {a['series'] or a['source']}, the same report's own history (same respondents and definition)"
                     if within_report else f"one series: {a['series'] or a['source']}"))
@@ -1228,35 +1230,52 @@ TABLE_KIND_LABELS = {"headcount_count": "headcount counts (a number of people)",
                      "spend_share": "spend (a percent of revenue or ARR)"}
 
 
+def _edition_key(r: dict) -> tuple:
+    """(publisher, edition year) a row belongs to for pairing a share with its total. A republisher's row
+    that cites its original ("Example High 2025 SaaS Benchmarks") belongs to the original's edition."""
+    series = _lc(r.get("series") or r.get("source"))
+    cm = re.search(r"(?<!\d)((?:19|20)\d{2})(?!\d)", str(r.get("cited_source") or ""))
+    return (series, int(cm.group(1)) if cm else _year_num(r.get("report_year")))
+
+
 def derive_headcount_counts(rows: list[dict], cap: int = 12) -> list[str]:
     """Derived counts for the headcount mix table: a function's share of headcount times the total headcount
-    the SAME report prints for the same size band, statistic and data period, rounded to a whole person.
-    Each line names the share, the total and where both come from, and says it is derived. Nothing is stored
-    or changed; a share with no total in the same report, band, period and statistic gets no line (it is
-    shown as a share only). Medians do not multiply into a median count; the line says so."""
-    totals: dict[tuple, dict] = {}
+    the SAME edition prints for the same size band and data period, rounded to a whole person. A share row a
+    republisher prints for its original counts as that original's. The total with the same statistic is used
+    when there is one, else the median total (the line names both statistics). Each line names the share, the
+    total and where both come from, and says it is derived. Nothing is stored or changed; a share with no total
+    in the same edition, band and period gets no line (it is shown as a share only)."""
+    totals: dict[tuple, list[dict]] = {}
     for r in rows:
         if r.get("value_num") is None or not is_total_fte_row(r) or row_table_kind(r) != "headcount_count":
             continue
-        k = (r.get("report_slug"), _band_key(r["band"]), _lc(r["statistic"]), _year_num(r["data_period"]))
-        totals.setdefault(k, r)
-    out: list[str] = []
+        if _lc(r.get("data_period")).startswith("change"):
+            continue
+        k = (_edition_key(r), _band_key(r["band"]), _year_num(r["data_period"]))
+        totals.setdefault(k, []).append(r)
+    lines: list[str] = []
     seen: set = set()
     for r in rows:
         if r.get("value_num") is None or row_table_kind(r) != "headcount_share" or is_total_fte_row(r):
             continue
-        k = (r.get("report_slug"), _band_key(r["band"]), _lc(r["statistic"]), _year_num(r["data_period"]))
-        t = totals.get(k)
+        k = (_edition_key(r), _band_key(r["band"]), _year_num(r["data_period"]))
+        # A share from another report of the same publisher is not that report's total; only a republisher's row
+        # (it cites its original) is matched across reports.
+        cands = [x for x in (totals.get(k) or []) if x.get("report_slug") == r.get("report_slug") or r.get("cited_source")]
+        t = next((x for x in cands if _lc(x["statistic"]) == _lc(r["statistic"])), None) \
+            or next((x for x in cands if _lc(x["statistic"]) == "median"), None) or (cands[0] if cands else None)
         if t is None or (k, r["metric"]) in seen:
             continue
         seen.add((k, r["metric"]))
         count = int(r["value_num"] * t["value_num"] / 100 + 0.5)
-        out.append(f"{r['metric']} at {r['band'] or 'no band'} ({r['statistic'] or 'statistic not stated'}): about {count} people "
-                   f"(derived, not in report: {_num(r['value_num'])}% x {_num(t['value_num'])} total, rounded; share from {_ends(r)}, "
-                   f"total from {_ends(t)}; a product of two medians, not a median count)")
-        if len(out) >= cap:
+        stats = (f"a {_lc(r['statistic'])} share times a {_lc(t['statistic'])} total" if _lc(r["statistic"]) != _lc(t["statistic"])
+                 else f"a product of two {_lc(t['statistic']) or 'printed'} figures")
+        lines.append(f"{r['metric']} at {r['band'] or 'no band'} ({r['statistic'] or 'statistic not stated'}): about {count} people "
+                     f"(derived, not in report: {_num(r['value_num'])}% x {_num(t['value_num'])} total, rounded; share from {_ends(r)}, "
+                     f"total from {_ends(t)}; {stats}, not a median count)")
+        if len(lines) >= cap:
             break
-    return out
+    return lines
 
 
 def band_sort_key(band) -> tuple:

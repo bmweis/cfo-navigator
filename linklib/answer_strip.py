@@ -116,3 +116,20 @@ def strip_answer(text: str) -> tuple[str, list[dict]]:
     if _words(clean) < MIN_WORDS_LEFT:
         return text, [dict(r, action="kept_short") for r in record]
     return clean, record
+
+
+_LEFT_OUT_LINE = re.compile(r"^\s*(?:\*\*|_)?Left out \(not sent\)", re.I)
+
+
+def drop_left_out_without_table(text: str) -> tuple[str, list[dict]]:
+    """The closing "Left out (not sent): ..." line names rows that would have been in a figures table. An answer
+    with no table of figures (a definition, a how-to) has nothing the line could refer to, so the line is removed
+    and the removal is recorded like any other strip. (clean text, record)."""
+    if not text or any(l.lstrip().startswith("|") for l in text.split("\n")):
+        return text or "", []
+    lines = text.split("\n")
+    gone = [l for l in lines if _LEFT_OUT_LINE.match(l)]
+    if not gone:
+        return text, []
+    clean = re.sub(r"\n{3,}", "\n\n", "\n".join(l for l in lines if not _LEFT_OUT_LINE.match(l))).strip()
+    return clean, [{"sentence": g.strip()[:200], "pattern": "left-out line with no figures table", "action": "removed"} for g in gone]
