@@ -142,16 +142,18 @@ def test_first_answer_brings_the_bubble_and_top_button_stays_ask(live):
     _ask(pg, "First question")
     pg.wait_for_selector("#fu-q")
     assert pg.get_attribute("#ask-btn", "aria-label") == "Ask"
-    assert pg.locator("#ask-btn").is_disabled()          # the box is empty after a send
-    pg.fill("#ask-q", "Another")
-    assert pg.locator("#ask-btn").is_enabled()
     # The bubble is the last child of the thread: under the latest reply.
     assert pg.evaluate("document.getElementById('ask-thread').lastElementChild.id") == "fu"
     assert pg.evaluate("getComputedStyle(document.getElementById('fu')).position") == "sticky"
+    # A live conversation hides the top card entirely: there is no second Ask.
+    assert not pg.is_visible("#ask-btn")
     first = pg.evaluate("window.__calls[0]")
     assert first["conversation_id"] is None
-    # Sources are the top controls only: no depth tier, no cloned chips.
     assert first["sources"] == ["library", "feed"]
+    pg.click("#ask-new")
+    pg.fill("#ask-q", "Another")
+    assert pg.locator("#ask-btn").is_enabled()
+
 
 
 def test_follow_up_continues_the_conversation_and_top_box_starts_a_new_one(live):
@@ -164,7 +166,8 @@ def test_follow_up_continues_the_conversation_and_top_box_starts_a_new_one(live)
     pg.wait_for_selector("#fu-q")
     assert pg.evaluate("window.__calls[1].conversation_id") == "c1"
     assert pg.evaluate("window.__calls[1].question") == "A follow-up"
-    # Top box: a fresh conversation, the old thread is cleared first.
+    # New conversation: clears the thread, then the top box starts a fresh one.
+    pg.click("#ask-new")
     _ask(pg, "Something else entirely")
     pg.wait_for_function("window.__calls.length === 3")
     pg.wait_for_selector("#fu-q")
@@ -214,9 +217,9 @@ def test_limit_state_replaces_the_bubble_input_and_offers_a_new_question(live):
     assert pg.is_disabled("#fu-q") and pg.is_disabled("#fu-btn")
     assert pg.evaluate("getComputedStyle(document.getElementById('fu')).position") == "static"
     assert pg.get_attribute("#fu-btn", "aria-label") == "Ask follow-up"
+    pg.click("#ask-new")
     pg.fill("#ask-q", "A new question")
     assert pg.locator("#ask-btn").is_enabled()          # a new question is always possible
-    pg.click("#fu .fu-limit a")
     assert pg.locator("#fu").count() == 0
     assert pg.locator("#ask-thread .ask-answer").count() == 0
 

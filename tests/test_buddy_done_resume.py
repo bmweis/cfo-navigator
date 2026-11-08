@@ -108,7 +108,8 @@ def _open(html, width, height=900, path="/tools/fpa-buddy"):
     pg.route(re.compile(r"^http://buddy\.test/.*"), site.handle)
     pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
     pg.goto(ORIGIN + path)
-    pg.wait_for_selector("#ask-q")
+    # A resumed thread hides the entry card, so wait for it to exist, not to show.
+    pg.wait_for_selector("#ask-q", state="attached")
     pg.evaluate("var d = document.getElementById('pq-all'); if (d) d.open = true")
     return pw, browser, pg, site
 

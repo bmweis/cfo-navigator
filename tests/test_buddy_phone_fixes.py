@@ -198,6 +198,7 @@ def test_top_ask_and_start_new_question_clear_the_url(phone):
     _open(pg)
     _ask(pg, "First")
     assert pg.evaluate("new URL(location.href).searchParams.get('c')") == "c99"
+    pg.click("#ask-new")
     pg.fill("#ask-q", "Second, a new conversation")
     pg.click("#ask-btn")
     pg.wait_for_function("document.querySelectorAll('#ask-thread .ask-q-bubble').length === 1 && !!document.getElementById('fu-q')")

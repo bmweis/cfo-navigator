@@ -24699,6 +24699,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     <button type="submit" name="helpful" value="{pq_keep}" class="ask-ctl ask-ctl-sm ask-ctl-w">Search</button>
     <button type="submit" name="helpful" value="{pq_flip}" class="ask-ctl ask-ctl-sm ask-ctl-w" aria-pressed="{"true" if helpful_only else "false"}">Helpful only</button>
   </form>
+  <div id="ask-recent" style="display:none;"></div>
   <details id="pq-all" class="ask-pq-list"{pq_open}>
     <summary class="ask-pq-listsum"><span class="disclosure-caret" aria-hidden="true"></span><span class="ask-pq-heading">{pq_heading} ({pq_total})</span></summary>
     {pq_rows_html}
@@ -24828,6 +24829,13 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         if usage_html else
         '"intro" "example" "question"'
     )
+    # The "similar questions" card is its own grid item under the entry card, in the
+    # left column only. The example spans just the rows above it, so showing or
+    # hiding the suggestions never changes the example's height. Its row exists only
+    # while the card is shown (.has-sim), because an empty row would still add a gap.
+    _intro_areas_desktop_sim = _intro_areas_desktop + ' "sim ."'
+    _intro_rows_desktop_sim = _intro_rows_desktop + " auto"
+    _intro_areas_mobile_sim = _intro_areas_mobile + ' "sim"'
 
     body = f"""<div class="page page-standard" id="fpa-page">
 <p style="margin:0 0 12px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
@@ -24838,6 +24846,10 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     <h1 style="margin-bottom:6px;">FP&amp;A Buddy</h1>
     <p style="color:var(--ink-soft);margin:0 0 12px;font-size:15.5px;line-height:1.6;">Ask a real FP&amp;A question and get an answer with its sources, not half a day of Googling. It pulls from a research archive I curate by hand, and it remembers the thread, so you can follow up.</p>
     <p class="ask-teaser"><a href="/tools/fpa-buddy/how-it-works">How it works &rarr;</a></p>
+    <div class="fpa-live-actions" id="fpa-live-actions">
+      <button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="ask-new" onclick="doneThread()">New conversation</button>
+      <a href="/tools/fpa-buddy/questions">Past questions &rarr;</a>
+    </div>
   </div>
   <div class="fpa-intro-area-example">
     <div class="ask-example">
@@ -24882,16 +24894,14 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         <textarea id="ask-q" rows="5" autofocus placeholder="e.g. What frameworks do CFOs use for headcount planning in uncertain environments?">{pre_q}</textarea>
         <button type="button" class="fu-send ask-send" id="ask-btn" onclick="doAsk()" aria-label="Ask" title="Ask"{'' if q.strip() else ' disabled'}><span class="fu-send-dot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></button>
       </div>
-      <div id="ask-sim" class="ask-sim" hidden aria-live="polite"></div>
       <label class="ask-priv-opt"><input type="checkbox" id="ask-private"><span>Keep this question private</span></label>
       <p class="ask-priv-note">Shared with other users without your name. Admins can see every question. Leave out company names and figures you want kept confidential. <a href="/privacy">Privacy policy</a></p>
     </div>
   </div>
+  <div id="ask-sim" class="ask-sim fpa-intro-area-sim" hidden aria-live="polite"></div>
 </div>
 
 {past_questions_section}
-
-<div id="ask-recent" class="ask-section" style="display:none;"></div>
 
 <div id="ask-thread"></div>
 </div>
@@ -24973,12 +24983,26 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fpa-thread-open .fpa-intro-area-example{{display:none;}}
 .fpa-thread-open .fpa-intro-layout{{grid-template-columns:1fr;grid-template-rows:none;
   grid-template-areas:{_intro_areas_thread};}}
+/* A conversation is a chat: no entry card, no similar-questions card, no past-question
+   lists. Follow-ups go through the sticky bubble. After a failed FIRST turn the entry
+   card comes back (.fpa-retry) because the question was put back in its box. */
+.fpa-thread-open:not(.fpa-retry) .fpa-intro-area-question,
+.fpa-thread-open .fpa-intro-area-sim,
+.fpa-thread-open #past-questions,
+.fpa-thread-open #ask-recent{{display:none!important;}}
+.fpa-live-actions{{display:none;align-items:center;gap:14px;flex-wrap:wrap;margin-top:12px;}}
+.fpa-live-actions a{{font-size:14px;font-weight:600;color:var(--accent);}}
+.fpa-thread-open .fpa-live-actions{{display:flex;}}
+.fpa-intro-area-sim{{grid-area:sim;margin:0;}}
+.fpa-intro-layout.has-sim{{grid-template-areas:{_intro_areas_desktop_sim};
+  grid-template-rows:{_intro_rows_desktop_sim};}}
 .fpa-intro-area-intro{{grid-area:intro;}}
 .fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
 .fpa-intro-area-usage{{grid-area:usage;}}
 .fpa-intro-area-question{{grid-area:question;align-self:stretch;}}
 @media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;grid-template-rows:none;
-  grid-template-areas:{_intro_areas_mobile};}}}}
+  grid-template-areas:{_intro_areas_mobile};}}
+  .fpa-intro-layout.has-sim{{grid-template-areas:{_intro_areas_mobile_sim};grid-template-rows:none;}}}}
 
 /* Depth and Sources sit inside the question card, above the text box. Each has a
    visible header above its control (a real wrapping <label>). Two columns from
@@ -25121,7 +25145,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu{{position:sticky;bottom:8px;z-index:20;margin:16px 0 8px;max-width:88%;background:#fff;border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 -4px 24px rgba(11,31,77,.14);}}
 /* The limit message is not worth floating over the reply it follows. */
 .fu.fu-limited{{position:static;box-shadow:none;}}
-.ask-sim{{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:10px;}}
+.ask-sim{{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 20px;margin:0;}}
 .ask-sim h3{{font-size:15px;margin:0 0 4px;color:var(--navy);}}
 .ask-sim-sub{{font-size:13px;color:var(--muted);margin:0 0 10px;line-height:1.45;}}
 .ask-sim-item{{border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#fff;}}
@@ -25655,6 +25679,7 @@ function setConvoUrl(id) {{
 }}
 function resetConvo() {{
   convoGen++; asked = false; convoId = null; convoPrivate = false; setConvoUrl(null);
+  document.getElementById('fpa-page').classList.remove('fpa-retry');
   document.getElementById('ask-thread').innerHTML = '';
   var rec = document.getElementById('ask-recent');
   if (rec.innerHTML) rec.style.display = 'block';
@@ -25775,6 +25800,7 @@ function doneThread() {{
   var loading = !!document.querySelector('#ask-thread .ask-loading');
   var cid = convoId;
   convoGen++; asked = false; convoId = null; convoPrivate = false; setConvoUrl(null);
+  document.getElementById('fpa-page').classList.remove('fpa-retry');
   document.getElementById('ask-thread').innerHTML = '';
   topBusy = false; topSync();
   var rec = document.getElementById('ask-recent');
@@ -25793,7 +25819,7 @@ function doneThread() {{
       (function(el) {{ el.classList.add('recent-hl'); setTimeout(function() {{ el.classList.remove('recent-hl'); }}, 2500); }})(items[i]);
     }}
   }}
-  window.scrollTo({{top: 0, behavior: 'smooth'}});
+  window.scrollTo({{top: 0, behavior: 'auto'}});
 }}
 
 // --- Resume: recent conversations -------------------------------------------
@@ -25934,8 +25960,12 @@ async function resumeConvoById(cid) {{
 // always there. A second submit cancels a pending check; if the panel is already
 // showing for exactly this text, a submit asks. Any failure just asks.
 var simCtl = null, simShownFor = '';
+function simLayout(on) {{
+  var l = document.querySelector('.fpa-intro-layout'); if (l) l.classList.toggle('has-sim', on);
+}}
 function simHide() {{
   var p = document.getElementById('ask-sim'); if (p) {{ p.hidden = true; p.innerHTML = ''; }}
+  simLayout(false);
   simShownFor = '';
 }}
 function simItemHtml(x) {{
@@ -25963,7 +25993,7 @@ async function simCheck(q) {{
       '<p class="ask-sim-sub">Check one before this runs. It uses your depth and sources if you ask anyway.</p>' +
       d.suggestions.map(simItemHtml).join('') +
       '<button type="button" class="btn" id="ask-anyway" onclick="doAsk(false,true)">Ask anyway</button>';
-    p.hidden = false; simShownFor = q;
+    p.hidden = false; simLayout(true); simShownFor = q;
     return true;
   }} catch(e) {{ return false; }}
 }}
@@ -25994,6 +26024,7 @@ async function doAsk(followUp, skipSimilar) {{
     // before anything is sent (the old one stays in Recent conversations).
     asked = false; convoId = null; setConvoUrl(null);
     thread.innerHTML = '';
+    document.getElementById('fpa-page').classList.remove('fpa-retry');
   }}
   var topBtn = document.getElementById('ask-btn');
   var myGen = convoGen;
@@ -26020,6 +26051,8 @@ async function doAsk(followUp, skipSimilar) {{
   function done(state) {{
     if (stale()) return;          // Done was tapped while this ran: nothing to redraw
     topBusy = false; topSync();
+    // A failed first turn: the question is back in the entry box, so show the box again.
+    document.getElementById('fpa-page').classList.toggle('fpa-retry', state === 'none');
     fuRender(state);
   }}
   // Done was tapped while this question ran. The server has recorded it; show
