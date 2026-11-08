@@ -12049,3 +12049,29 @@ invalid header (the library message contains the header value).
 `webapp.app._cookie_health_state` and `_cf_cookie_cell_html` render the reason;
 `extract.cookie_var_state` distinguishes a missing from an empty variable.
 Tests: `tests/test_subscriber_check_reasons.py`.
+
+
+### Code-rendered tables, step 1: spend and gross margin (2026-11)
+
+`linklib/table_render.py` builds the spend and margins tables from the figure rows that were really sent; the model writes
+`{{table:spend}}` and `{{table:margins}}` where each belongs and never sees a table. **Order in `agent.answer_question`:**
+`extract_citations` -> `drop_unresolved_markers` -> `trim_to_full_sentence` (a trailing placeholder counts as a complete
+ending; a half-typed `{{...` is dropped) -> strip -> lint -> **render**. Rendering is last, so the strip and the lint only
+ever see what the model wrote; the stored answer, `result_json`, CSV and both markdown renderers (live JS `mdToHtml`, Python
+`answer_render._try_table`) read the final markdown and need no change. **Rows:** `Prestep.table_rows` is every picked row
+whose figure key made it into a document (`_figure_docs` returns each document's `keys`); `Prestep.table_kinds` says which
+tables the turn builds (a spend row = `row_table_kind` "spend_share" and not cost of revenue/gross margin; a margins row =
+"margin", or cost of revenue, COGS, hosting). Only when a kind is present do the placeholder note
+(`answer_rules.table_placeholder_note`) and the placeholder form of the shape rules (`answer_rules.shape_rules`) reach the
+model, so any other turn behaves as before. **Citation bridge:** each figures document's `sent` dict carries
+`identity` (slug, source, report, year); `benchmark_prestep.table_cite(citations, sent_docs)` returns a row's `[n]`, reusing
+the entry the prose already cited and otherwise appending an entry of the same shape with the next number, so every marker in
+a table resolves to a Sources entry and numbering stays contiguous. `extract_citations` and the stored citations shape are
+unchanged. **Fallbacks** (`render_tables`, recorded on the admin row at `prestep.tables.fallback`): a missing placeholder
+appends the table once at the end; a repeated one is dropped; an unknown one or one with no rows is removed. `tables.selfcheck`
+(flag-only) lists any rendered Value cell that is not a sent row's value. **Rules:** public (band-less) rows first, then bands
+smallest to largest by upper then lower edge, newest edition first inside a band, then median before other statistics; spend
+line items S&M, R&D, G&A, customer success, total opex, then others; a "target"/"plan"/estimate figure reads "target" in the
+Statistic column; the heading names the bases present; a range line per line item, basis and statistic is computed from the
+sent points whose bands overlap (at least two sources, each endpoint named and cited, targets and other bases never in it);
+the margins Segment column only appears when more than one segment does. Headcount counts and mix stay model-written (step 2).

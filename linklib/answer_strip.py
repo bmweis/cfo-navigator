@@ -125,7 +125,7 @@ def drop_left_out_without_table(text: str) -> tuple[str, list[dict]]:
     """The closing "Left out (not sent): ..." line names rows that would have been in a figures table. An answer
     with no table of figures (a definition, a how-to) has nothing the line could refer to, so the line is removed
     and the removal is recorded like any other strip. (clean text, record)."""
-    if not text or any(l.lstrip().startswith("|") for l in text.split("\n")):
+    if not text or any(l.lstrip().startswith("|") or l.lstrip().startswith("{{table:") for l in text.split("\n")):
         return text or "", []
     lines = text.split("\n")
     gone = [l for l in lines if _LEFT_OUT_LINE.match(l)]
