@@ -25819,7 +25819,7 @@ function doneThread() {{
       (function(el) {{ el.classList.add('recent-hl'); setTimeout(function() {{ el.classList.remove('recent-hl'); }}, 2500); }})(items[i]);
     }}
   }}
-  window.scrollTo({{top: 0, behavior: 'smooth'}});
+  window.scrollTo({{top: 0, behavior: 'auto'}});
 }}
 
 // --- Resume: recent conversations -------------------------------------------
