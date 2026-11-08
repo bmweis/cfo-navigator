@@ -56,6 +56,9 @@ SPLIT_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 FIGURES_CHARS = {"quick": 4000, "standard": 9000, "deep": 20000}
 CARD_CHARS = {"quick": 3000, "standard": 6000, "deep": 12000}
 FIGURE_FETCH_LIMIT = 150
+# The shift lookup sends nothing to the model, so it reads every matching row: a pair needs both editions, and the
+# newest-first cut at 150 left the older edition out whenever the newest one printed many rows.
+SHIFT_FETCH_LIMIT = 1000
 # What one part sends, and what the whole turn sends (Part B, 2026-11). 150 rows per part cost about
 # 15,000 input tokens; the rows beyond the cap are the oldest and least close, and the admin row says so.
 PART_ROWS_CAP = 40
@@ -169,6 +172,7 @@ class Prestep:
     outcome: str = ""
     figure_documents: list = field(default_factory=list)     # merged documents: [{"title","rows","parts"}]
     left_out_detail: dict = field(default_factory=dict)      # {report title: stored rows not sent}, whole turn
+    table_rows_shaped: int = 0                               # rows the org/spend table shaping left out (shape_for_tables); named in the closing line
     shifts: list = field(default_factory=list)               # computed shift lines sent to the model (figures.compute_shifts)
     shifts_suppressed: int = 0                               # shifts below the threshold, left out silently
     shifts_skipped: list = field(default_factory=list)       # cells skipped because a report prints two values
@@ -201,6 +205,7 @@ class Prestep:
                         "directional": x["directional"]} for x in self.shifts],
             "shifts_suppressed": self.shifts_suppressed, "shifts_skipped": self.shifts_skipped,
             "shifts_unpaired": self.shifts_unpaired, "shifts_outliers": self.shifts_outliers,
+            "table_rows_shaped": self.table_rows_shaped,
             "left_out_detail": dict(sorted(self.left_out_detail.items(), key=lambda kv: -kv[1])),
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
             "remaining_usd": None if self.remaining_usd is None else round(self.remaining_usd, 4),
@@ -719,6 +724,67 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
     return [rows[i] for i in sorted(chosen)]
 
 
+# Rows of each kind the org-structure and spend-profile tables hold. The model writes the tables, so every row sent is
+# a row it writes: on id 53 the four tables held 5 + 12 + 12 + 3 rows and the answer hit the 2,500-token ceiling.
+# The choice is made here, in code, before the model sees the rows; rows not sent are named in the closing line.
+SPEND_ROWS_PER_LINE = 2
+
+
+def _spend_rank(r: dict) -> tuple:
+    b = fg.parse_band(r.get("band"))
+    width = (b["hi"] - b["lo"]) if b and b["hi"] != float("inf") else 1e18
+    return (fg._MATCH_RANK[r["match"]], bool(r.get("band_context")), width, -fg._year_num(r.get("data_period")),
+            -fg._year_num(r.get("report_year")), r["source"], str(r.get("figure_key")))
+
+
+def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
+    """(ids of the rows to keep, rows dropped) for a turn that writes the org-structure and spend-profile tables.
+    Headcount mix: one edition per publisher, the newest, at its newest data period (never two editions in one
+    column). Spend: at most SPEND_ROWS_PER_LINE rows per line item, one per publisher first, the closest band
+    first (exact before adjacent, a band that fits the asked size before a wider one), newest period first.
+    Headcount counts and margins are kept as they are. Nothing is changed in a row."""
+    keep = {id(r) for r in rows}
+    drop: list[dict] = []
+    share = [r for r in rows if fg.row_table_kind(r) == "headcount_share"]
+    newest: dict[str, int] = {}
+    for r in share:
+        pub = fg._edition_key(r)[0]
+        newest[pub] = max(newest.get(pub, -1), fg._edition_key(r)[1])
+    latest_period: dict[tuple, int] = {}
+    for r in share:
+        k = fg._edition_key(r)
+        if k[1] == newest[k[0]]:
+            latest_period[k] = max(latest_period.get(k, -1), fg._year_num(r.get("data_period")))
+    for r in share:
+        k = fg._edition_key(r)
+        if k[1] != newest[k[0]] or fg._year_num(r.get("data_period")) != latest_period.get(k, -1):
+            keep.discard(id(r))
+            drop.append(r)
+    by_line: dict[tuple, list[dict]] = {}
+    for r in rows:
+        if fg.row_table_kind(r) == "spend_share":
+            by_line.setdefault(_item_key(r), []).append(r)
+    for grp in by_line.values():
+        grp.sort(key=_spend_rank)
+        chosen: list[dict] = []
+        pubs: set = set()
+        for r in grp:                                   # one row per publisher first
+            pub = _norm(r.get("series") or r["source"])
+            if pub not in pubs and len(chosen) < SPEND_ROWS_PER_LINE:
+                pubs.add(pub)
+                chosen.append(r)
+        for r in grp:
+            if len(chosen) >= SPEND_ROWS_PER_LINE:
+                break
+            if r not in chosen:
+                chosen.append(r)
+        for r in grp:
+            if r not in chosen:
+                keep.discard(id(r))
+                drop.append(r)
+    return keep, drop
+
+
 def allocate_caps(subs: list[Sub]) -> dict[int, int]:
     """Row cap per part: each part up to PART_ROWS_CAP, all parts together up to TURN_ROWS_CAP.
     A part that needs less than its share leaves the rest to the others."""
@@ -754,6 +820,18 @@ def lookup(lib, sub: Sub, tier: str, reports: dict, *, over_time: bool = False,
     build(lib, sub, tier, reports, row_cap if row_cap is not None else PART_ROWS_CAP)
 
 
+def metric_segment(lib, metric: str, sub: Sub, segment: str, include_illustrative: bool = False) -> str:
+    """The segment to search THIS metric with: the sub-question's segment only when this metric's own stored rows
+    print it. A segment some other metric prints ("Enterprise" on a gross-margin row) narrows a headcount lookup
+    to nothing and flags every report without it "different segment". gather() and the shift lookup both use this,
+    so the figures sent and the shifts computed come from the same rows."""
+    if not segment:
+        return ""
+    probe = fg.find_figures(lib, metric, band=sub.band or None, all_editions=True, limit=SHIFT_FETCH_LIMIT,
+                            include_illustrative=include_illustrative, basis_hint=sub.text)
+    return segment if any(_norm(r["segment"]) == _norm(segment) for r in probe["rows"]) else ""
+
+
 def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool = False) -> None:
     """Find the rows for one part (sub.candidates, best first) and the notes. Reads only."""
     names = list(sub.metrics)
@@ -765,13 +843,7 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
     if sub.segment and not segment:
         sub.segment_dropped = sub.segment
     for m in names:
-        seg_m = segment
-        if seg_m:
-            # The segment must be used by THIS metric's stored rows, not just by some other metric's.
-            probe = fg.find_figures(lib, m, band=sub.band or None, all_editions=True, limit=FIGURE_FETCH_LIMIT,
-                                    include_illustrative=include_illustrative, basis_hint=sub.text)
-            if not any(_norm(r["segment"]) == _norm(seg_m) for r in probe["rows"]):
-                seg_m = ""
+        seg_m = metric_segment(lib, m, sub, segment, include_illustrative)
         if sub.segment and not seg_m:
             sub.segment_dropped = sub.segment
             sub.notes.append(f"Segment not used by the data: {sub.segment}. The figures below are not narrowed to it.")
@@ -1201,6 +1273,21 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
     caps = allocate_caps(todo)
     for s in todo:
         pick(lib, s, tier, caps.get(id(s), PART_ROWS_CAP))
+    if any(m in fg.SHAPE_LABELS for s in ps.subs for m in s.metrics):
+        # One choice for the whole turn: a row two parts picked is kept or dropped for both.
+        union = list({(r["report_slug"], r["figure_key"]): r for s in todo for r in s.picked}.values())
+        keep_ids, dropped = shape_for_tables(union)
+        gone = {(r["report_slug"], r["figure_key"]) for r in dropped}
+        if gone:
+            for s in todo:
+                out = [r for r in s.picked if (r["report_slug"], r["figure_key"]) in gone]
+                s.picked = [r for r in s.picked if (r["report_slug"], r["figure_key"]) not in gone]
+                s.also_stored += out
+                s.rows = len(s.picked)
+                s.match_mix = {}
+                for r in s.picked:
+                    s.match_mix[r["match"]] = s.match_mix.get(r["match"], 0) + 1
+            ps.table_rows_shaped = len(gone)
     fdocs = merge_figure_docs(todo, tier, reports)
     ps.figure_documents = [{"title": d["title"], "rows": d.get("rows", 0), "parts": d.get("parts", [])} for d in fdocs]
     holder = next((s for s in todo if s.picked), None)
@@ -1270,8 +1357,9 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
         seg = fg.usable_segment(lib, s.segment)
         for m in s.metrics:
             try:
-                res = fg.find_figures(lib, m, band=s.band or None, segment=seg or None, all_editions=True, recent_window=True,
-                                      limit=FIGURE_FETCH_LIMIT, basis_hint=s.text)
+                seg_m = metric_segment(lib, m, s, seg)
+                res = fg.find_figures(lib, m, band=s.band or None, segment=seg_m or None, all_editions=True, recent_window=True,
+                                      limit=SHIFT_FETCH_LIMIT, basis_hint=s.text)
             except Exception:
                 _log.exception("shift lookup failed for %r", m)
                 continue
