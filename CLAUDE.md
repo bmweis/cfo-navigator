@@ -13768,3 +13768,14 @@ subscription.
 
 
 - **Shifts, round 5 (2026-11, after ids 54 to 56).** The id 55 "no headcount shift" was the 4-line cap on a list sorted by raw size, not a pairing failure; the code now chooses and orders the printed shifts (`figures.rank_shifts`: headline series first, then a named cohort, then other cohorts; median first; one per metric family before a second), the model prints the first two. Estimate/forecast/target endpoints never pair (named in `shifts_skipped`); quartile shifts are left out unless asked; `shifts_unpaired_groups` names up to 10 groups per reason; "excluded" is segment noise. A headcount share whose function is in the segment is now named in the derived-count lines (six functions used to collapse into one unnamed line), and `answer_lint.function_share_problems` flags a function label on another function's share. Lint: a scope sentence with a year or band under "What shifted" is not a figure; `inference_problems` flags unsourced inference about the user's own company; the answer rules ban "down from/rose/fell" with no computed line and that inference. Not built (report only): the "Match note" column (the `match:` tag on every figure line plus PRESTEP_RULES telling the model to explain non-exact tags), code-rendered tables, spend as a range. No schema change. See `tests/test_round5_shifts.py`.
+
+- **Code-rendered tables, step 1: spend and gross margin (2026-11).** The model writes `{{table:spend}}` / `{{table:margins}}`;
+  `linklib/table_render.py` replaces them with markdown tables built from the sent rows, after strip and lint (so the model's
+  own tables are still linted, rendered ones are not). Citation numbers: `benchmark_prestep.table_cite` reuses the number the
+  prose cited or appends a Sources entry of the same shape; `extract_citations` is unchanged. Fallback for a missing, repeated or
+  unknown placeholder is recorded at `prestep.tables.fallback` on the admin row, and `tables.selfcheck` is flag-only. A turn
+  with no spend or margin rows behaves exactly as before. Headcount counts and mix are still model-written (step 2, Brian's call
+  after the Part F report). Known, unchanged: `PRESTEP_RULES`' "Table mechanics" still lists a "match note" column for
+  model-written tables, which is where id 58's Match note column came from. Pre-existing and not touched: a citation with no
+  link renders plain `[n]` in the Python twin and as `<sup>` in the live JS. Tests: `tests/test_table_render.py`.
+
