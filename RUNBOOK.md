@@ -425,17 +425,29 @@ The page kicks a background re-check when the stored status is missing or
 older than 12 hours, so just loading it is usually enough. Press the button
 to force one.
 
-Each domain reports one of three states:
+Each domain reports one of three states (working, expired, untested).
+Each check now records a **reason** from a closed list (2026-11), shown in the
+feed's Cookie cell under the status, plus HTTP status, where the response ended
+up (host and path only), the cookie **names** and header byte length the app
+holds, and whether the header was sent to the test post's host. Cookie values
+are never stored or shown.
 
-<!-- The `detail` strings below are copied verbatim from authcheck.check_auth_cookies
-     so they match what the panel actually prints. The spaced em dash in the
-     "expired" row is the code's own; don't normalize it. -->
+| Reason | Meaning |
+|---|---|
+| Cookie accepted | Full text came back. Status **working**. |
+| Rejected: HTTP 401 or 403 | The site refused the request. A stale or wrong login. |
+| Redirected to login | The post sent the request to a sign-in page. |
+| Bot challenge (Cloudflare or similar) | The site blocked this server before looking at the login. A fresh cookie alone may not fix it. |
+| Paywall text returned | The post loaded but showed the preview. Cookie missing, stale or not accepted. |
+| Cookie not sent (test post is on another host) | The probe's post is not on the cookie's domain, so the header was not attached. Not a stale login. |
+| Variable has a line break or unsupported character | The pasted value cannot be sent as a header. Re-paste it on one line. |
+| Could not reach the site (timeout or DNS) | Network failure, not a cookie problem. |
+| Unexpected response (HTTP nnn) | Anything else. |
+| No recent post found to test | Status **untested**; see 5.5. |
 
-| State | `detail` reads | Meaning |
-|---|---|---|
-| **working** | `full text fetched (N chars)` | Cookie is good. |
-| **expired** | `got a preview/paywall — cookie missing or expired` | **This runbook.** |
-| **untested** | `no recent post found to test` | The probe found no post to check. Not a cookie failure—see 5.5. |
+Every reason except "Cookie accepted" and "No recent post found to test" still
+shows as **expired** (red). That is the original rule, kept on purpose; the
+reason is what says whether the login is actually stale.
 
 The feed table's **Cookie** column is a computed, read-only indicator—it
 drives nothing, does not gate fetching, and is not what the probe reads.
@@ -557,7 +569,7 @@ container.
 1. Open `/admin/reader/feeds`.
 2. Press **Re-check subscriber access** (don't rely on the 12-hour
    auto-refresh—you want a probe against the new value, now).
-3. The domain should flip to **working**, with `full text fetched (N chars)`.
+3. The domain should flip to **working**, reason "Cookie accepted".
    The coral panel disappears once no domain is left in the expired state.
 
 If it still reads expired: the cookie was probably copied from a logged-out

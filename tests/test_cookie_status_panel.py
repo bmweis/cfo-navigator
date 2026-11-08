@@ -303,7 +303,7 @@ def test_the_expired_panel_no_longer_repeats_the_domains(app_env):
     coral = html[i:html.index("</div>", html.index("</ol>", i))]
     for dom in DOMAINS:
         assert dom not in coral
-    assert "To refresh an expired cookie" in html
+    assert "refresh the cookie" in html
 
 
 def test_nothing_renders_when_no_cookies_are_configured(monkeypatch, tmp_path):

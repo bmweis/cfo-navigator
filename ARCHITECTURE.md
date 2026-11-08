@@ -12030,3 +12030,22 @@ Not shipped: raising `TURN_ROWS_CAP` from 80 to 120. On the id-36 fixture one me
 - **Per-report edit page (`/admin/reader/figures/<slug>/edit`, follow-up to #765).** The report list on `/admin/reader/figures` is read-only: Report (slug beneath), Source, Year, Rows stored, Loaded, Landing URL (short link and how it resolved, or "Not set"), Republished from (with its metric text, or a dash) and an Edit link under a column headed Actions. Below 700px the table becomes labelled cards (`.fg-reports`, the `.bk-stack` pattern). The old inline `POST .../landing` and `POST .../cited-source` routes are gone (no redirect). `GET/POST .../<slug>/edit` (`_figures_edit_page`, `admin_figures_edit_save`, `.page-standard`, form capped at 900px) edits Source, Report title, Year (four digits), Landing URL, Republished from and Only for metrics containing in one save through `Library.save_benchmark_report_edit` (one transaction; a refused value writes nothing and re-renders with the typed values at 400; one audit row names the changed fields). **The slug is shown read-only**: stored figures, the digest `?digest=` link and the zip loader all key on it. **Edits stick across a reload:** the loader (`replace_benchmark_report`) rewrites `source`, `report` and `report_year` from the CSV every time, so the page stores the three name fields in new columns `source_override`, `report_override`, `year_override` (idempotent `ALTER TABLE`), which the loader's upsert never lists. An override is stored only when it differs from the CSV value, so clearing a box or typing the file value back returns to the file. `Library.effective_report` / `list_benchmark_reports` return the effective value in `source`/`report`/`report_year` and the file's under `*_loaded`; `figures.apply_report_overrides` applies the same values to stored figure rows when `find_figures` and `coverage` read them (rows stay verbatim in the table), so Sources titles, edition windows and the republished-from matching follow the edit. Landing URL and Republished from were already loader-proof (`landing_url_manual`, `cited_source`). Nothing is cached, so there is nothing to refresh on save.
 
 **FP&A Buddy live conversation is a chat surface (2026-11).** `fpa-thread-open` on `#fpa-page` (a MutationObserver on `#ask-thread`) now hides the whole entry card, the similar-questions card, the past-questions section and Recent conversations; `.fpa-live-actions` ("New conversation" = `doneThread()`, "Past questions" link) shows instead. `fpa-retry` (set by `done('none')` on a failed first turn, cleared by `doneThread`, `resetConvo` and a new top ask) re-shows the entry card so a failed ask stays retryable. `#ask-sim` is a direct child of `.fpa-intro-layout` in a `sim` grid row that exists only under `.has-sim` (`simLayout(on)`), so the example panel's height does not change; Recent conversations is rendered above `#pq-all`. The follow-up bubble is unchanged. See CLAUDE.md and `tests/test_buddy_chat_surface.py`.
+
+### Subscriber check reasons (2026-11)
+
+`authcheck.check_auth_cookies` probes one recent post per cookie domain through
+the same `extract.fetch_page` (and so the same `_cookie_for` header) the Reader
+backfill uses. `fetch_page` now also records `http_status`, `final_url`,
+`redirected` and, on an HTTP error, `challenge` (bot-challenge body markers or
+a `cf-mitigated: challenge` header). `authcheck.classify_probe` turns that into
+`(ok, reason)` where `ok` is the original rule unchanged (full text and not
+paywalled) and `reason` is one of `authcheck.REASONS`. The record in
+`settings.auth_cookie_status` gains `reason`, `reason_text`, `http_status`,
+`final_host`, `final_path`, `post_host`, `cookie_sent`, `cookie_names`,
+`cookie_name_count`, `cookie_bytes`, `cookie_quoted`; no schema change, old
+records without them render "Reason not recorded". Never stored: cookie values,
+query strings. `extract._describe_fetch_error` returns a fixed string for an
+invalid header (the library message contains the header value).
+`webapp.app._cookie_health_state` and `_cf_cookie_cell_html` render the reason;
+`extract.cookie_var_state` distinguishes a missing from an empty variable.
+Tests: `tests/test_subscriber_check_reasons.py`.
