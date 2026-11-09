@@ -37,7 +37,7 @@ EVERY_TURN = {
 }
 # Figures mechanics stay in the figures block.
 FIGURES_ONLY = {
-    "table columns": ["metric, band as printed, statistic", "value, report and year, match note"],
+    "table columns": ["metric, band as printed, statistic", "value, report and year. Six rows", "no match column, no note column"],
     "period exactly as given": ["exactly as the figures give it", "only from numbers shown", "Count the years"],
     "newest edition and change table": ["newest edition", "every edition in one small table, oldest to newest"],
 }

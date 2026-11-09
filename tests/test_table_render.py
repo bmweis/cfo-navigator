@@ -77,8 +77,8 @@ def test_order_is_line_item_then_band_size_then_newest_edition():
     md, _ = tr.build_spend(rows, lambda _r: None)
     body = [l.split("|") for l in table_lines(md)[2:]]
     assert [(c[1].strip(), c[2].strip(), c[4].strip()) for c in body] == [
-        ("S&M", "All sizes", "36%"), ("S&M", "$5M-$25M", "39%"), ("S&M", "$5M-$25M", "40%"),
-        ("S&M", "$50M+", "35%"), ("R&D", "$20M-$50M", "30%")]
+        ("S&M", "All sizes", "36%"), ("S&M", "$5-25M", "39%"), ("S&M", "$5-25M", "40%"),
+        ("S&M", "$50M+", "35%"), ("R&D", "$20-50M", "30%")]
 
 
 def _spend_row(**kw):
@@ -151,7 +151,7 @@ def test_adjacent_band_is_labelled():
              value="30", unit="percent", denominator="percent of revenue", statistic="median")
     r.update(figure_key=1, report_slug="x", match="adjacent_band", gaps=[], series="Example Capital", also_printed_in=[], basis_group="revenue")
     md, _ = tr.build_spend([r], lambda _r: 1)
-    assert "$20M-$100M (adjacent band)" in md
+    assert "$20-100M (adjacent band)" in md
 
 
 def _row(**kw):
@@ -172,7 +172,7 @@ def test_margins_public_first_then_bands_small_to_large_newest_first():
             _row(figure_key=5, band="$25M-$50M", value="71", source="B", report_year="2025")]
     md, _ = tr.build_margins(rows, lambda _r: None)
     bands = [l.split("|")[2].strip() for l in table_lines(md)[2:]]
-    assert bands == ["All sizes", "$5M-$25M", "$5M-$25M", "$25M-$50M", "$50M+"]
+    assert bands == ["All sizes", "$5-25M", "$5-25M", "$25-50M", "$50M+"]
     # inside one band the newest edition leads
     vals = [l.split("|")[4].strip() for l in table_lines(md)[2:]]
     assert vals[1:3] == ["73%", "72%"]
@@ -247,7 +247,7 @@ def test_the_answer_text_carries_the_final_markdown_and_the_python_renderer_show
     ans, _ = run_turn(lib, monkeypatch, PROSE)
     assert "{{" not in ans.text
     html = render_answer_markdown(ans.text, ans.citations)
-    assert html.count("<table>") == 2 and "<th>Line item</th>" in html and 'data-label="Value"' in html
+    assert html.count("<table>") == 3 and "<th>Line item</th>" in html and 'data-label="Value"' in html
 
 
 NODE = shutil.which("node")
@@ -269,7 +269,7 @@ def test_the_live_js_renderer_matches_the_python_twin_on_a_rendered_table(lib, m
                       "\nprocess.stdout.write(mdToHtml(require('fs').readFileSync(0,'utf8')));")
     live = subprocess.run([NODE, str(script)], input=ans.text, capture_output=True, text=True, check=True).stdout
     assert render_answer_markdown(ans.text, cites) == live
-    assert live.count("<table>") == 2
+    assert live.count("<table>") == 3
 
 
 # --- prompt and lint ---------------------------------------------------------------------------------------------

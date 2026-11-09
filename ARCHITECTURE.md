@@ -12076,6 +12076,11 @@ Statistic column; the heading names the bases present; a range line per line ite
 sent points whose bands overlap (at least two sources, each endpoint named and cited, targets and other bases never in it);
 the margins Segment column only appears when more than one segment does. Headcount counts and mix stay model-written (step 2).
 
+
+#### Code-rendered tables, step 2: total headcount and headcount mix
+
+`linklib/table_render.py` builds four tables from the rows that were really sent (placeholders `{{table:headcount}}`, `{{table:mix}}`, `{{table:spend}}`, `{{table:margins}}`, rendered after strip and lint). `pick_rows` (linklib/benchmark_prestep.py) keeps a publisher's headcount mix whole through `mix_units`, which adds the unit's extra rows to the row cap. `figures.mix_function_ok` and the widened `_SHARE_PREFIX` decide which share rows name a function. `render_tables` records `fallback`, `selfcheck` (flag-only: every number cell equals a sent row's value or a derived count; `mix_selfcheck` ties each function label to its own share) and `not_in_table` on the admin row; `cite_shifts` adds the endpoint report markers to computed shift lines. `answer_rules.shape_rules` and `table_placeholder_note` name the two new placeholders. No schema change.
+
 ### FP&A Buddy page layout fixes (2026-11)
 
 UI only; the answer pipeline is untouched. `/tools/fpa-buddy/questions` and `/ask/history` stay on `.page-standard` (the main Buddy page's tier) but no longer wrap their content in `.tool-prose` (760px); an `.ask-list-page` wrapper caps only the search row (640px) and answer text (820px), via `_ASK_LIST_PAGE_CSS`. In `_pq_row_html`, Hide, Make private and Resume render in one `.ask-pq-foot` container, Hide first; the footer is `flex-wrap:wrap`, so on a phone Hide stays first. Hide exists only on past-question rows (the live conversation footer and `/ask/history` have none). The sample card (`webapp/buddy_example.py`, unchanged text) clips its answer at 120px until "Show full answer", is `align-self:start` beside the form on a desktop (no stretch to the form's height), and on a phone its grid area comes after the form and the similar-questions card (`_intro_areas_mobile`, `_intro_areas_mobile_sim`). Tests: `tests/test_buddy_layout_fixes.py`, `tests/test_buddy_real_example.py`.
