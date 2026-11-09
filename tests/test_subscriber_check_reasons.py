@@ -247,7 +247,8 @@ def appmod(tmp_path, monkeypatch):
 def test_cell_shows_reason_status_names_and_never_the_value(appmod, lib, monkeypatch):
     _stub(monkeypatch, _resp(403, CF_BODY))
     status = {DOMAIN: _check(lib)}
-    html = appmod._cf_cookie_cell_html(DOMAIN, True, status, "Mostly Metrics")
+    html = (appmod._cf_cookie_cell_html(DOMAIN, True, status, "Mostly Metrics")
+            + appmod._cf_lastcheck_cell_html(DOMAIN, True, status, "Mostly Metrics"))
     assert "expired" in html and "Bot challenge (Cloudflare or similar)" in html
     assert "HTTP 403" in html and "2 cookies (token, _px3)" in html and "bytes" in html
     assert SECRET not in html
@@ -256,7 +257,7 @@ def test_cell_shows_reason_status_names_and_never_the_value(appmod, lib, monkeyp
 def test_cell_for_an_old_record_says_reason_not_recorded(appmod):
     status = {DOMAIN: {"ok": False, "checked_at": "2026-11-08T00:00:00+00:00",
                        "detail": "got a preview/paywall"}}
-    html = appmod._cf_cookie_cell_html(DOMAIN, True, status, "MM")
+    html = appmod._cf_lastcheck_cell_html(DOMAIN, True, status, "MM")
     assert "Reason not recorded" in html
 
 

@@ -2207,6 +2207,11 @@ _TABLE_FLOOR_NARROW = 480    # 2-3 columns
 _TABLE_FLOOR_MEDIUM = 640    # 4-5 columns
 _TABLE_FLOOR_WIDE = 800      # 6-7 columns
 _TABLE_FLOOR_XWIDE = 960     # 8+ columns
+_TABLE_FLOOR_FEEDS = 1380    # The feeds table: nine columns, two of them wide
+                             # (Cookie 190 + Last check 320), so the other seven
+                             # need about 870px between them (2026-11). A named
+                             # exception, like the voice review queue's; the
+                             # frame scrolls sideways below it.
 
 # Per-column widths by FIELD TYPE (not by table) — the natural next step
 # after the floors above: a floor keeps a whole table from squeezing itself
@@ -2289,6 +2294,12 @@ _COL_WIDTH_REPORT_TITLE = 420  # A report or digest title, which can run to 90+
                               # grows to the longest title and the .table-frame
                               # scrolls sideways, which Brian prefers to wrapped
                               # titles (2026-10).
+_COL_WIDTH_LAST_CHECK = 320   # The feeds table's Last check column: reason, then
+                              # "HTTP 200 · /p/slug-…-end", then the cookie
+                              # names and size, each on one line (2026-11).
+                              # Measured so the cell holds to three lines at
+                              # 1280px; the full path and the comparison line
+                              # sit in the cell's own Details fold.
 _COL_WIDTH_STATUS_AGE = 190   # A status word PLUS a relative-age readout on
                               # the same line (e.g. the feeds admin table's
                               # Cookie column: a dot, "inconclusive", " · ",
@@ -31315,16 +31326,86 @@ def _cf_cookie_cell_html(domain: str, configured: bool, status: dict, feed_name:
         return (f'<span aria-label="Cookie for {_esc(feed_name)}: configured, not yet checked" '
                 f'title="A cookie is configured but the re-check button above hasn\'t probed it yet." '
                 f'style="color:{st["color"]};font-size:13px;">Not yet checked</span>')
-    head = (f'<span style="display:inline-flex;align-items:center;gap:5px;">'
+    return (f'<div aria-label="Cookie for {_esc(feed_name)}: {st["label"]}, checked {st["age"]}" '
+            f'style="font-size:13px;display:inline-flex;align-items:center;gap:5px;">'
             f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{st["color"]};flex:none;" aria-hidden="true"></span>'
             f'<span style="color:{st["color"]};">{st["label"]}</span>'
-            f'<span style="color:var(--muted);">&middot; {_esc(st["age"])}</span></span>')
-    reason = (f'<div style="color:var(--ink-soft);font-size:12px;line-height:1.4;margin-top:3px;">'
-              f'{_esc(st["reason_text"] or "Reason not recorded (re-check)")}</div>')
-    facts = (f'<div style="color:var(--muted);font-size:11.5px;line-height:1.4;overflow-wrap:anywhere;">'
-             f'{_esc(st["facts"])}</div>') if st["facts"] else ""
-    return (f'<div aria-label="Cookie for {_esc(feed_name)}: {st["label"]}, checked {st["age"]}" '
-            f'title="{_esc(st["detail"])}" style="font-size:13px;">{head}{reason}{facts}</div>')
+            f'<span style="color:var(--muted);">&middot; {_esc(st["age"])}</span></div>')
+
+
+def _shorten_middle(text: str, limit: int) -> str:
+    """Shorten `text` to `limit` characters with an ellipsis in the middle,
+    keeping both ends ("/p/duration-risk-…-most-exposed"). The full text is
+    always shown elsewhere in the cell's Details fold, never only in a tooltip."""
+    if len(text) <= limit:
+        return text
+    keep = limit - 1
+    head = keep // 2 + keep % 2
+    tail = keep // 2
+    return text[:head] + "\u2026" + (text[len(text) - tail:] if tail else "")
+
+
+_LAST_CHECK_PATH_CHARS = 30   # a path longer than this is shortened in the cell
+
+
+def _cf_lastcheck_cell_html(domain: str, configured: bool, status: dict, feed_name: str) -> str:
+    """Last check column (2026-11): the reason first, then one line with the
+    HTTP status and where the check ended up, then one line with what was sent
+    (cookie names and size, never values). Three lines at the column's width.
+    The full host and path, the matched paywall marker and the with-and-without
+    cookie comparison live in a Details fold in the same cell (a native
+    <details>, so it works on touch). Every state says something; nothing is
+    blank."""
+    if not domain:
+        return '<span style="color:var(--muted);font-size:13px;">&mdash;</span>'
+    st = _cookie_health_state(domain, configured, status)
+    if not st["configured"]:
+        # No variable: the Cookie column already says so (a dash or "Variable
+        # empty"), so this cell keeps the dash.
+        return '<span style="color:var(--muted);font-size:13px;">&mdash;</span>'
+    if st["state"] == "unchecked":
+        return '<span style="color:var(--muted);font-size:12.5px;">Not checked</span>'
+    s = status.get(domain) or {}
+    line1 = st["reason_text"] or "Reason not recorded (re-check)"
+    if s.get("reason") == "paywall":
+        from linklib.authcheck import REASONS as _REASONS
+        line1 = _REASONS["paywall"]
+    http = f"HTTP {s['http_status']}" if s.get("http_status") else "No response"
+    fh, fp = s.get("final_host") or s.get("post_host") or "", s.get("final_path") or ""
+    own = domain
+    shown_host = "" if (fh[4:] if fh.startswith("www.") else fh) == own else fh
+    where = f"{shown_host}{_shorten_middle(fp, _LAST_CHECK_PATH_CHARS)}" if (fh or fp) else ""
+    line2 = f"{http} \u00b7 {where}" if where else http
+    n = s.get("cookie_name_count")
+    if n is not None and "cookie_bytes" in s:
+        shown = s.get("cookie_names") or []
+        names = ", ".join(shown)
+        if n - len(shown) > 0:
+            names += f" and {n - len(shown)} more"
+        line3 = (f"{n} cookie{'s' if n != 1 else ''}" + (f" ({names})" if names else "")
+                 + f", {s['cookie_bytes']:,} bytes"
+                 + ("" if s.get("cookie_sent", True) else ", not sent to this host"))
+    else:
+        line3 = "Cookie details not recorded (re-check)"
+    detail_bits = [f"Full address: {fh}{fp}" if (fh or fp) else "",
+                   f"Matched paywall wording: {s['paywall_marker']}" if s.get("paywall_marker") else "",
+                   s.get("compare_text") or "",
+                   st["reason_text"] if line1 != st["reason_text"] else ""]
+    detail_html = "".join(f'<div style="margin-top:3px;overflow-wrap:anywhere;">{_esc(b)}</div>'
+                          for b in detail_bits if b)
+    lines = (f'<div style="color:var(--ink-soft);">{_esc(line1)}</div>'
+             f'<div style="color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_esc(line2)}</div>'
+             f'<div style="color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_esc(line3)}</div>')
+    if not detail_html:
+        return f'<div style="font-size:12px;line-height:1.45;">{lines}</div>'
+    # The three lines ARE the summary of a native <details>, so tapping the
+    # cell opens the full address, matched wording and comparison line below
+    # (works on touch; a tooltip would not). Still three lines when closed.
+    return (f'<details class="ff-lc-fold" style="font-size:12px;line-height:1.45;">'
+            f'<summary aria-label="Last check for {_esc(feed_name)}, tap for details" '
+            f'style="cursor:pointer;">{lines}</summary>'
+            f'<div style="color:var(--ink-soft);font-size:11.5px;line-height:1.4;margin-top:4px;">{detail_html}</div>'
+            f'</details>')
 
 
 def _auth_cookie_controls(request: Request,
@@ -31378,10 +31459,10 @@ def _auth_cookie_controls(request: Request,
         return recheck_form, "", status
 
     from linklib.extract import _cookie_env_var
-    stale_vars = ", ".join(f"<code>{_esc(_cookie_env_var(d))}</code>" for d in stale)
     reason_lines = "".join(
         f'<li><code>{_esc(_cookie_env_var(d))}</code>: '
         f'{_esc(status[d].get("reason_text") or "reason not recorded, re-check")}'
+        + (f'. {_esc(status[d]["compare_text"])}' if status[d].get("compare_text") else "")
         + "</li>" for d in stale)
     challenge_note = ""
     if any(status[d].get("reason") in ("bot_challenge", "not_sent", "bad_header") for d in stale):
@@ -31389,16 +31470,42 @@ def _auth_cookie_controls(request: Request,
                           'A bot challenge means the site blocked this server before checking the login, '
                           'so a fresh cookie alone may not fix it. A not-sent or line-break reason '
                           'is a variable problem, not a stale login.</p>')
-    refresh_steps = (f"""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">Why the last check failed:</p>
-<ul style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">{reason_lines}</ul>{challenge_note}
-<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">If the reason is a rejected or stale login, refresh the cookie:</p>
-<ol style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">
-<li>Log into the site.</li>
-<li>Open DevTools &rarr; <strong>Network</strong>, then reload.</li>
-<li>Click the request to the domain.</li>
-<li>Copy the full <code>Cookie:</code> header.</li>
-<li>Update {stale_vars} in Railway &rarr; Variables.</li>
-</ol>""")
+    # Steps depend on the reason (2026-11). "Copy the full Cookie: header" only
+    # fits a rejected or stale login; it was wrong for a paywall page that came
+    # back the same with or without the cookie.
+    p_style = 'font-size:13px;color:var(--ink-soft);margin:10px 0 6px;'
+    reasons = {d: status[d].get("reason") for d in stale}
+    ignored = [d for d in stale if reasons[d] == "paywall"
+               and status[d].get("same_without_cookie") is True]
+    # Every other reason keeps the refresh steps it always had; only a paywall
+    # page that came back identical without the cookie drops them.
+    login_like = [d for d in stale if d not in ignored]
+    steps = ""
+    if ignored:
+        where = ", ".join(
+            f"<code>{_esc(status[d].get('final_host') or status[d].get('post_host') or d)}"
+            f"{_esc(status[d].get('final_path', ''))}</code>" for d in ignored)
+        steps += (f'<p style="{p_style}">The page came back the same with and without the cookie '
+                  f'({where}). Replacing the cookie will not change that. Open that post in a '
+                  f'logged-out window:</p>'
+                  '<ul style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">'
+                  '<li>If it shows the full text, the post is free and the paywall wording is a '
+                  'subscribe block on the page. The cookie may be fine; this check cannot tell.</li>'
+                  '<li>If it shows a preview, the site is ignoring this cookie from this server. '
+                  'The login is probably tied to your browser.</li></ul>')
+    if login_like:
+        steps += (f'<p style="{p_style}">To refresh the cookie for '
+                  + ", ".join(f"<code>{_esc(_cookie_env_var(d))}</code>" for d in login_like)
+                  + ':</p>'
+                  '<ol style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">'
+                  '<li>Log into the site.</li>'
+                  '<li>Open DevTools &rarr; <strong>Network</strong>, then reload.</li>'
+                  '<li>Click the request to the domain.</li>'
+                  '<li>Copy the full <code>Cookie:</code> header.</li>'
+                  f'<li>Update {", ".join(f"<code>{_esc(_cookie_env_var(d))}</code>" for d in login_like)} in Railway &rarr; Variables.</li>'
+                  '</ol>')
+    refresh_steps = (f"""<p style="{p_style}">Why the last check failed:</p>
+<ul style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">{reason_lines}</ul>{challenge_note}{steps}""")
 
     # Which domains are stale is already shown, per row, in the feed table
     # below — this panel now carries only what a per-row dot can't: the fix.
@@ -32205,6 +32312,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
     </form>
   </td>
   <td class="ff-cookie">{_cf_cookie_cell_html(_cookie_domain, _cookie_configured, auth_status, f['name'])}</td>
+  <td class="ff-lastcheck">{_cf_lastcheck_cell_html(_cookie_domain, _cookie_configured, auth_status, f['name'])}</td>
   <td class="ff-sub">
     <form method="post" action="/admin/reader/feeds/{f['id']}/subscription" style="margin:0;">
       <input type="checkbox" name="has_active_subscription" value="1" onchange="this.form.submit()"
@@ -32227,7 +32335,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   </td>
 </tr>"""
     if not feeds:
-        feed_rows = ('<tr class="ff-row"><td colspan="8" class="ff-empty">'
+        feed_rows = ('<tr class="ff-row"><td colspan="9" class="ff-empty">'
                      'No feeds yet. Add a section below, then add a feed to it.</td></tr>')
 
     # -- manage sections: a table matching the feed table above --------------
@@ -32300,7 +32408,7 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
    Sections table, which never needed one) — see the comment above
    #cmp-scroll-wrap in the route below for why this exists and what it's
    sized to (_TABLE_FLOOR_XWIDE, the 8+-column bucket). */
-.ff-table{{min-width:{_TABLE_FLOOR_XWIDE}px;}}
+.ff-table{{min-width:{_TABLE_FLOOR_FEEDS}px;}}
 .ff-row>td,.fs-row>td{{padding:9px 12px;vertical-align:middle;border-top:1px solid var(--line);}}
 /* vertical-align:top is explicit, not decorative: on a narrow column
    (Subscriber, Current Feed) the trailing sort-indicator span doesn't fit
@@ -32328,6 +32436,12 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 .ff-url a{{word-break:break-all;}}
 .ff-section{{width:11%;}}
 .ff-cookie{{width:{_COL_WIDTH_STATUS_AGE}px;text-align:center;}}
+.ff-lastcheck{{width:{_COL_WIDTH_LAST_CHECK}px;}}
+.ff-lc-fold summary>div{{display:block;}}
+.ff-lc-fold summary{{list-style:none;position:relative;padding-right:46px;}}
+.ff-lc-fold summary::-webkit-details-marker{{display:none;}}
+.ff-lc-fold summary::after{{content:"Details";position:absolute;right:0;top:0;font-size:11px;color:var(--accent);}}
+.ff-lc-fold[open] summary::after{{content:"Hide";}}
 .ff-sub{{width:9%;text-align:center;}}
 /* NOTE: with table-layout:fixed, the browser reads column widths from the
    FIRST row only — here, the <thead><tr>'s own inline width="..." styles,
@@ -32391,6 +32505,8 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
   /* Labelled unconditionally, same as Subscriber. Holds a computed
      configured/not-configured readout that carries meaning in both states
      (see _feed_cookie_readout), so it can't be hidden when "not configured". */
+  .ff-lastcheck::before{{content:"Last check";display:block;font-size:11.5px;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
   .ff-cookie::before{{content:"Cookie";display:block;font-size:11.5px;color:var(--muted);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;}}
 }}
@@ -32410,20 +32526,21 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
   <table class="ff-table" id="ff-table">
     <thead><tr>
-      <th style="width:15%;" data-sort="name" tabindex="0" role="button" aria-label="Sort by name"
+      <th style="width:10%;" data-sort="name" tabindex="0" role="button" aria-label="Sort by name"
         onclick="ffSortBy('name')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('name');}}">Name<span class="ff-sort-ind" aria-hidden="true"></span></th>
-      <th style="width:16%;">URL</th>
-      <th style="width:11%;" data-sort="section" tabindex="0" role="button" aria-label="Sort by section"
+      <th style="width:11.5%;">URL</th>
+      <th style="width:8%;" data-sort="section" tabindex="0" role="button" aria-label="Sort by section"
         onclick="ffSortBy('section')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('section');}}">Section<span class="ff-sort-ind" aria-hidden="true"></span></th>
       <th style="width:{_COL_WIDTH_STATUS_AGE}px;text-align:center;" data-sort="cookie" tabindex="0" role="button" aria-label="Sort by cookie status"
         onclick="ffSortBy('cookie')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('cookie');}}">Cookie<span class="ff-sort-ind" aria-hidden="true"></span></th>
-      <th style="width:9%;text-align:center;" data-sort="subscriber" tabindex="0" role="button" aria-label="Sort by subscriber"
+      <th style="width:{_COL_WIDTH_LAST_CHECK}px;">Last check</th>
+      <th style="width:6.5%;text-align:center;" data-sort="subscriber" tabindex="0" role="button" aria-label="Sort by subscriber"
         onclick="ffSortBy('subscriber')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('subscriber');}}">Subscriber<span class="ff-sort-ind" aria-hidden="true"></span></th>
-      <th style="width:16%;" data-sort="current-feed" tabindex="0" role="button" aria-label="Sort by Current Feed"
+      <th style="width:10%;" data-sort="current-feed" tabindex="0" role="button" aria-label="Sort by Current Feed"
         onclick="ffSortBy('current-feed')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('current-feed');}}">Current Feed<span class="ff-sort-ind" aria-hidden="true"></span></th>
-      <th style="width:7%;" data-sort="order" tabindex="0" role="button" aria-label="Sort by order: groups by side, then position within it"
+      <th style="width:5%;" data-sort="order" tabindex="0" role="button" aria-label="Sort by order: groups by side, then position within it"
         onclick="ffSortBy('order')" onkeydown="if(event.key==='Enter'||event.key===' '){{event.preventDefault();ffSortBy('order');}}">Order<span class="ff-sort-ind" aria-hidden="true"></span></th>
-      <th style="width:15%;text-align:right;">Actions</th>
+      <th style="width:11%;text-align:right;">Actions</th>
     </tr></thead>
     <tbody id="ff-tbody">{feed_rows}</tbody>
   </table>
