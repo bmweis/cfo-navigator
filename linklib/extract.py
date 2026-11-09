@@ -145,6 +145,38 @@ def has_configured_cookie(domain: str) -> bool:
     return bool(_cookie_for(f"https://{domain}"))
 
 
+def cookie_var_state(domain: str) -> str:
+    """"missing" (variable not set), "empty" (set to nothing or whitespace) or
+    "set" for LINKLIB_COOKIE_<DOMAIN>. Never returns or logs the value."""
+    raw = os.environ.get(_cookie_env_var(domain))
+    if raw is None:
+        return "missing"
+    return "set" if raw.strip() else "empty"
+
+
+def cookie_summary(value: str) -> dict:
+    """What can be said about a Cookie header without revealing it: the cookie
+    NAMES (the part before each '='), the byte length of the whole header,
+    and two shape problems that stop it working. Values are never returned."""
+    names: list[str] = []
+    for part in (value or "").split(";"):
+        if "=" in part:
+            n = part.split("=", 1)[0].strip()
+            if n:
+                names.append(n)
+    try:
+        value.encode("latin-1")
+        sendable = True
+    except UnicodeEncodeError:
+        sendable = False
+    if "\r" in value or "\n" in value:
+        sendable = False
+    return {"names": names[:30], "name_count": len(names),
+            "bytes": len((value or "").encode("utf-8")),
+            "sendable": sendable,
+            "quoted": len(value) > 1 and value[0] == value[-1] == '"'}
+
+
 def _cookie_for(url: str) -> str:
     """Return the configured Cookie header for `url`'s domain, or "" if none."""
     host = (urlsplit(url).netloc or "").lower().split(":")[0]
@@ -252,6 +284,10 @@ class PageData:
                               # plain-text `content` the ingest/search/enrichment
                               # pipeline depends on) can run its own extraction over it
                               # without a second HTTP fetch. See extract_reader_html().
+    http_status: int = 0     # status of the final response (also set on an HTTPError), 0 if none
+    final_url: str = ""      # URL after redirects (also set on an HTTPError); callers show host+path only
+    redirected: bool = False # at least one redirect was followed
+    challenge: bool = False  # an error response whose body/headers look like a bot challenge
     fetch_error: str = ""    # populated only when the request itself failed (timeout,
                               # DNS, connection refused, non-2xx status) — see
                               # _describe_fetch_error(). Every other caller of fetch_page
@@ -272,6 +308,12 @@ def _describe_fetch_error(exc: Exception) -> str:
     if isinstance(exc, requests.exceptions.HTTPError):
         status = exc.response.status_code if exc.response is not None else "?"
         return f"HTTP {status}"
+    # A header that cannot be sent (a line break or non-latin-1 character in a
+    # LINKLIB_COOKIE_<DOMAIN> value). requests/http.client put the offending
+    # header VALUE in their message, so never pass str(exc) through for these:
+    # fetch_error is logged and stored (content_refetch_log.detail).
+    if isinstance(exc, (requests.exceptions.InvalidHeader, UnicodeEncodeError)):
+        return "invalid header value"
     if isinstance(exc, requests.exceptions.Timeout):
         return "timeout"
     if isinstance(exc, requests.exceptions.SSLError):
@@ -394,17 +436,45 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     except requests.exceptions.ConnectionError as exc:
         www_url = _with_www(url)
         if not www_url:
-            return PageData(title="", content="", fetch_error=_describe_fetch_error(exc))
+            return _failed_page(exc)
         try:
             resp = requests.get(www_url, headers=headers, timeout=timeout)
             resp.raise_for_status()
             html = resp.text
         except Exception as retry_exc:
-            return PageData(title="", content="", fetch_error=_describe_fetch_error(retry_exc))
+            return _failed_page(retry_exc)
     except Exception as exc:
-        return PageData(title="", content="", fetch_error=_describe_fetch_error(exc))
+        return _failed_page(exc)
 
-    return _page_data_from_html(html)
+    page = _page_data_from_html(html)
+    # getattr: older test doubles for requests.Response carry only status/text.
+    page.http_status = getattr(resp, "status_code", 0)
+    page.final_url = getattr(resp, "url", "") or ""
+    page.redirected = bool(getattr(resp, "history", None))
+    return page
+
+
+def _failed_page(exc: Exception) -> PageData:
+    """PageData for a failed request: the short fetch_error plus, for an HTTP
+    error response, its status, final URL and whether it looks like a bot
+    challenge (2026-11, so the subscriber check can say WHY). Reads only the
+    response status, URL, body markers and the cf-mitigated header; nothing
+    here ever touches the request's Cookie header."""
+    page = PageData(title="", content="", fetch_error=_describe_fetch_error(exc))
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        # getattr: test doubles for requests.Response may carry only status/text.
+        page.http_status = getattr(resp, "status_code", 0)
+        page.final_url = getattr(resp, "url", "") or ""
+        page.redirected = bool(getattr(resp, "history", None))
+        try:
+            body = resp.text
+        except Exception:
+            body = ""
+        hdrs = getattr(resp, "headers", None) or {}
+        page.challenge = (looks_like_bot_challenge(body)
+                          or (hdrs.get("cf-mitigated", "").lower() == "challenge"))
+    return page
 
 
 def fetch_fulltext(url: str, timeout: int = 20) -> str:
