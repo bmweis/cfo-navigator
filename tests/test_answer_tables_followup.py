@@ -258,10 +258,10 @@ RULE_TEXT = {
     "no unasked recommendations": ["Give no recommendation unless the question asks for one",
                                    "Sitting below the median means you are behind"],
     "table mechanics, six rows, fixed columns": ["If a table helps, its columns are", "Six rows at most",
-                                                 "metric, band as printed, statistic, value, report and year, match note",
+                                                 "metric, band as printed, statistic, value, report and year. Six rows at most",
                                                  "Newest report first"],
-    "short match note, shared caveat once": ["The match note is a short phrase",
-                                             "stated once above the table and never repeated in each row"],
+    "short match note, shared caveat once": ["no match column, no note column, no sentence in a cell",
+                                             "stated once in a sentence above or below the table, never in a column"],
     "synthesize then point": ["Synthesize, then point to the source", "do not write one"],
     "two publishers disagree": ["When two publishers disagree, show both", "Do not average"],
 }

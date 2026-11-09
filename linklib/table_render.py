@@ -15,11 +15,13 @@ import re
 
 from . import figures as fg
 
-KINDS = ("spend", "margins")
+KINDS = ("headcount", "mix", "spend", "margins")
 PLACEHOLDER = re.compile(r"\{\{\s*table\s*:\s*([A-Za-z_]+)\s*\}\}")
 _PARTIAL_TAIL = re.compile(r"\{\{[^}]*$")
 SPEND_ROW_CAP = 16
 MARGIN_ROW_CAP = 12
+COUNT_ROW_CAP = 12
+MIX_COLS_CAP = 4
 
 _ITEM_ORDER = ("sm", "rd", "ga", "cs", "opex")
 _ITEM_LABEL = {"sm": "S&M", "rd": "R&D", "ga": "G&A", "cs": "Customer success", "opex": "Total opex"}
@@ -34,16 +36,67 @@ def _cell(s) -> str:
     return re.sub(r"\s+", " ", str(s if s is not None else "")).replace("|", "/").strip()
 
 
+_COUNT_UNITS = ("count", "fte", "ftes", "employees", "people", "headcount")
+_LONG_DECIMAL = re.compile(r"(?<![\d.])([-+]?\d[\d,]*)\.(\d{3,})")
+
+
 def _unit(r: dict) -> str:
     u = (r.get("unit") or "").strip()
-    return "%" if "%" in u or u.lower() in ("percent", "pct") else (" " + u if u else "")
+    if "%" in u or u.lower() in ("percent", "pct"):
+        return "%"
+    if u.lower() in _COUNT_UNITS:
+        return ""
+    return " " + u if u else ""
+
+
+def round_text(v: str) -> str:
+    """Never more digits than a report prints: a number with three or more decimals (74.5783946473) is shown to
+    one decimal (74.6). One or two decimals are left as stored. Display only; the stored figure is unchanged."""
+    def one(m: re.Match) -> str:
+        try:
+            return f"{round(float(m.group(1).replace(',', '') + '.' + m.group(2)), 1):.1f}"
+        except ValueError:
+            return m.group(0)
+    return _LONG_DECIMAL.sub(one, v)
 
 
 def value_text(r: dict) -> str:
-    v = _cell(r.get("value"))
+    v = round_text(_cell(r.get("value")))
     if "%" in v:
         return v
     return v + _unit(r)
+
+
+_PLAIN_BAND = re.compile(r"^(?:under |over |<|>)?\$\d[\d.,]*[mkb]?(?:\s*(?:-|to)\s*\$?\d[\d.,]*[mkb]?)?\+?$", re.I)
+
+
+def _money(x: float) -> str:
+    for div, suf in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if x >= div:
+            n = x / div
+            return (str(int(n)) if float(n).is_integer() else f"{n:g}") + suf
+    return str(int(x))
+
+
+def band_display(b: str) -> str:
+    """One spelling for a size band in a table: "$20M-$50M" and "$20-50M" both read "$20-50M"; "Under $1M" reads
+    "<$1M". Only a plain money band is respelled; anything else (a caveat in the text, a segment, "All") is
+    shown as printed. Display only; the stored band is unchanged."""
+    t = _cell(b)
+    if not t or not _PLAIN_BAND.match(t):
+        return t
+    p = fg.parse_band(t)
+    if p is None or p["kind"] != "money":
+        return t
+    lo, hi = p["lo"], p["hi"]
+    if hi == float("inf"):
+        return f"${_money(lo)}+"
+    if lo == 0:
+        return f"<${_money(hi)}"
+    if lo == hi:
+        return t
+    a, bb = _money(lo), _money(hi)
+    return f"${a[:-1]}-{bb}" if a[-1] == bb[-1] else f"${a}-${bb}"
 
 
 def _basis_text(r: dict) -> str:
@@ -69,7 +122,7 @@ def _band_text(r: dict) -> str:
     if not b or fg.parse_band(b) is None and b.lower() in ("all", "n/a", "na", "none"):
         txt = "All sizes" if not b or b.lower() == "all" else b
     else:
-        txt = b
+        txt = band_display(b)
     if r.get("match") == "adjacent_band" or r.get("band_context"):
         txt += " (adjacent band)" if b and fg.parse_band(b) is not None else " (all sizes, context)"
     return txt
@@ -174,12 +227,17 @@ def build_spend(rows: list[dict], cite) -> tuple[str, dict]:
     return md, {"rows": len(shown), "capped": capped, "ranges": len(rng)}
 
 
+def margin_sort_key(r: dict) -> tuple:
+    """Public (band-less) rows first, then bands smallest to largest by upper then lower edge, the newest edition
+    first inside a band, gross margin before another margin, then metric name and statistic."""
+    m = _cell(r.get("metric")).lower()
+    return _size_rank(r) + _edition_rank(r) + ("gross" not in m, m, fg.statistic_rank(r.get("statistic")),
+                                              str(r.get("source") or ""), str(r.get("figure_key")))
+
+
 def build_margins(rows: list[dict], cite) -> tuple[str, dict]:
-    ordered = sorted(rows, key=lambda r: (_cell(r.get("metric")).lower(),) + row_order_key(r))
+    ordered = sorted(rows, key=margin_sort_key)
     shown, capped = ordered[:MARGIN_ROW_CAP], max(len(ordered) - MARGIN_ROW_CAP, 0)
-    # Public rows first for the whole table, then by metric, so a public index leads.
-    shown.sort(key=lambda r: (_size_rank(r)[0] != 0, "gross" not in _cell(r.get("metric")).lower(),
-                              _cell(r.get("metric")).lower()) + row_order_key(r))
     show_seg = len({(_cell(r.get("segment")).lower()) for r in shown}) > 1
     head = ["Metric", "Band"] + (["Segment"] if show_seg else []) + ["Statistic", "Value", "Basis", "Report and period"]
     body = []
@@ -189,7 +247,179 @@ def build_margins(rows: list[dict], cite) -> tuple[str, dict]:
             row.append(_cell(r.get("segment")) or "All")
         row += [statistic_text(r), value_text(r), _cell(r.get("denominator")) or "not stated", _report_text(r, cite(r))]
         body.append(row)
-    return "**Margins**\n\n" + _table(head, body), {"rows": len(shown), "capped": capped, "ranges": 0}
+    metrics = {_cell(r.get("metric")).lower() for r in shown}
+    note = ("\n\nRows run by size band, smallest to largest, then newest edition; different margins sit in the same "
+            "order, not in groups." if len(metrics) > 1 else "")
+    return ("**Margins**\n\n" + _table(head, body) + note,
+            {"rows": len(shown), "capped": capped, "ranges": 0, "sort": "public first, band upper then lower edge, newest edition first, gross before other margins"})
+
+
+# --- headcount counts and headcount mix --------------------------------------------------------------
+
+def _is_delta(r: dict) -> bool:
+    return (r.get("data_period") or "").strip().lower().startswith("change")
+
+
+def _prefer(rows: list[dict]) -> dict:
+    """Of rows that print one figure, the original publisher's row before a republisher's (cited_source set)."""
+    return sorted(rows, key=lambda r: (bool(r.get("cited_source")), str(r.get("source") or ""), str(r.get("figure_key"))))[0]
+
+
+def count_rows(rows: list[dict]) -> list[dict]:
+    """Total headcount (FTE) rows: a number of people, never a change row, one per edition, band, period, statistic
+    and denominator. Different denominators or statistics are different rows."""
+    groups: dict[tuple, list[dict]] = {}
+    for r in rows:
+        if fg.row_table_kind(r) != "headcount_count" or not fg.is_total_fte_row(r) or _is_delta(r) or r.get("value_num") is None:
+            continue
+        k = (fg._edition_key(r), fg._band_key(r.get("band")), fg._year_num(r.get("data_period")),
+             (r.get("statistic") or "").strip().lower(), fg._denom_key(r.get("denominator")))
+        groups.setdefault(k, []).append(r)
+    return [_prefer(g) for g in groups.values()]
+
+
+def build_headcount(rows: list[dict], cite) -> tuple[str, dict]:
+    picked = sorted(count_rows(rows), key=row_order_key)
+    shown, capped = picked[:COUNT_ROW_CAP], max(len(picked) - COUNT_ROW_CAP, 0)
+    body = [[_report_text(r, cite(r)), _band_text(r), statistic_text(r), value_text(r), _cell(r.get("denominator")) or "not stated"]
+            for r in shown]
+    md = "**Total headcount (a number of people)**\n\n" + _table(["Report and period", "Band", "Statistic", "Value", "Basis"], body)
+    return md, {"rows": len(shown), "capped": capped, "ranges": 0}
+
+
+def mix_share_rows(rows: list[dict]) -> list[dict]:
+    return [r for r in rows if fg.row_table_kind(r) == "headcount_share" and not fg.is_total_fte_row(r)
+            and fg.mix_function_ok(r) and not _is_delta(r) and r.get("value_num") is not None]
+
+
+def _function_name(r: dict) -> str:
+    f = fg.share_function(r).strip()
+    return (f[:1].upper() + f[1:]) if f and f[0].islower() else f
+
+
+def _find_total(share: dict, totals: list[dict]):
+    """The same edition's total headcount for a share's band and period (a republisher's share matches its
+    original's). Same statistic first, then the median; None when there is no total for that band and period."""
+    k = (fg._edition_key(share), fg._band_key(share.get("band")), fg._year_num(share.get("data_period")))
+    cands = [t for t in totals
+             if (fg._edition_key(t), fg._band_key(t.get("band")), fg._year_num(t.get("data_period"))) == k
+             and (t.get("report_slug") == share.get("report_slug") or share.get("cited_source") or t.get("cited_source"))]
+    if not cands:
+        return None
+    st = (share.get("statistic") or "").strip().lower()
+    return (next((t for t in cands if (t.get("statistic") or "").strip().lower() == st), None)
+            or next((t for t in cands if (t.get("statistic") or "").strip().lower() == "median"), None) or cands[0])
+
+
+def build_mix(rows: list[dict], cite) -> tuple[str, dict]:
+    """Functions down, one edition per value column (newest first, exact band before adjacent), functions in the
+    order the report prints them, then a derived people-count column for the first column that has a matching
+    total. An older edition, a column past the cap and a row whose function the data does not name are listed in
+    one line under the table; none of them is added as a row or merged."""
+    share = mix_share_rows(rows)
+    unnamed = [r for r in rows if fg.row_table_kind(r) == "headcount_share" and not fg.is_total_fte_row(r)
+               and not _is_delta(r) and not fg.mix_function_ok(r)]
+    cols: dict[tuple, list[dict]] = {}
+    for r in share:
+        cols.setdefault((fg._edition_key(r), fg._band_key(r.get("band")), fg._year_num(r.get("data_period"))), []).append(r)
+
+    def col_rank(item):
+        k, rs = item
+        exact = min((0 if r.get("match") == "exact" else 1) for r in rs)
+        return (exact, -k[0][1], -k[2], str(k[0][0]), str(k[1]))
+    ordered = sorted(cols.items(), key=col_rank)
+    # one column per publisher edition: when a publisher prints two bands, only the closest stays a column
+    seen_ed: set = set()
+    chosen, older = [], []
+    for k, rs in ordered:
+        if k[0][0] in seen_ed:                       # one column per publisher: its newest edition, closest band
+            older.append((k, rs))
+        else:
+            seen_ed.add(k[0][0])
+            chosen.append((k, rs))
+    extra_cols = chosen[MIX_COLS_CAP:]
+    chosen = chosen[:MIX_COLS_CAP]
+
+    totals = count_rows(rows)
+    col_data = []                       # (header, {fkey: row})
+    fnames: dict[str, str] = {}
+    forder: list[str] = []
+    allowed_extra: list[str] = []
+    for k, rs in chosen:
+        by_f: dict[str, list[dict]] = {}
+        for r in sorted(rs, key=lambda r: (str(r.get("report_slug")), r.get("figure_key") if isinstance(r.get("figure_key"), int) else 0)):
+            by_f.setdefault(fg.function_key(fg.share_function(r)), []).append(r)
+        picked = {f: _prefer(g) for f, g in by_f.items()}
+        head_row = _prefer(list(picked.values()))
+        for f, g in by_f.items():
+            vals = {value_text(x) for x in g}
+            if len(vals) > 1:
+                allowed_extra.append("conflict:" + f)
+        for f, r in sorted(picked.items(), key=lambda kv: (kv[1].get("figure_key") if isinstance(kv[1].get("figure_key"), int) else 0)):
+            if f not in fnames:
+                fnames[f] = _function_name(r)
+                forder.append(f)
+        col_data.append((head_row, picked))
+
+    if not col_data:
+        return "", {"rows": 0, "capped": 0, "ranges": 0}
+
+    # the derived column: the first value column with a matching total
+    derived_idx, derived_total = None, None
+    for i, (hr, picked) in enumerate(col_data):
+        t = _find_total(hr, totals)
+        if t is not None:
+            derived_idx, derived_total = i, t
+            break
+
+    head = ["Function"]
+    for hr, picked in col_data:
+        label = " ".join(x for x in (_cell(hr.get("source")), _cell(hr.get("report_year"))) if x)
+        meta = ", ".join(x for x in (_cell(hr.get("data_period")), _band_text(hr), statistic_text(hr)) if x)
+        n = cite(hr)
+        head.append(f"{label} ({meta})" + (f" [{n}]" if n else ""))
+    if derived_idx is not None:
+        head.append("Derived people")
+    body = []
+    for f in forder:
+        row = [fnames[f]]
+        for i, (hr, picked) in enumerate(col_data):
+            r = picked.get(f)
+            if r is None:
+                row.append("")
+                continue
+            cell = value_text(r)
+            if r.get("report_slug") != hr.get("report_slug"):
+                n = cite(r)
+                cell += f" [{n}]" if n else ""
+            row.append(cell)
+        if derived_idx is not None:
+            r = col_data[derived_idx][1].get(f)
+            if r is None:
+                row.append("")
+            else:
+                cnt = int(r["value_num"] * derived_total["value_num"] / 100 + 0.5)
+                allowed_extra.append(str(cnt))
+                row.append(str(cnt))
+        body.append(row)
+    md = "**Headcount mix (percent of headcount)**\n\n" + _table(head, body)
+    if derived_idx is not None:
+        dn = cite(derived_total)
+        md += (f"\n\nDerived people = share x total headcount ({value_text(derived_total)}, {_report_text(derived_total, dn)}), "
+               "rounded; derived, not in the report.")
+    out_notes = []
+    if older or extra_cols:
+        names = []
+        for k, rs in older + extra_cols:
+            r = rs[0]
+            names.append(f"{_cell(r.get('source'))} {_cell(r.get('report_year'))} ({_cell(r.get('data_period'))}, {_band_text(r)})".replace("  ", " "))
+        out_notes.append("Not shown, another edition or band: " + "; ".join(names))
+    if unnamed:
+        out_notes.append("Not shown, the data does not name the function: " + "; ".join(sorted({_cell(r.get("metric")) for r in unnamed})[:6]))
+    if out_notes:
+        md += "\n\n" + ". ".join(out_notes) + "."
+    return md, {"rows": len(forder), "capped": 0, "ranges": 0, "columns": len(col_data), "derived": derived_idx is not None,
+                "allowed_extra": allowed_extra, "not_shown": len(older) + len(extra_cols), "unnamed": len(unnamed)}
 
 
 _COGS = re.compile(r"cost of revenue|\bcogs\b|cost of goods|\bhosting\b|cost of (?:subscription|services)|gross (?:margin|profit)", re.I)
@@ -204,11 +434,29 @@ def is_margin_row(r: dict) -> bool:
 def rows_for(kind: str, rows: list[dict]) -> list[dict]:
     if kind == "margins":
         return [r for r in rows if is_margin_row(r)]
+    if kind == "headcount":
+        return count_rows(rows)
+    if kind == "mix":
+        return mix_share_rows(rows)
     return [r for r in rows if fg.row_table_kind(r) == "spend_share" and not is_margin_row(r)]
 
 
 def kinds_present(rows: list[dict]) -> list[str]:
     return [k for k in KINDS if rows_for(k, rows)]
+
+
+_BUILD = {}
+
+
+def _builder(kind: str):
+    return {"headcount": build_headcount, "mix": build_mix, "spend": build_spend, "margins": build_margins}[kind]
+
+
+def not_in_any_table(rows: list[dict]) -> list[dict]:
+    """Sent rows no code-built table took (a kind of figure none of the tables covers), for the admin row."""
+    taken = {id(r) for k in KINDS for r in rows_for(k, rows)}
+    return [{"figure_key": r.get("figure_key"), "report": r.get("report_slug"), "metric": _cell(r.get("metric")),
+             "kind": fg.row_table_kind(r)} for r in rows if id(r) not in taken][:20]
 
 
 def render_tables(text: str, rows: list[dict], cite) -> tuple[str, dict]:
@@ -221,10 +469,12 @@ def render_tables(text: str, rows: list[dict], cite) -> tuple[str, dict]:
     done: set = set()
 
     def one(kind: str) -> str:
-        fn = build_spend if kind == "spend" else build_margins
-        md, meta = fn(rows_for(kind, rows), lambda r, _c=cite: _c(r))
-        info["rendered"][kind] = meta
-        bad = selfcheck(md, rows)
+        # The mix builder needs the sent totals too (for the derived people column); it picks its own share rows.
+        md, meta = _builder(kind)(rows if kind == "mix" else rows_for(kind, rows), lambda r, _c=cite: _c(r))
+        info["rendered"][kind] = {k: v for k, v in meta.items() if k != "allowed_extra"}
+        bad = selfcheck(md, rows, extra=meta.get("allowed_extra"))
+        if kind == "mix":
+            bad += mix_selfcheck(md, rows)
         if bad:
             info.setdefault("selfcheck", []).extend(bad)
         return md
@@ -249,22 +499,81 @@ def render_tables(text: str, rows: list[dict], cite) -> tuple[str, dict]:
             info["fallback"].append(f"missing placeholder: {kind} table appended")
             out = out.rstrip() + "\n\n" + one(kind) + "\n"
     out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    stray = not_in_any_table(rows)
+    if stray:
+        info["not_in_table"] = stray
     return out, info
 
 
-def selfcheck(markdown: str, rows: list[dict]) -> list[str]:
-    """Flag-only: every Value, Statistic and Band cell of a rendered table equals a sent row's own value."""
-    values = {value_text(r) for r in rows}
+_NUMERIC_CELL = re.compile(r"[-+]?\d[\d.,]*(?: ?%| [A-Za-z$]+)?")
+
+
+def selfcheck(markdown: str, rows: list[dict], extra=None) -> list[str]:
+    """Flag-only: every number-looking cell of a rendered table equals a sent row's own value (rounded the way the
+    table rounds it) or a count the table derived from two sent rows."""
+    values = {value_text(r) for r in rows} | {str(x) for x in (extra or [])}
     bad: list[str] = []
     for line in (markdown or "").split("\n"):
         if not line.startswith("|") or set(line.replace("|", "").strip()) <= set("-: "):
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if cells and cells[0] in ("Line item", "Metric"):
+        if cells and cells[0] in ("Line item", "Metric", "Function", "Report and period"):
             continue
-        txt = " ".join(cells)
-        # locate the cells by header position: spend has Value at 3, margins at index of "Value"
-        hdr_val = next((c for c in cells if re.fullmatch(r"[-+]?\d[\d.,]*(?: ?%| [A-Za-z$]+)?", c)), None)
-        if hdr_val is not None and hdr_val not in values:
-            bad.append(f"value not in a sent row: {hdr_val} ({txt[:60]})")
+        for c in cells[1:] if cells and cells[0] == "Function" else cells:
+            c2 = re.sub(r"\s*\[\d+\]$", "", c)
+            if _NUMERIC_CELL.fullmatch(c2) and c2 not in values:
+                bad.append(f"value not in a sent row: {c2} ({' '.join(cells)[:60]})")
     return bad
+
+
+def mix_selfcheck(markdown: str, rows: list[dict]) -> list[str]:
+    """Flag-only: each function row's share cells equal a sent share row for that same function. Catches a label
+    sitting on another function's number."""
+    sent: dict[str, set] = {}
+    for r in mix_share_rows(rows):
+        sent.setdefault(fg.function_key(fg.share_function(r)), set()).add(value_text(r))
+    bad: list[str] = []
+    for line in (markdown or "").split("\n"):
+        if not line.startswith("|") or set(line.replace("|", "").strip()) <= set("-: "):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells[0] == "Function":
+            continue
+        want = sent.get(fg.function_key(cells[0]))
+        for c in cells[1:]:
+            c2 = re.sub(r"\s*\[\d+\]$", "", c)
+            if c2.endswith("%") and (want is None or c2 not in want):
+                bad.append(f"function label does not match its share: {cells[0]} {c2}")
+    return bad
+
+
+_DERIVED_TAG = "(derived from stored reports)"
+
+
+def cite_shifts(text: str, shifts: list[dict], cite) -> tuple[str, int]:
+    """Add the [n] of each computed shift's two reports to the sentence that prints it. The model writes the
+    shift lines in order, each ending "(derived from stored reports)"; a line already carrying a marker is left
+    alone, and a report that was not sent gets none. Returns (text, lines changed)."""
+    if not shifts or _DERIVED_TAG not in (text or ""):
+        return text, 0
+    lines = text.split("\n")
+    changed, idx = 0, 0
+    for i, ln in enumerate(lines):
+        if _DERIVED_TAG not in ln or ln.lstrip().startswith("|") or idx >= len(shifts):
+            continue
+        sh = shifts[idx]
+        idx += 1
+        if re.search(r"\[\d{1,2}\]", ln):
+            continue
+        marks = []
+        for end in ("from", "to"):
+            e = sh.get(end) or {}
+            row = {"report_slug": e.get("report_slug", ""), "source": e.get("source", ""), "report": e.get("report", ""),
+                   "report_year": e.get("year", "")}
+            n = cite(row) if row["report_slug"] else None
+            if n and f"[{n}]" not in marks:
+                marks.append(f"[{n}]")
+        if marks:
+            lines[i] = ln.replace(_DERIVED_TAG, " ".join(marks) + " " + _DERIVED_TAG, 1).replace("  ", " ")
+            changed += 1
+    return "\n".join(lines), changed
