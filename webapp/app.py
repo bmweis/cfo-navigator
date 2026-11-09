@@ -31255,18 +31255,51 @@ def _cookie_health_state(domain: str, configured: bool, status: dict) -> dict:
     "label"/"age"/"detail" are only meaningful when configured is True.
     """
     if not configured:
+        from linklib.extract import cookie_var_state
+        var_state = cookie_var_state(domain)
         return {"configured": False, "state": "not_configured", "color": "var(--muted)",
-                "label": "", "age": "", "detail": ""}
+                "label": "", "age": "", "detail": "", "reason": "", "facts": "",
+                "var_state": var_state,
+                "reason_text": ("Variable empty" if var_state == "empty"
+                                else "Not configured (variable missing)")}
     s = status.get(domain)
     if s is None:
         return {"configured": True, "state": "unchecked", "color": "var(--seafoam-deep)",
-                "label": "Not yet checked", "age": "", "detail": ""}
+                "label": "Not yet checked", "age": "", "detail": "", "reason": "",
+                "reason_text": "", "facts": ""}
     ok = s.get("ok")
     key = "working" if ok else ("unknown" if ok is None else "expired")
     color, label = _COOKIE_STATE_STYLES[key]
     age = _relative_age(s.get("checked_at", "")) or "just now"
     detail = s.get("detail") or ""
-    return {"configured": True, "state": key, "color": color, "label": label, "age": age, "detail": detail}
+    return {"configured": True, "state": key, "color": color, "label": label, "age": age,
+            "detail": detail, "reason": s.get("reason") or "",
+            "reason_text": s.get("reason_text") or "", "facts": _cookie_check_facts(s)}
+
+
+def _cookie_check_facts(s: dict) -> str:
+    """One plain line of what the last check saw and sent, from the stored
+    record: HTTP status, where it ended up (host and path, never a query),
+    cookie NAMES and header size. Cookie values are never in the record.
+    Records from before 2026-11 have none of these fields and give ""."""
+    bits = []
+    if s.get("http_status"):
+        bits.append(f"HTTP {s['http_status']}")
+    if s.get("final_host"):
+        bits.append(f"{s['final_host']}{s.get('final_path', '')}")
+    elif s.get("post_host"):
+        bits.append(f"test post on {s['post_host']}")
+    n = s.get("cookie_name_count")
+    if n is not None and "cookie_bytes" in s:
+        shown = s.get("cookie_names") or []
+        names = ", ".join(shown)
+        if n - len(shown) > 0:
+            names += f" and {n - len(shown)} more"
+        bits.append(f"{n} cookie{'s' if n != 1 else ''}"
+                    + (f" ({names})" if names else "")
+                    + f", {s['cookie_bytes']:,} bytes"
+                    + ("" if s.get("cookie_sent", True) else ", not sent to this host"))
+    return " · ".join(bits)
 
 
 def _cf_cookie_cell_html(domain: str, configured: bool, status: dict, feed_name: str) -> str:
@@ -31288,18 +31321,27 @@ def _cf_cookie_cell_html(domain: str, configured: bool, status: dict, feed_name:
         return '<span style="color:var(--muted);font-size:13px;">&mdash;</span>'
     st = _cookie_health_state(domain, configured, status)
     if not st["configured"]:
+        if st.get("var_state") == "empty":
+            return (f'<span aria-label="Cookie for {_esc(feed_name)}: variable empty" '
+                    f'title="The variable {_esc(_cookie_env_var_name(domain))} exists but holds nothing." '
+                    f'style="color:#CA8A04;font-size:13px;">Variable empty</span>')
         return (f'<span aria-label="Cookie for {_esc(feed_name)}: not configured" '
-                f'title="No LINKLIB_COOKIE_&lt;DOMAIN&gt; variable is set for this domain." '
+                f'title="Not configured (variable missing). No {_esc(_cookie_env_var_name(domain))} variable is set." '
                 f'style="color:var(--muted);font-size:13px;">&mdash;</span>')
     if st["state"] == "unchecked":
         return (f'<span aria-label="Cookie for {_esc(feed_name)}: configured, not yet checked" '
                 f'title="A cookie is configured but the re-check button above hasn\'t probed it yet." '
                 f'style="color:{st["color"]};font-size:13px;">Not yet checked</span>')
-    return (f'<span aria-label="Cookie for {_esc(feed_name)}: {st["label"]}, checked {st["age"]}" '
-            f'title="{_esc(st["detail"])}" style="font-size:13px;display:inline-flex;align-items:center;gap:5px;">'
+    head = (f'<span style="display:inline-flex;align-items:center;gap:5px;">'
             f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{st["color"]};flex:none;" aria-hidden="true"></span>'
             f'<span style="color:{st["color"]};">{st["label"]}</span>'
             f'<span style="color:var(--muted);">&middot; {_esc(st["age"])}</span></span>')
+    reason = (f'<div style="color:var(--ink-soft);font-size:12px;line-height:1.4;margin-top:3px;">'
+              f'{_esc(st["reason_text"] or "Reason not recorded (re-check)")}</div>')
+    facts = (f'<div style="color:var(--muted);font-size:11.5px;line-height:1.4;overflow-wrap:anywhere;">'
+             f'{_esc(st["facts"])}</div>') if st["facts"] else ""
+    return (f'<div aria-label="Cookie for {_esc(feed_name)}: {st["label"]}, checked {st["age"]}" '
+            f'title="{_esc(st["detail"])}" style="font-size:13px;">{head}{reason}{facts}</div>')
 
 
 def _auth_cookie_controls(request: Request,
@@ -31354,7 +31396,19 @@ def _auth_cookie_controls(request: Request,
 
     from linklib.extract import _cookie_env_var
     stale_vars = ", ".join(f"<code>{_esc(_cookie_env_var(d))}</code>" for d in stale)
-    refresh_steps = (f"""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">To refresh an expired cookie:</p>
+    reason_lines = "".join(
+        f'<li><code>{_esc(_cookie_env_var(d))}</code>: '
+        f'{_esc(status[d].get("reason_text") or "reason not recorded, re-check")}'
+        + "</li>" for d in stale)
+    challenge_note = ""
+    if any(status[d].get("reason") in ("bot_challenge", "not_sent", "bad_header") for d in stale):
+        challenge_note = ('<p style="font-size:13px;color:var(--ink-soft);margin:6px 0 0;">'
+                          'A bot challenge means the site blocked this server before checking the login, '
+                          'so a fresh cookie alone may not fix it. A not-sent or line-break reason '
+                          'is a variable problem, not a stale login.</p>')
+    refresh_steps = (f"""<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">Why the last check failed:</p>
+<ul style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">{reason_lines}</ul>{challenge_note}
+<p style="font-size:13px;color:var(--ink-soft);margin:10px 0 6px;">If the reason is a rejected or stale login, refresh the cookie:</p>
 <ol style="font-size:13px;color:var(--ink-soft);line-height:1.55;margin:0 0 6px;padding-left:20px;">
 <li>Log into the site.</li>
 <li>Open DevTools &rarr; <strong>Network</strong>, then reload.</li>
