@@ -271,7 +271,16 @@ def paywall_comparison(with_cookie, without_cookie) -> dict:
                 "no paywall wording" if not without_cookie.paywall_marker else "different paywall wording")
             line = (f"Without the cookie: {b:,} bytes vs {a:,} with it, {how}, {wording} "
                     f"(cookie had an effect)")
-    return {"paywall_marker": label, "bytes_with_cookie": a, "bytes_without_cookie": b,
+    wo = PAYWALL_MARKER_LABELS.get(without_cookie.paywall_marker, without_cookie.paywall_marker)
+    present = ("present with and without the cookie" if wo and wo == label
+               else "present with the cookie only" if not wo
+               else f"different wording without the cookie ({wo})")
+    if same is not None:
+        line += f". Matched wording: {label} ({present}); response {a:,} bytes with, {b:,} without"
+    return {"paywall_marker": label, "paywall_marker_without_cookie": wo,
+            "bytes_with_cookie": a, "bytes_without_cookie": b,
+            "text_chars_with_cookie": len(with_cookie.content or ""),
+            "text_chars_without_cookie": len(without_cookie.content or ""),
             "same_without_cookie": same, "compare_text": line}
 
 

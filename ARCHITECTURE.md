@@ -12056,7 +12056,7 @@ JSON included, lowercased; a footer upsell on a subscriber's full page can trip 
 `PageData` gains `paywall_marker` and `body_bytes`; `fetch_page(send_cookie=False)` skips the
 cookie for one request. Only on the paywall reason, `authcheck.paywall_comparison` fetches the
 same post URL once more without the cookie and stores `paywall_marker` (label),
-`bytes_with_cookie`, `bytes_without_cookie`, `same_without_cookie` and `compare_text`
+`paywall_marker_without_cookie`, `bytes_with_cookie`, `bytes_without_cookie`, `text_chars_with_cookie`, `text_chars_without_cookie`, `same_without_cookie` and `compare_text` (which also says whether the matched wording is present with and without the cookie, and both response sizes)
 (identical = same marker and sizes within 2 percent). No other reason makes a second request.
 The test post is the first item the feed returns (or the sitemap's latest post); the check
 does not know whether it is paid. On `/admin/reader/feeds` the Cookie cell is now status and

@@ -111,7 +111,10 @@ def test_second_request_omits_the_cookie_and_the_first_sends_it(lib, monkeypatch
 def test_identical_pages_say_the_cookie_was_ignored(lib, monkeypatch):
     _stub(monkeypatch, [_resp(200, PAYWALL), _resp(200, PAYWALL)], [])
     rec = _check(lib)
-    assert rec["compare_text"] == "Same page without the cookie: identical (cookie ignored)"
+    assert rec["compare_text"].startswith("Same page without the cookie: identical (cookie ignored)")
+    assert "this post is for paid subscribers (present with and without the cookie)" in rec["compare_text"]
+    assert rec["paywall_marker_without_cookie"] == rec["paywall_marker"]
+    assert rec["bytes_with_cookie"] == rec["bytes_without_cookie"] == len(PAYWALL.encode())
     assert rec["same_without_cookie"] is True
     assert rec["compare_text"] in rec["detail"]
 
@@ -125,11 +128,20 @@ def test_different_pages_say_the_cookie_had_an_effect(lib, monkeypatch):
     assert rec["bytes_without_cookie"] > rec["bytes_with_cookie"]
 
 
+def test_marker_only_with_the_cookie_is_stated(lib, monkeypatch):
+    _stub(monkeypatch, [_resp(200, PAYWALL), _resp(200, FULL_TEXT)], [])
+    rec = _check(lib)
+    assert "present with the cookie only" in rec["compare_text"]
+    assert rec["paywall_marker_without_cookie"] == ""
+    assert rec["text_chars_without_cookie"] > rec["text_chars_with_cookie"]
+
+
 def test_a_failed_comparison_request_is_reported_not_raised(lib, monkeypatch):
     _stub(monkeypatch, [_resp(200, PAYWALL), requests.exceptions.ConnectionError("dns")], [])
     rec = _check(lib)
     assert rec["reason"] == "paywall"
     assert rec["compare_text"] == "Without the cookie: could not fetch the page again"
+    assert "Matched wording" not in rec["compare_text"]
     assert rec["same_without_cookie"] is None
 
 
