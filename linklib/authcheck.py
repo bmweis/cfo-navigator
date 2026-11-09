@@ -14,6 +14,7 @@ Status is persisted in the settings KV under `auth_cookie_status` as JSON:
 from __future__ import annotations
 
 import json
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse, urlsplit
@@ -21,6 +22,7 @@ from urllib.parse import urljoin, urlparse, urlsplit
 import requests
 
 from .db import Library
+from .extract import looks_like_bot_challenge
 
 STATUS_KEY = "auth_cookie_status"
 
@@ -191,27 +193,101 @@ def _recent_post_url(domain: str, opml_path: str) -> tuple[str, str]:
     return "", ""
 
 
+# Closed list of reasons a probe can report. code -> plain-language text.
+REASONS = {
+    "accepted": "Cookie accepted",
+    "no_post": "No recent post found to test",
+    "bad_header": "Variable has a line break or unsupported character",
+    "unreachable": "Could not reach the site (timeout or DNS)",
+    "bot_challenge": "Bot challenge (Cloudflare or similar)",
+    "rejected": "Rejected: HTTP 401 or 403",
+    "login_redirect": "Redirected to login",
+    "not_sent": "Cookie not sent (test post is on another host)",
+    "paywall": "Paywall text returned",
+    "unexpected": "Unexpected response",
+}
+
+_LOGIN_PATH = re.compile(r"/(log-?in|sign-?in|sign-?up|auth|subscribe|checkout)(/|$)", re.I)
+
+
+def _host_path(url: str) -> tuple[str, str]:
+    """Host and path only, never a query string or fragment."""
+    sp = urlsplit(url or "")
+    return (sp.netloc or "").lower(), sp.path or "/"
+
+
+def classify_probe(page, post_url: str, cookie_sent: bool) -> tuple[bool, str]:
+    """(ok, reason_code) for a probe fetch. `ok` follows the original rule
+    exactly (full text and not paywalled; any failed fetch is False), so the
+    status colours did not change; only the reason is new."""
+    ok = bool(page.content) and not page.blocked
+    err = page.fetch_error or ""
+    if err == "invalid header value":
+        return ok, "bad_header"
+    if err and not page.http_status:
+        return ok, "unreachable"
+    if err:
+        if page.challenge:
+            return ok, "bot_challenge"
+        if page.http_status in (401, 403):
+            return ok, "rejected"
+        return ok, "unexpected"
+    final_host, final_path = _host_path(page.final_url)
+    post_host, post_path = _host_path(post_url)
+    if page.final_url and _LOGIN_PATH.search(final_path) and not _LOGIN_PATH.search(post_path):
+        return ok, "login_redirect"
+    if looks_like_bot_challenge(page.raw_html):
+        return ok, "bot_challenge"
+    if page.blocked:
+        return ok, "paywall" if cookie_sent else "not_sent"
+    if not page.content:
+        return ok, "unexpected"
+    return ok, "accepted"
+
+
 def check_auth_cookies(lib: Library, opml_path: str) -> dict:
     """Probe each configured auth-cookie domain and persist a health record.
-    Returns the status dict. No-op (empty) when no cookies are configured."""
-    from .extract import _auth_cookies, fetch_page
+    Returns the status dict. No-op (empty) when no cookies are configured.
 
-    domains = list(_auth_cookies().keys())
+    Each record also carries a reason (closed list, REASONS), the HTTP status,
+    the final URL's host and path (no query), and what the app sent: cookie
+    NAMES, header byte length, and whether the header was sent to the test
+    post's host at all. Cookie values are never read into the record."""
+    from .extract import _auth_cookies, _cookie_for, cookie_summary, fetch_page
+
+    domains = list(_auth_cookies().items())
     status: dict = {}
     now = datetime.now(timezone.utc).isoformat()
-    for dom in domains:
+    for dom, cookie in domains:
+        summ = cookie_summary(cookie)
+        sent_info = {"cookie_names": summ["names"], "cookie_name_count": summ["name_count"],
+                     "cookie_bytes": summ["bytes"], "cookie_quoted": summ["quoted"]}
         url, title = _recent_post_url(dom, opml_path)
         if not url:
             status[dom] = {"ok": None, "checked_at": now, "title": "",
-                           "detail": "no recent post found to test"}
+                           "detail": "no recent post found to test",
+                           "reason": "no_post", "reason_text": REASONS["no_post"],
+                           "http_status": 0, "final_host": "", "final_path": "",
+                           "post_host": "", "cookie_sent": False, **sent_info}
             continue
+        sent = bool(_cookie_for(url))
         page = fetch_page(url)
-        if page.content and not page.blocked:
-            status[dom] = {"ok": True, "checked_at": now, "title": title,
-                           "detail": f"full text fetched ({len(page.content):,} chars)"}
+        ok, code = classify_probe(page, url, sent)
+        if not summ["sendable"]:
+            code = "bad_header"
+        fh, fp = _host_path(page.final_url)
+        text = REASONS[code]
+        if code == "unexpected":
+            if page.http_status:
+                text += f" (HTTP {page.http_status}" + ("" if page.content else ", empty body") + ")"
+        if ok and code == "accepted":
+            detail = f"full text fetched ({len(page.content):,} chars)"
         else:
-            status[dom] = {"ok": False, "checked_at": now, "title": title,
-                           "detail": "got a preview/paywall — cookie missing or expired"}
+            detail = text
+        status[dom] = {"ok": ok, "checked_at": now, "title": title, "detail": detail,
+                       "reason": code, "reason_text": text,
+                       "http_status": page.http_status, "final_host": fh, "final_path": fp,
+                       "post_host": _host_path(url)[0], "cookie_sent": sent, **sent_info}
     lib.set_setting(STATUS_KEY, json.dumps(status))
     return status
 
