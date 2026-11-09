@@ -282,7 +282,6 @@ def build_margins(rows: list[dict], cite) -> tuple[str, dict]:
             row.append(_cell(r.get("segment")) or "All")
         row += [statistic_text(r), value_text(r), _cell(r.get("denominator")) or "not stated", _report_text(r, cite(r))]
         body.append(row)
-    metrics = {_cell(r.get("metric")).lower() for r in shown}
     note = "\n\n" + ORDER_NOTE
     return ("**Margins**\n\n" + _table(head, body) + note,
             {"rows": len(shown), "capped": capped, "ranges": 0, "dropped": _dropped(rows, kept), "sort": "public first, band upper then lower edge, newest edition first, gross before other margins"})
