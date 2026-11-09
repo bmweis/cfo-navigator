@@ -22,6 +22,7 @@ SPEND_ROW_CAP = 16
 MARGIN_ROW_CAP = 12
 COUNT_ROW_CAP = 12
 MIX_COLS_CAP = 4
+HEADER_MAX = 40       # characters of a mix column header before the period moves under the table
 
 _ITEM_ORDER = ("sm", "rd", "ga", "cs", "opex")
 _ITEM_LABEL = {"sm": "S&M", "rd": "R&D", "ga": "G&A", "cs": "Customer success", "opex": "Total opex"}
@@ -208,10 +209,42 @@ def _ranges(rows: list[dict], cite) -> list[str]:
     return lines
 
 
+def _dropped(rows: list[dict], kept: list[dict]) -> list[dict]:
+    keep = {id(r) for r in kept}
+    return [{"figure_key": r.get("figure_key"), "report": r.get("report_slug"), "metric": _cell(r.get("metric")),
+             "band": _cell(r.get("band"))} for r in rows if id(r) not in keep][:20]
+
+
+ORDER_NOTE = "Rows run public first, then by size band, newest edition first."
+
+
+def select_rows(rows: list[dict], cap: int, within) -> list[dict]:
+    """The rows a capped table keeps, chosen BEFORE the display sort so the cap never cuts the newest data.
+    Rule: every publisher's newest edition per band comes first, taking one row from each publisher-and-band group
+    in turn (public, band-less groups ahead of banded ones, then the more recent edition), then the next row of
+    each group, and so on; rows of an older edition fill what is left. `within` orders the rows inside one group.
+    Returns at most `cap` rows; the caller sorts them for display."""
+    groups: dict[tuple, list[dict]] = {}
+    for r in rows:
+        groups.setdefault((fg._edition_key(r)[0], fg._band_key(r.get("band"))), []).append(r)
+    ranked: list[tuple] = []
+    for g in groups.values():
+        newest = min(g, key=_edition_rank).get("report_slug")
+        cur = sorted([r for r in g if r.get("report_slug") == newest], key=within)
+        old = sorted([r for r in g if r.get("report_slug") != newest], key=lambda r: (_edition_rank(r), within(r)))
+        for i, r in enumerate(cur):
+            ranked.append((0, i, _size_rank(r)[0] != 0) + _edition_rank(r) + _size_rank(r)[1:3] + (str(r.get("source") or ""), str(r.get("figure_key")), id(r), r))
+        for i, r in enumerate(old):
+            ranked.append((1,) + _edition_rank(r) + (i,) + (str(r.get("source") or ""), str(r.get("figure_key")), id(r), r))
+    ranked.sort(key=lambda t: t[:-2])
+    return [t[-1] for t in ranked[:cap]]
+
+
 def build_spend(rows: list[dict], cite) -> tuple[str, dict]:
     """(markdown, info). rows: the sent spend rows; cite(row) -> the [n] of the row's report document."""
-    body_rows = sorted(rows, key=lambda r: (_item_of(r)[0],) + row_order_key(r))
-    shown, capped = body_rows[:SPEND_ROW_CAP], max(len(body_rows) - SPEND_ROW_CAP, 0)
+    kept = select_rows(rows, SPEND_ROW_CAP, lambda r: (_item_of(r)[0], fg.statistic_rank(r.get("statistic"))))
+    shown = sorted(kept, key=lambda r: (_item_of(r)[0],) + row_order_key(r))
+    capped = max(len(rows) - len(shown), 0)
     bases = []
     for r in shown:
         b = _basis_text(r)
@@ -224,7 +257,7 @@ def build_spend(rows: list[dict], cite) -> tuple[str, dict]:
     rng = _ranges(shown, cite)
     if rng:
         md += "\n\nRanges across the sent points:\n" + "\n".join(rng)
-    return md, {"rows": len(shown), "capped": capped, "ranges": len(rng)}
+    return md, {"rows": len(shown), "capped": capped, "ranges": len(rng), "dropped": _dropped(rows, kept)}
 
 
 def margin_sort_key(r: dict) -> tuple:
@@ -236,8 +269,10 @@ def margin_sort_key(r: dict) -> tuple:
 
 
 def build_margins(rows: list[dict], cite) -> tuple[str, dict]:
-    ordered = sorted(rows, key=margin_sort_key)
-    shown, capped = ordered[:MARGIN_ROW_CAP], max(len(ordered) - MARGIN_ROW_CAP, 0)
+    kept = select_rows(rows, MARGIN_ROW_CAP, lambda r: ("gross" not in _cell(r.get("metric")).lower(), _cell(r.get("metric")).lower(),
+                                                       fg.statistic_rank(r.get("statistic"))))
+    shown = sorted(kept, key=margin_sort_key)
+    capped = max(len(rows) - len(shown), 0)
     show_seg = len({(_cell(r.get("segment")).lower()) for r in shown}) > 1
     head = ["Metric", "Band"] + (["Segment"] if show_seg else []) + ["Statistic", "Value", "Basis", "Report and period"]
     body = []
@@ -248,10 +283,9 @@ def build_margins(rows: list[dict], cite) -> tuple[str, dict]:
         row += [statistic_text(r), value_text(r), _cell(r.get("denominator")) or "not stated", _report_text(r, cite(r))]
         body.append(row)
     metrics = {_cell(r.get("metric")).lower() for r in shown}
-    note = ("\n\nRows run by size band, smallest to largest, then newest edition; different margins sit in the same "
-            "order, not in groups." if len(metrics) > 1 else "")
+    note = "\n\n" + ORDER_NOTE
     return ("**Margins**\n\n" + _table(head, body) + note,
-            {"rows": len(shown), "capped": capped, "ranges": 0, "sort": "public first, band upper then lower edge, newest edition first, gross before other margins"})
+            {"rows": len(shown), "capped": capped, "ranges": 0, "dropped": _dropped(rows, kept), "sort": "public first, band upper then lower edge, newest edition first, gross before other margins"})
 
 
 # --- headcount counts and headcount mix --------------------------------------------------------------
@@ -373,11 +407,25 @@ def build_mix(rows: list[dict], cite) -> tuple[str, dict]:
             break
 
     head = ["Function"]
+    col_notes: list[str] = []
+    reprint_only: list[str] = []
     for hr, picked in col_data:
         label = " ".join(x for x in (_cell(hr.get("source")), _cell(hr.get("report_year"))) if x)
-        meta = ", ".join(x for x in (_cell(hr.get("data_period")), _band_text(hr), statistic_text(hr)) if x)
+        period = _cell(hr.get("data_period"))
+        # A header is the report, its edition and its period; a long period, the band, "adjacent band" and the
+        # statistic go in one line under the table so the header stays short.
+        short = f"{label} ({period})" if period and len(label) + len(period) + 3 <= HEADER_MAX else label
         n = cite(hr)
-        head.append(f"{label} ({meta})" + (f" [{n}]" if n else ""))
+        head.append(short + (f" [{n}]" if n else ""))
+        details = ", ".join(x for x in (period if short == label else "", _band_text(hr), statistic_text(hr)) if x)
+        col_notes.append(f"{label}: {details}")
+        # A function only a reprint prints (a row from another report than the column's own) is named once.
+        own = [f for f, r in picked.items() if r.get("report_slug") == hr.get("report_slug")]
+        extra = [fnames[f] for f, r in picked.items() if r.get("report_slug") != hr.get("report_slug") and f not in own]
+        if extra:
+            other = next((r for r in picked.values() if r.get("report_slug") != hr.get("report_slug")), None)
+            reprint_only.append(f"{', '.join(extra)} ({_cell((other or {}).get('source'))} {_cell((other or {}).get('report_year'))} prints "
+                                f"{'it' if len(extra) == 1 else 'them'}; {label} does not)")
     if derived_idx is not None:
         head.append("Derived people")
     body = []
@@ -407,7 +455,9 @@ def build_mix(rows: list[dict], cite) -> tuple[str, dict]:
         dn = cite(derived_total)
         md += (f"\n\nDerived people = share x total headcount ({value_text(derived_total)}, {_report_text(derived_total, dn)}), "
                "rounded; derived, not in the report.")
-    out_notes = []
+    out_notes = ["Column details: " + "; ".join(col_notes)]
+    if reprint_only:
+        out_notes.append("Only in a reprint: " + "; ".join(reprint_only))
     if older or extra_cols:
         names = []
         for k, rs in older + extra_cols:
@@ -471,7 +521,9 @@ def render_tables(text: str, rows: list[dict], cite) -> tuple[str, dict]:
     def one(kind: str) -> str:
         # The mix builder needs the sent totals too (for the derived people column); it picks its own share rows.
         md, meta = _builder(kind)(rows if kind == "mix" else rows_for(kind, rows), lambda r, _c=cite: _c(r))
-        info["rendered"][kind] = {k: v for k, v in meta.items() if k != "allowed_extra"}
+        info["rendered"][kind] = {k: v for k, v in meta.items() if k not in ("allowed_extra", "dropped")}
+        if meta.get("dropped"):
+            info.setdefault("cap_dropped", []).extend(dict(d, kind=kind) for d in meta["dropped"])
         bad = selfcheck(md, rows, extra=meta.get("allowed_extra"))
         if kind == "mix":
             bad += mix_selfcheck(md, rows)
@@ -577,3 +629,71 @@ def cite_shifts(text: str, shifts: list[dict], cite) -> tuple[str, int]:
             lines[i] = ln.replace(_DERIVED_TAG, " ".join(marks) + " " + _DERIVED_TAG, 1).replace("  ", " ")
             changed += 1
     return "\n".join(lines), changed
+
+
+# --- the "What shifted" lines, built in code ---------------------------------------------------------------
+
+SHIFTS_PLACEHOLDER = re.compile(r"\{\{\s*shifts\s*\}\}", re.I)
+SHIFT_LINES = 2
+_WHAT_SHIFTED = re.compile(r"^\s*(?:#{1,6}\s*|\*\*)?what shifted\b", re.I)
+_SECTION_END = re.compile(r"^\s*(?:#{1,6}\s+\S|\*\*[^*]+\*\*\s*$|(?:\*\*|_)?left out\b)", re.I)
+_DERIVED_SUFFIX = "; derived from stored reports"
+
+
+def shift_line(sh: dict, cite) -> str:
+    """One computed shift as a sentence: the exact computed text, the [n] of both endpoint reports, the derived tag."""
+    base = str(sh.get("line", "")).strip()
+    if base.endswith(_DERIVED_SUFFIX):
+        base = base[: -len(_DERIVED_SUFFIX)]
+    marks = []
+    for end in ("from", "to"):
+        e = sh.get(end) or {}
+        row = {"report_slug": e.get("report_slug", ""), "source": e.get("source", ""), "report": e.get("report", ""),
+               "report_year": e.get("year", "")}
+        n = cite(row) if row["report_slug"] else None
+        if n and f"[{n}]" not in marks:
+            marks.append(f"[{n}]")
+    base = base[:1].upper() + base[1:]
+    return " ".join(x for x in (base, " ".join(marks), _DERIVED_TAG) if x) + "."
+
+
+def render_shifts(text: str, shifts: list[dict], cite, max_lines: int = SHIFT_LINES) -> tuple[str, dict]:
+    """Put the computed shift lines into the answer in code, so the model never retypes a computed number.
+    The lines go at the {{shifts}} placeholder. Fallbacks, recorded in info["fallback"]: no placeholder and a
+    "What shifted" section: the model's lines that carry a number are replaced by the computed ones (a sentence of cause
+    with no number stays); no placeholder and no section: one section is appended before the closing "Left out"
+    line; a placeholder with no computed shifts is removed. Returns (text, info)."""
+    info: dict = {"fallback": [], "lines": 0}
+    text = text or ""
+    lines_md = [shift_line(sh, cite) for sh in (shifts or [])[:max_lines]]
+    block = "\n\n".join(lines_md)
+    if SHIFTS_PLACEHOLDER.search(text):
+        first = True
+
+        def one(_m):
+            nonlocal first
+            if first and block:
+                first = False
+                return "\n\n" + block + "\n\n"
+            info["fallback"].append("repeated or empty {{shifts}} placeholder removed")
+            return ""
+        out = SHIFTS_PLACEHOLDER.sub(one, text)
+        info["lines"] = len(lines_md)
+        return re.sub(r"\n{3,}", "\n\n", out).strip(), info
+    if not lines_md:
+        return text, info
+    src = text.split("\n")
+    start = next((i for i, ln in enumerate(src) if _WHAT_SHIFTED.match(ln)), None)
+    if start is None:
+        info["fallback"].append("missing placeholder: What shifted section appended")
+        at = next((i for i, ln in enumerate(src) if re.match(r"^\s*(?:\*\*|_)?left out\b", ln, re.I)), len(src))
+        out = src[:at] + ["**What shifted**", "", block, ""] + src[at:]
+        info["lines"] = len(lines_md)
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip(), info
+    end = next((i for i in range(start + 1, len(src)) if _SECTION_END.match(src[i])), len(src))
+    kept = [ln for ln in src[start + 1:end] if ln.strip() and not re.search(r"\d", ln)]
+    replaced = sum(1 for ln in src[start + 1:end] if ln.strip() and re.search(r"\d", ln))
+    info["fallback"].append(f"missing placeholder: {replaced} model-written line(s) with a number replaced by the computed lines")
+    out = src[:start + 1] + ["", block, ""] + [x for ln in kept for x in (ln, "")] + src[end:]
+    info["lines"] = len(lines_md)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip(), info

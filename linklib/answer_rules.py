@@ -153,7 +153,7 @@ SHAPE_RULES = (
     "  (b) Spend. One table of spend as a percent of revenue or ARR. Rows: S&M, R&D, G&A, customer success, total. "
     "Cost of revenue (COGS) and gross margin are not spend rows: they go in their own small table, margins. Columns by basis, each labelled (percent of revenue, percent of ARR), "
     "with source and period. A cell follows the line-item status in the lookup notes, as in (a).\n"
-    "  (c) What shifted. Only the computed shift lines in the notes, at most two; leave the section out when there are none.\n"
+    "  (c) What shifted. Write {{shifts}} on a line of its own under the heading (the system inserts the computed lines, at most two); you may add one sentence on a stated cause, with no number. Leave the section out when there are no computed lines.\n"
     "- Do not repeat a table's rows in a sentence. One sentence for a table at most, and only what the table cannot show "
     "(a caveat, a band difference). The answer must reach its last line inside the length limit.\n"
     "- The headcount mix table holds the edition the notes send, one edition per column; an older edition's mix, if stored, "
@@ -164,11 +164,17 @@ SHAPE_RULES = (
 
 
 # Added to the lookup notes when the system builds the spend and/or margins table (linklib.table_render).
+MIX_PROSE_RULE = (" The headcount mix table carries every function's share and, where a total exists, its Derived people column: "
+                  "write no function share or count in a sentence (no \"20% sales\"), and never say the table cannot show a "
+                  "figure it shows.")
+
+
 def table_placeholder_note(kinds: list[str]) -> str:
     names = {"headcount": "the total headcount table ({{table:headcount}})", "mix": "the headcount mix table ({{table:mix}})",
              "spend": "the spend table ({{table:spend}})", "margins": "the margins table ({{table:margins}})"}
     built = " and ".join(names[k] for k in kinds if k in names)
-    return (f"TABLES THE SYSTEM BUILDS: {built}. The system builds each from the stored rows and puts it where you write its "
+    mix = MIX_PROSE_RULE if "mix" in kinds else ""
+    return (f"TABLES THE SYSTEM BUILDS: {built}.{mix} The system builds each from the stored rows and puts it where you write its "
             "placeholder. Write the placeholder on a line of its own, once, where the table belongs. Do not write those rows "
             "as a table or a list yourself and do not repeat a table's rows in a sentence; use sentences for the headline "
             "figures and what the table cannot show. You still see the rows so you can write about them. The table rules "
