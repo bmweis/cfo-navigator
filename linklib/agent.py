@@ -1168,13 +1168,20 @@ def answer_question(
             lint = []
         # The spend and margins tables are built last, from the rows that were really sent, so the strip and the
         # lint above only ever see what the model wrote. A failure leaves the text as written.
-        if prestep.active and prestep.table_kinds:
+        if prestep.active and (prestep.table_kinds or getattr(prestep, "shifts", None)):
             try:
                 from . import table_render as _tr
-                text, tinfo = _tr.render_tables(text, prestep.table_rows, _bp.table_cite(citations, sent_docs))
-                prestep.tables = tinfo
-                if isinstance(done.get("prestep"), dict):
-                    done["prestep"] = dict(done["prestep"], tables=tinfo)
+                _cite = _bp.table_cite(citations, sent_docs)
+                tinfo = {}
+                if prestep.table_kinds:
+                    text, tinfo = _tr.render_tables(text, prestep.table_rows, _cite)
+                text, n_cited = _tr.cite_shifts(text, list(getattr(prestep, "shifts", []) or []), _cite)
+                if n_cited:
+                    tinfo["shift_lines_cited"] = n_cited
+                if tinfo:
+                    prestep.tables = tinfo
+                    if isinstance(done.get("prestep"), dict):
+                        done["prestep"] = dict(done["prestep"], tables=tinfo)
             except Exception:
                 _log.exception("table render failed; answer left as written")
         return Answer(text=text, citations=citations, stripped=stripped,

@@ -165,7 +165,8 @@ SHAPE_RULES = (
 
 # Added to the lookup notes when the system builds the spend and/or margins table (linklib.table_render).
 def table_placeholder_note(kinds: list[str]) -> str:
-    names = {"spend": "the spend table ({{table:spend}})", "margins": "the margins table ({{table:margins}})"}
+    names = {"headcount": "the total headcount table ({{table:headcount}})", "mix": "the headcount mix table ({{table:mix}})",
+             "spend": "the spend table ({{table:spend}})", "margins": "the margins table ({{table:margins}})"}
     built = " and ".join(names[k] for k in kinds if k in names)
     return (f"TABLES THE SYSTEM BUILDS: {built}. The system builds each from the stored rows and puts it where you write its "
             "placeholder. Write the placeholder on a line of its own, once, where the table belongs. Do not write those rows "
@@ -182,6 +183,22 @@ def shape_rules(kinds: list[str]) -> str:
     end = SHAPE_RULES.find("  (c) What shifted.")
     if start < 0 or end < 0:
         return SHAPE_RULES
+    base = SHAPE_RULES
+    if "headcount" in kinds or "mix" in kinds:
+        a0, a1 = base.find("  (a) Headcount."), base.find("  (b) Spend.")
+        hp = []
+        if "headcount" in kinds:
+            hp.append("{{table:headcount}} (the system builds the total headcount table: one row per report edition, band and statistic)")
+        if "mix" in kinds:
+            hp.append("{{table:mix}} (the system builds the headcount mix table: functions down, one edition per column, with derived "
+                      "people counts where the same report prints a total)")
+        base = (base[:a0] + "  (a) Headcount. Write " + " and ".join(hp) + ", each on a line of its own. Add one or two sentences on what "
+                "the tables cannot show; do not list their rows and do not work out a count yourself. A count of people by function the notes "
+                "carry goes in a sentence, not a table.\n" + base[a1:])
+        start = base.find("  (b) Spend.")
+        end = base.find("  (c) What shifted.")
+        if not ({"spend", "margins"} & set(kinds)):
+            return base
     parts = []
     if "spend" in kinds:
         parts.append("{{table:spend}} (the system builds the spend table: percent of revenue or ARR by line item)")
@@ -189,4 +206,4 @@ def shape_rules(kinds: list[str]) -> str:
         parts.append("{{table:margins}} (the system builds the margins table; gross margin and cost of revenue stay out of the spend table)")
     repl = ("  (b) Spend and margins. Write " + " and ".join(parts) + ", each on a line of its own. Add one or two sentences "
             "on what the tables cannot show; do not list their rows.\n")
-    return SHAPE_RULES[:start] + repl + SHAPE_RULES[end:]
+    return base[:start] + repl + base[end:]

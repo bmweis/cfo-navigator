@@ -67,7 +67,7 @@ def test_expand_control_is_wired_and_text_stays_in_the_dom(buddy_html):
     assert 'id="ask-ex-toggle"' in html and 'aria-controls="ask-ex-answer"' in html
     assert 'aria-expanded="false"' in html and re.search(r'id="ask-ex-toggle"[^>]*\shidden', html)
     # the clip is CSS gated on a class only the script adds, so no script means full text
-    assert ".ask-example.ask-ex-js:not(.open) .ask-answer{max-height:300px" in html
+    assert ".ask-example.ask-ex-js:not(.open) .ask-answer{max-height:120px" in html
     # the last sentence of the answer is in the served HTML, not behind the button
     assert "which of these frameworks deserves the most weight." in html
 
@@ -97,7 +97,7 @@ def test_expand_toggle_in_a_browser(buddy_html):
         pg = b.new_page(viewport={"width": 390, "height": 900})
         pg.set_content(html)
         h0 = pg.evaluate("document.getElementById('ask-ex-answer').getBoundingClientRect().height")
-        assert 295 <= h0 <= 305
+        assert 115 <= h0 <= 125
         pg.click("#ask-ex-toggle")
         assert pg.get_attribute("#ask-ex-toggle", "aria-expanded") == "true"
         assert pg.inner_text("#ask-ex-toggle") == "Show less"

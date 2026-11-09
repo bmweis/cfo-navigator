@@ -24467,6 +24467,14 @@ _ASK_CHIP_CSS = (
 
 # Past-question row styles, shared by /tools/fpa-buddy and its full list page. Plain string, single
 # braces; injected with {_ASK_PQ_CSS}. The chip styles ride along in _ASK_CHIP_CSS.
+_ASK_LIST_PAGE_CSS = (
+    # /tools/fpa-buddy/questions and /ask/history share the main Buddy page's .page-standard tier
+    # with no inner reading column. Two things are capped so a 1300px row stays readable: the
+    # search row and the answer text (a card is full width, its prose is not).
+    ".ask-list-page .ask-pq-form{max-width:640px;}"
+    ".ask-list-page .ask-hist-answer{max-width:820px;}"
+)
+
 _ASK_PQ_CSS = (
     '.ask-pq-row{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}\n'
     '.ask-pq-row[open]{border-color:var(--navy);}\n'
@@ -24484,7 +24492,7 @@ _ASK_PQ_CSS = (
     '.ask-pq-body{padding:2px 16px 14px 32px;}\n'
     '.ask-pq-heading{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}\n'
     + _ASK_CHIP_CSS
-    + ".ask-pq-foot{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}"
+    + ".ask-pq-foot{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}"
     # The list under the search box: one disclosure with the newest few rows and a link to the rest.
     ".ask-pq-listsum{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0;margin-bottom:6px;}"
     ".ask-pq-listsum::-webkit-details-marker{display:none;}"
@@ -24573,9 +24581,8 @@ def _pq_row_html(r: dict, usage_user_id, authed: bool) -> str:
     who = _ask_byline(r, usage_user_id, authed)
     admin_controls = ""
     if authed:
-        admin_controls = f"""<div style="display:flex;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
-      <form method="post" action="/questions/{r["id"]}/hide" style="margin:0;"><button type="submit" class="admin-only ask-ctl-sm ask-ctl-w">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>
-    </div>"""
+        admin_controls = (f'<form method="post" action="/questions/{r["id"]}/hide" style="margin:0;">'
+                          f'<button type="submit" class="admin-only ask-ctl-sm ask-ctl-w">{"Unhide" if r.get("hidden_public") else "Hide"}</button></form>')
     # Meta: status chips first (Hidden for admins, Private, rating, from the
     # one chip function), then the byline and date as plain nowrap segments.
     # The chip set is the same on every surface; unrated, public, visible
@@ -24605,11 +24612,14 @@ def _pq_row_html(r: dict, usage_user_id, authed: bool) -> str:
     resume_html = ""
     if usage_user_id is not None and r.get("user_id") == usage_user_id and r.get("conversation_id"):
         priv_label = "Allow sharing" if r.get("is_private") else "Make private"
-        resume_html = (f'<div class="ask-pq-foot">'
-                       f'<form method="post" action="/questions/{r["id"]}/private" style="margin:0;">'
+        resume_html = (f'<form method="post" action="/questions/{r["id"]}/private" style="margin:0;">'
                        f'<button type="submit" class="ask-ctl ask-ctl-sm ask-ctl-w">{priv_label}</button></form>'
                        f'<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" '
-                       f'data-cid="{_esc(r["conversation_id"])}" onclick="resumeConvoById(this.dataset.cid)">Resume</button></div>')
+                       f'data-cid="{_esc(r["conversation_id"])}" onclick="resumeConvoById(this.dataset.cid)">Resume</button>')
+    # One footer row for every control, admin Hide first (leftmost, and first when the row wraps),
+    # then Make private and Resume. Hide shows for any row to an admin; the other two only on the
+    # reader's own rows.
+    foot_html = f'<div class="ask-pq-foot">{admin_controls}{resume_html}</div>' if (admin_controls or resume_html) else ""
     # A native <details>, closed on every load: the row is the question,
     # byline and a chevron; the answer, sources and admin buttons are the
     # disclosure body. Same fold element the Search past questions section uses.
@@ -24618,8 +24628,7 @@ def _pq_row_html(r: dict, usage_user_id, authed: bool) -> str:
   <div class="ask-pq-body">
     <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
     {src_html}
-    {resume_html}
-    {admin_controls}
+    {foot_html}
   </div>
 </details>"""
 
@@ -24835,10 +24844,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         if usage_html else
         '"intro" "question"'
     )
+    # Phone: the real example sits BELOW the form (and the similar-questions card), so the
+    # entry card is the first thing under the intro.
     _intro_areas_mobile = (
-        '"intro" "example" "usage" "question"'
+        '"intro" "usage" "question" "example"'
         if usage_html else
-        '"intro" "example" "question"'
+        '"intro" "question" "example"'
     )
     # The "similar questions" card is its own grid item under the entry card, in the
     # left column only. The example spans just the rows above it, so showing or
@@ -24846,7 +24857,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # while the card is shown (.has-sim), because an empty row would still add a gap.
     _intro_areas_desktop_sim = _intro_areas_desktop + ' "sim ."'
     _intro_rows_desktop_sim = _intro_rows_desktop + " auto"
-    _intro_areas_mobile_sim = _intro_areas_mobile + ' "sim"'
+    _intro_areas_mobile_sim = (
+        '"intro" "usage" "question" "sim" "example"'
+        if usage_html else
+        '"intro" "question" "sim" "example"'
+    )
 
     body = f"""<div class="page page-standard" id="fpa-page">
 <p style="margin:0 0 12px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
@@ -25008,7 +25023,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fpa-intro-layout.has-sim{{grid-template-areas:{_intro_areas_desktop_sim};
   grid-template-rows:{_intro_rows_desktop_sim};}}
 .fpa-intro-area-intro{{grid-area:intro;}}
-.fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
+.fpa-intro-area-example{{grid-area:example;align-self:start;}}
 .fpa-intro-area-usage{{grid-area:usage;}}
 .fpa-intro-area-question{{grid-area:question;align-self:stretch;}}
 @media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;grid-template-rows:none;
@@ -25071,7 +25086,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fpa-intro-area-example .ask-answer{{flex:1;}}
 
 .ask-example{{border:1px dashed var(--line-strong);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--surface);}}
-.ask-example.ask-ex-js:not(.open) .ask-answer{{max-height:300px;overflow:hidden;position:relative;}}
+.ask-example.ask-ex-js:not(.open) .ask-answer{{max-height:120px;overflow:hidden;position:relative;}}
 .ask-example.ask-ex-js:not(.open) .ask-answer:after{{content:"";position:absolute;left:0;right:0;bottom:0;height:64px;background:linear-gradient(rgba(255,255,255,0),var(--surface));pointer-events:none;}}
 .ask-ex-toggle{{margin:10px 0 4px;align-self:flex-start;}}
 .ask-ex-toggle[hidden]{{display:none;}}
@@ -25134,7 +25149,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
   font:inherit;padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;
   margin-bottom:8px;transition:border-color .12s ease;}}
 .ask-recent-foot{{display:flex;justify-content:space-between;align-items:center;gap:12px;}}
-.ask-pq-foot,.fu-foot{{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}}
+.ask-pq-foot,.fu-foot{{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}}
 .fu-foot{{margin-top:8px;flex-wrap:wrap;}}
 .fu-status{{flex:1 1 100%;}}
 .fu-status:empty{{display:none;}}
@@ -26320,7 +26335,7 @@ def fpa_buddy_questions(request: Request, pq: str = "", helpful: str = "", page:
     keep = "1" if helpful_only else ""
     heading = ("Matching questions" if pq.strip() else "Helpful questions only" if helpful_only else "All questions")
     body = f"""<div class="page page-standard">
-<div class="tool-prose">
+<div class="ask-list-page">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>{heading} ({total})</h1>
 <form method="get" action="/tools/fpa-buddy/questions" class="ask-pq-form" style="margin:14px 0;">
@@ -26335,6 +26350,7 @@ def fpa_buddy_questions(request: Request, pq: str = "", helpful: str = "", page:
 <style>
 {_ASK_CTL_CSS}
 {_ASK_PQ_CSS}
+{_ASK_LIST_PAGE_CSS}
 </style>
 <script>
 // Resume opens the thread on the Buddy page (which strips the parameter after opening it).
@@ -26777,7 +26793,7 @@ def ask_history(request: Request, page: int = 1):
          '<a href="/tools/fpa-buddy">Ask a question &rarr;</a></div>')
 
     body = f"""<div class="page page-standard">
-<div class="tool-prose">
+<div class="ask-list-page">
 <p style="margin:0 0 4px;"><a href="/tools/fpa-buddy" style="font-size:13px;color:var(--muted);">&larr; FP&amp;A Buddy</a></p>
 <h1>Your FP&amp;A Buddy history</h1>
 <p style="color:var(--muted);margin:4px 0 22px;">Every question you&rsquo;ve asked, with the answer and what it cost. Others can&rsquo;t see this page or your usage&mdash;it&rsquo;s yours alone. Unless you mark a question private, it may also appear in the <a href="/tools/fpa-buddy#past-questions">past questions list</a> for other users to browse, without your name. See the <a href="/privacy">privacy policy</a>.</p>
@@ -26790,6 +26806,7 @@ def ask_history(request: Request, page: int = 1):
 <style>
 {_ASK_CTL_CSS}
 {_ASK_CHIP_CSS}
+{_ASK_LIST_PAGE_CSS}
 .convo-chip{{display:inline-flex;align-items:center;margin-top:10px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:4px 12px;}}
 </style>
 </div>"""

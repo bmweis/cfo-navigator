@@ -671,6 +671,47 @@ def _window_args(sub: Sub) -> dict:
 BASIS_RESERVE = 6
 
 
+MIX_UNIT_MAX = 12      # function rows kept together for one report edition, band and period
+MIX_UNITS_MAX = 3      # publishers whose mix is kept whole in one part
+
+
+def mix_units(rows: list[dict]) -> list[list[int]]:
+    """Index lists, one per publisher: the headcount-share rows (a function's percent of headcount, never a
+    total or a sum row) of that publisher's newest edition, from the one report, band, data period and statistic
+    its best-ranked share row sits in. Rows are best first, so the anchor is the closest match."""
+    share = [i for i, r in enumerate(rows) if fg.row_table_kind(r) == "headcount_share"
+             and not fg.is_total_fte_row(r) and fg.mix_function_ok(r)]
+    newest: dict[str, int] = {}
+    for i in share:
+        pub, yr = fg._edition_key(rows[i])
+        newest[pub] = max(newest.get(pub, -1), yr)
+    units: list[list[int]] = []
+    seen_pub: set = set()
+    for i in share:
+        pub, yr = fg._edition_key(rows[i])
+        if pub in seen_pub or yr != newest[pub]:
+            continue
+        seen_pub.add(pub)
+        a = rows[i]
+        key = (a["report_slug"], fg._band_key(a["band"]), fg._year_num(a["data_period"]), _norm(a["statistic"]))
+        unit, funcs = [], set()
+        for j in share:
+            r = rows[j]
+            if (r["report_slug"], fg._band_key(r["band"]), fg._year_num(r["data_period"]), _norm(r["statistic"])) != key:
+                continue
+            fk = fg.function_key(fg.share_function(r))
+            if fk in funcs:
+                continue
+            funcs.add(fk)
+            unit.append(j)
+            if len(unit) >= MIX_UNIT_MAX:
+                break
+        units.append(unit)
+        if len(units) >= MIX_UNITS_MAX:
+            break
+    return units
+
+
 def pick_rows(rows: list[dict], cap: int) -> list[dict]:
     """At most `cap` rows from rows already sorted best first (basis group, match, band,
     sample, newest year). Before the rest is filled, the best row of every publisher and of
@@ -689,6 +730,16 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
                 best[ed] = i
     reserved = sorted(best.values(), key=lambda i: (-fg._year_num(rows[i].get("report_year")), i))[:max(cap // 2, 1)]
     chosen += reserved
+    # A headcount mix is one unit: every function row of the anchor report, edition, band and period is kept
+    # together and counts against the cap once (a unit adds its extra rows to the cap, it does not compete for it).
+    extra = 0
+    for unit in mix_units(rows):
+        new = [i for i in unit if i not in chosen]
+        if not new:
+            continue
+        chosen += new
+        extra += max(len(new) - 1, 0)
+    cap = cap + extra
     # The publisher floor: the best-ranked row (rows are sorted best first, newest data period first) of each
     # publisher's NEWEST edition inside the rows given. Older editions of a publisher never take a floor slot.
     newest_ed: dict[str, int] = {}
@@ -1076,9 +1127,10 @@ PRESTEP_RULES = (
     "deeper\" line naming each report you cited, so do not write one.\n"
     "\nTable mechanics when figures are present:\n"
     "- If a table helps, its columns are, in this order: metric, band as printed, statistic, value, report and "
-    "year, match note. Six rows at most unless the user asked for every edition. Newest report first.\n"
-    "- The match note is a short phrase of a few words. A caveat that applies to every row (for example, "
-    "\"band wider than asked\") is stated once above the table and never repeated in each row.\n"
+    "year. Six rows at most unless the user asked for every edition. Newest report first. Cells hold a value or a "
+    "short label only: no match column, no note column, no sentence in a cell.\n"
+    "- A caveat about how a figure differs from what was asked (a wider band, another basis) is stated once in a "
+    "sentence above or below the table, never in a column and never repeated in each row.\n"
     "- State a period exactly as the figures give it (the years printed), and compute a percent change or "
     "difference only from numbers shown in the answer. Count the years between two dates correctly."
 )
@@ -1318,7 +1370,8 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
         order = _order_note(s_.picked)
         if order:
             s_.notes.append(order)
-        for extra in (band_order_note(s_.picked), table_kinds_note(s_.picked), derived_counts_note(s_.picked)):
+        for extra in (band_order_note(s_.picked), table_kinds_note(s_.picked),
+                      "" if "mix" in ps.table_kinds else derived_counts_note(s_.picked)):
             if extra:
                 s_.notes.append(extra)
     # The text block sent before the question: lookup notes, the plan, the notice.
