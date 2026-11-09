@@ -12056,3 +12056,7 @@ line items S&M, R&D, G&A, customer success, total opex, then others; a "target"/
 Statistic column; the heading names the bases present; a range line per line item, basis and statistic is computed from the
 sent points whose bands overlap (at least two sources, each endpoint named and cited, targets and other bases never in it);
 the margins Segment column only appears when more than one segment does. Headcount counts and mix stay model-written (step 2).
+
+### FP&A Buddy page layout fixes (2026-11)
+
+UI only; the answer pipeline is untouched. `/tools/fpa-buddy/questions` and `/ask/history` stay on `.page-standard` (the main Buddy page's tier) but no longer wrap their content in `.tool-prose` (760px); an `.ask-list-page` wrapper caps only the search row (640px) and answer text (820px), via `_ASK_LIST_PAGE_CSS`. In `_pq_row_html`, Hide, Make private and Resume render in one `.ask-pq-foot` container, Hide first; the footer is `flex-wrap:wrap`, so on a phone Hide stays first. Hide exists only on past-question rows (the live conversation footer and `/ask/history` have none). The sample card (`webapp/buddy_example.py`, unchanged text) clips its answer at 120px until "Show full answer", is `align-self:start` beside the form on a desktop (no stretch to the form's height), and on a phone its grid area comes after the form and the similar-questions card (`_intro_areas_mobile`, `_intro_areas_mobile_sim`). Tests: `tests/test_buddy_layout_fixes.py`, `tests/test_buddy_real_example.py`.

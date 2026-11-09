@@ -24481,7 +24481,7 @@ _ASK_PQ_CSS = (
     '.ask-pq-body{padding:2px 16px 14px 32px;}\n'
     '.ask-pq-heading{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}\n'
     + _ASK_CHIP_CSS
-    + ".ask-pq-foot{display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}"
+    + ".ask-pq-foot{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}"
     # The list under the search box: one disclosure with the newest few rows and a link to the rest.
     ".ask-pq-listsum{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 0;margin-bottom:6px;}"
     ".ask-pq-listsum::-webkit-details-marker{display:none;}"
@@ -24833,10 +24833,12 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
         if usage_html else
         '"intro" "question"'
     )
+    # Phone: the real example sits BELOW the form (and the similar-questions card), so the
+    # entry card is the first thing under the intro.
     _intro_areas_mobile = (
-        '"intro" "example" "usage" "question"'
+        '"intro" "usage" "question" "example"'
         if usage_html else
-        '"intro" "example" "question"'
+        '"intro" "question" "example"'
     )
     # The "similar questions" card is its own grid item under the entry card, in the
     # left column only. The example spans just the rows above it, so showing or
@@ -24844,7 +24846,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
     # while the card is shown (.has-sim), because an empty row would still add a gap.
     _intro_areas_desktop_sim = _intro_areas_desktop + ' "sim ."'
     _intro_rows_desktop_sim = _intro_rows_desktop + " auto"
-    _intro_areas_mobile_sim = _intro_areas_mobile + ' "sim"'
+    _intro_areas_mobile_sim = (
+        '"intro" "usage" "question" "sim" "example"'
+        if usage_html else
+        '"intro" "question" "sim" "example"'
+    )
 
     body = f"""<div class="page page-standard" id="fpa-page">
 <p style="margin:0 0 12px;"><a href="/tools" style="font-size:13px;color:var(--muted);">&larr; Toolbox</a></p>
@@ -25006,7 +25012,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fpa-intro-layout.has-sim{{grid-template-areas:{_intro_areas_desktop_sim};
   grid-template-rows:{_intro_rows_desktop_sim};}}
 .fpa-intro-area-intro{{grid-area:intro;}}
-.fpa-intro-area-example{{grid-area:example;align-self:stretch;}}
+.fpa-intro-area-example{{grid-area:example;align-self:start;}}
 .fpa-intro-area-usage{{grid-area:usage;}}
 .fpa-intro-area-question{{grid-area:question;align-self:stretch;}}
 @media(max-width:900px){{.fpa-intro-layout{{grid-template-columns:1fr;row-gap:24px;grid-template-rows:none;
@@ -25069,7 +25075,7 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fpa-intro-area-example .ask-answer{{flex:1;}}
 
 .ask-example{{border:1px dashed var(--line-strong);border-radius:14px;padding:18px 20px;margin:0 0 24px;background:var(--surface);}}
-.ask-example.ask-ex-js:not(.open) .ask-answer{{max-height:300px;overflow:hidden;position:relative;}}
+.ask-example.ask-ex-js:not(.open) .ask-answer{{max-height:120px;overflow:hidden;position:relative;}}
 .ask-example.ask-ex-js:not(.open) .ask-answer:after{{content:"";position:absolute;left:0;right:0;bottom:0;height:64px;background:linear-gradient(rgba(255,255,255,0),var(--surface));pointer-events:none;}}
 .ask-ex-toggle{{margin:10px 0 4px;align-self:flex-start;}}
 .ask-ex-toggle[hidden]{{display:none;}}
