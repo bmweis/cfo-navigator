@@ -125,7 +125,7 @@ def _band_text(r: dict) -> str:
     else:
         txt = band_display(b)
     if r.get("match") == "adjacent_band" or r.get("band_context"):
-        txt += " (adjacent band)" if b and fg.parse_band(b) is not None else " (all sizes, context)"
+        txt += " (adjacent band)" if b and fg.parse_band(b) is not None else " (context)"
     return txt
 
 
@@ -298,12 +298,30 @@ def _prefer(rows: list[dict]) -> dict:
     return sorted(rows, key=lambda r: (bool(r.get("cited_source")), str(r.get("source") or ""), str(r.get("figure_key"))))[0]
 
 
+def _not_a_count(r: dict) -> bool:
+    """A hiring target, a plan or an estimate is not a total headcount figure: it never goes in the total headcount table."""
+    return _is_target(r) or fg.is_estimate(r) or str(r.get("statistic") or "").strip().lower() in ("context", "target", "plan", "goal")
+
+
+def excluded_counts(rows: list[dict]) -> list[dict]:
+    """Total-headcount-shaped rows the table leaves out because they are a target, plan or estimate (one per report and period)."""
+    seen, out = set(), []
+    for r in rows:
+        if fg.row_table_kind(r) == "headcount_count" and fg.is_total_fte_row(r) and not _is_delta(r) and r.get("value_num") is not None and _not_a_count(r):
+            k = (r.get("report_slug"), r.get("data_period"), str(r.get("statistic") or "").lower())
+            if k not in seen:
+                seen.add(k)
+                out.append(r)
+    return out
+
+
 def count_rows(rows: list[dict]) -> list[dict]:
     """Total headcount (FTE) rows: a number of people, never a change row, one per edition, band, period, statistic
     and denominator. Different denominators or statistics are different rows."""
     groups: dict[tuple, list[dict]] = {}
     for r in rows:
-        if fg.row_table_kind(r) != "headcount_count" or not fg.is_total_fte_row(r) or _is_delta(r) or r.get("value_num") is None:
+        if fg.row_table_kind(r) != "headcount_count" or not fg.is_total_fte_row(r) or _is_delta(r) or r.get("value_num") is None \
+                or _not_a_count(r):
             continue
         k = (fg._edition_key(r), fg._band_key(r.get("band")), fg._year_num(r.get("data_period")),
              (r.get("statistic") or "").strip().lower(), fg._denom_key(r.get("denominator")))
@@ -317,7 +335,12 @@ def build_headcount(rows: list[dict], cite) -> tuple[str, dict]:
     body = [[_report_text(r, cite(r)), _band_text(r), statistic_text(r), value_text(r), _cell(r.get("denominator")) or "not stated"]
             for r in shown]
     md = "**Total headcount (a number of people)**\n\n" + _table(["Report and period", "Band", "Statistic", "Value", "Basis"], body)
-    return md, {"rows": len(shown), "capped": capped, "ranges": 0}
+    out = excluded_counts(rows)
+    if out:
+        names = "; ".join(f"{_cell(r.get('source'))} {_cell(r.get('report_year'))} ({_cell(r.get('data_period'))}, {statistic_text(r)})"
+                          for r in out[:4])
+        md += f"\n\nNot shown, not a headcount count: {names}."
+    return md, {"rows": len(shown), "capped": capped, "ranges": 0, "excluded": len(out)}
 
 
 def mix_share_rows(rows: list[dict]) -> list[dict]:

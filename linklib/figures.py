@@ -825,7 +825,11 @@ def _num(x: float) -> str:
 
 
 def _ends(r: dict) -> str:
-    return f"{r['source']}, {r['report']}".strip(", ") + (f", {r['data_period']}" if r["data_period"] else "")
+    """"<publisher>, <report>, <period>" with the publisher named once: a report title that already starts with the
+    publisher's name is not preceded by it again. Display only."""
+    src, rep = str(r["source"] or "").strip(), str(r["report"] or "").strip()
+    who = rep if (src and rep.lower().startswith(src.lower())) else f"{src}, {rep}".strip(", ")
+    return who + (f", {r['data_period']}" if r["data_period"] else "")
 
 
 def _band_key(text) -> tuple:
@@ -1082,9 +1086,10 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
         unit_txt = "points" if kind == "points" else "percent"
         direction = "up" if delta > 0 else "down"
         v = lambda x: _num(x["value_num"]) + ("%" if _is_percent(x["unit"]) else (f" {x['unit']}" if x["unit"] else ""))
-        ya, yb = _year_num(a["data_period"]), _year_num(b["data_period"])
-        span = f", a {yb - ya}-year span" if ya > 0 and yb > ya else ""
-        line = (f"{b['metric']} at {b['band'] or 'no band'} ({b['statistic'] or 'statistic not stated'}): {direction} {_num(size)} "
+        sp = span_text(a, b)
+        span = f", {sp}" if sp else ""
+        seg_txt = f", {b['segment']}" if (b.get("segment") or "").strip() else ""
+        line = (f"{b['metric']} at {b['band'] or 'no band'} ({b['statistic'] or 'statistic not stated'}{seg_txt}): {direction} {_num(size)} "
                 f"{unit_txt}, from {v(a)} ({_ends(a)}) to {v(b)} ({_ends(b)}){span}; "
                 + ("different surveys, directional only" if directional else
                    (f"one series: {a['series'] or a['source']}, the same report's own history (same respondents and definition)"
@@ -1195,7 +1200,10 @@ def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segmen
     seen: set = set()
     first, rest = [], []
     for sh in ordered:
-        fam = name_key(sh["metric"]) or frozenset({_lc(sh["metric"])})
+        # One family per expense line ("Sales and Marketing Expenses % of Revenue" and "S&M expense" are both S&M), so
+        # two spend lines cannot push the headcount or margin line off the printed list.
+        line_item = expense_line_of(sh["metric"], "", "percent") if sh.get("unit") == "percent" else ""
+        fam = ("expense", line_item) if line_item else (name_key(sh["metric"]) or frozenset({_lc(sh["metric"])}))
         (rest if fam in seen else first).append(sh)
         seen.add(fam)
     return (first + rest)[:cap], {"quartile_left_out": quart, "over_cap": max(len(first) + len(rest) - cap, 0)}
@@ -1287,6 +1295,32 @@ def statistic_rank(statistic, wants: dict | None = None) -> float:
     return 2          # empty, "value", "reported": the single printed value
 
 
+_ISO_DATE = re.compile(r"(?<!\d)((?:19|20)\d{2})-(\d{2})(?:-(\d{2}))?(?!\d)")
+
+
+def _period_months(period) -> int | None:
+    """Months since year 0 for the last ISO date ("2026-05-09") a data period prints, else None."""
+    ms = _ISO_DATE.findall(str(period or ""))
+    if not ms:
+        return None
+    y, m, _d = ms[-1]
+    return int(y) * 12 + int(m)
+
+
+def span_text(a: dict, b: dict) -> str:
+    """The time between a shift's two endpoints, from their data periods. Both dated to the month: under 12 months is
+    "a span of about N months"; otherwise years from the data year ("a 2-year span"). "" when the years are equal and no
+    month dates are printed. Display only."""
+    ma, mb = _period_months(a.get("data_period")), _period_months(b.get("data_period"))
+    if ma is not None and mb is not None and mb > ma:
+        n = mb - ma
+        if n < 12:
+            return f"a span of about {n} month{'s' if n != 1 else ''}"
+        return f"a {round(n / 12)}-year span"
+    ya, yb = _year_num(a.get("data_period")), _year_num(b.get("data_period"))
+    return f"a {yb - ya}-year span" if ya > 0 and yb > ya else ""
+
+
 _TOTAL_FTE_KEY = None
 
 
@@ -1341,6 +1375,8 @@ _SHARE_PREFIX = re.compile(r"^\s*(?:percent of employees by department|headcount
                            r"headcount share|headcount mix|share of headcount|headcount)\s*[:,\-]?\s*", re.I)
 _SHARE_NOT_A_FUNCTION = re.compile(r"\bsums?\b|not assigned|unassigned|\bpoints\b|\btotal of\b|\bspend\b|\bexpenses?\b|\bshare of \w+ headcount\b", re.I)
 # A label that groups functions but is not one: "By Department", "Function", "All".
+# Two functions printed as one row ("engineering plus product and design") is not one function's share.
+_COMBINED_FUNCTIONS = re.compile(r"\bplus\b|\+|\bcombined\b", re.I)
 _GENERIC_FUNCTION_LABEL = re.compile(r"^(?:by\s+)?(?:departments?|functions?|teams?|all|total|other functions?)$", re.I)
 
 
@@ -1361,7 +1397,7 @@ def mix_function_ok(r: dict) -> bool:
     if _SHARE_NOT_A_FUNCTION.search(str(r.get("metric") or "")) or _SHARE_NOT_A_FUNCTION.search(str(r.get("segment") or "")):
         return False
     fn = share_function(r).strip()
-    return bool(fn) and not _GENERIC_FUNCTION_LABEL.match(fn)
+    return bool(fn) and not _GENERIC_FUNCTION_LABEL.match(fn) and not _COMBINED_FUNCTIONS.search(fn)
 
 
 def function_key(text) -> str:
@@ -2261,7 +2297,8 @@ _SPEND_PHRASE = re.compile(
 
 _HC_FUNCTION_WORDS = {_stem(w) for w in (
     "engineering", "eng", "rd", "product", "sales", "sm", "marketing", "customer", "success", "support", "cs",
-    "ga", "finance", "operations", "other", "people", "hr", "services", "professional", "implementation", "admin")}
+    "ga", "finance", "operations", "other", "people", "hr", "services", "professional", "implementation", "admin",
+    "design")}
 _HC_WORDS = {_stem(w) for w in (
     "employees", "total", "percent", "pct", "percentage", "count", "number", "mix", "function", "functions",
     "department", "departments", "team", "teams", "full", "time", "part", "share")}

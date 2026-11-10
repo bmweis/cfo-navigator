@@ -1171,7 +1171,7 @@ def answer_question(
         if prestep.active and (prestep.table_kinds or getattr(prestep, "shifts", None)):
             try:
                 from . import table_render as _tr
-                _cite = _bp.table_cite(citations, sent_docs)
+                _cite = _bp.table_cite(citations, sent_docs, extra=_bp.unsent_report_source(lib))
                 tinfo = {}
                 if prestep.table_kinds:
                     text, tinfo = _tr.render_tables(text, prestep.table_rows, _cite)

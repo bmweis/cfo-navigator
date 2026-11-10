@@ -166,7 +166,9 @@ SHAPE_RULES = (
 # Added to the lookup notes when the system builds the spend and/or margins table (linklib.table_render).
 MIX_PROSE_RULE = (" The headcount mix table carries every function's share and, where a total exists, its Derived people column: "
                   "write no function share or count in a sentence (no \"20% sales\"), and never say the table cannot show a "
-                  "figure it shows.")
+                  "figure it shows. Never describe the mix table's columns, editions, statistics or sources in a sentence (the system "
+                  "writes a Column details line under it), and never write a \"left out\" sentence about rows or reports (the system "
+                  "writes the closing Left out line).")
 
 
 def table_placeholder_note(kinds: list[str]) -> str:
