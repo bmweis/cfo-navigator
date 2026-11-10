@@ -12050,6 +12050,24 @@ invalid header (the library message contains the header value).
 `extract.cookie_var_state` distinguishes a missing from an empty variable.
 Tests: `tests/test_subscriber_check_reasons.py`.
 
+**Follow-up (2026-11): paywall branch and the Last check column.** `extract.paywall_marker`
+returns which of the closed marker list matched (searched in the whole raw HTML, scripts and
+JSON included, lowercased; a footer upsell on a subscriber's full page can trip it);
+`PageData` gains `paywall_marker` and `body_bytes`; `fetch_page(send_cookie=False)` skips the
+cookie for one request. Only on the paywall reason, `authcheck.paywall_comparison` fetches the
+same post URL once more without the cookie and stores `paywall_marker` (label),
+`paywall_marker_without_cookie`, `bytes_with_cookie`, `bytes_without_cookie`, `text_chars_with_cookie`, `text_chars_without_cookie`, `same_without_cookie` and `compare_text` (which also says whether the matched wording is present with and without the cookie, and both response sizes)
+(identical = same marker and sizes within 2 percent). No other reason makes a second request.
+The test post is the first item the feed returns (or the sitemap's latest post); the check
+does not know whether it is paid. On `/admin/reader/feeds` the Cookie cell is now status and
+age only and a new **Last check** column (`_cf_lastcheck_cell_html`, `_COL_WIDTH_LAST_CHECK`
+320) holds the reason, `HTTP 200 · /path` (host shown only when it differs from the feed's;
+path shortened in the middle past 30 characters) and the cookie names and size, three lines;
+tapping the cell opens a native `<details>` with the full address, matched wording and
+comparison line. The table floor is `_TABLE_FLOOR_FEEDS` (1380, nine columns). The banner's
+steps follow the reason (`_auth_cookie_controls`). Tests:
+`tests/test_paywall_branch_and_lastcheck.py`.
+
 
 ### Code-rendered tables, step 1: spend and gross margin (2026-11)
 

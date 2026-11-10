@@ -200,14 +200,37 @@ _PAYWALL_MARKERS = (
 )
 
 
+# Short plain names for each marker, shown in the subscriber-check detail. A
+# closed list (never body text), each at most six words.
+PAYWALL_MARKER_LABELS = {
+    "this post is for pa": "this post is for paid subscribers",
+    "this post is for free and paid": "this post is for free and paid",
+    "available to paid subscribers": "available to paid subscribers",
+    "become a paid subscriber": "become a paid subscriber",
+    "subscribe to read": "subscribe to read",
+    "this episode is for pa": "this episode is for paid subscribers",
+    "thin page with paywall block": "thin page with a paywall block",
+}
+
+
+def paywall_marker(html: str, content: str) -> str:
+    """The marker that makes looks_paywalled() true, as a PAYWALL_MARKER_LABELS
+    key, or "" when none matches. The phrases are searched in the whole raw
+    HTML (scripts and embedded JSON included), not just visible text."""
+    low = (html or "").lower()
+    for m in _PAYWALL_MARKERS:
+        if m in low:
+            return m
+    if len(content or "") < 400 and ('class="paywall"' in low or "subscribe-widget" in low):
+        return "thin page with paywall block"
+    return ""
+
+
 def looks_paywalled(html: str, content: str) -> bool:
     """Heuristic: does this page look like the logged-out preview of paid content?
     True when a known paywall phrase appears, or the body is suspiciously thin
     next to a subscribe prompt."""
-    low = (html or "").lower()
-    if any(m in low for m in _PAYWALL_MARKERS):
-        return True
-    return len(content or "") < 400 and ('class="paywall"' in low or "subscribe-widget" in low)
+    return bool(paywall_marker(html, content))
 
 
 # Phrases a bot-challenge/anti-scraper interstitial shows instead of the real
@@ -288,6 +311,8 @@ class PageData:
     final_url: str = ""      # URL after redirects (also set on an HTTPError); callers show host+path only
     redirected: bool = False # at least one redirect was followed
     challenge: bool = False  # an error response whose body/headers look like a bot challenge
+    paywall_marker: str = ""  # which paywall marker matched (a PAYWALL_MARKER_LABELS key), "" if none
+    body_bytes: int = 0      # size of the response body in bytes (not the extracted text)
     fetch_error: str = ""    # populated only when the request itself failed (timeout,
                               # DNS, connection refused, non-2xx status) — see
                               # _describe_fetch_error(). Every other caller of fetch_page
@@ -381,8 +406,10 @@ def _page_data_from_html(html: str) -> PageData:
     content = _extract_content(html)
     return PageData(title=title, content=content,
                     blocked=looks_paywalled(html, content),
+                    paywall_marker=paywall_marker(html, content),
                     published=_extract_published(html),
-                    raw_html=html)
+                    raw_html=html,
+                    body_bytes=len((html or "").encode("utf-8", "ignore")))
 
 
 def _with_www(url: str) -> str:
@@ -396,7 +423,7 @@ def _with_www(url: str) -> str:
     return parts._replace(netloc="www." + host).geturl()
 
 
-def fetch_page(url: str, timeout: int = 20) -> PageData:
+def fetch_page(url: str, timeout: int = 20, send_cookie: bool = True) -> PageData:
     """Fetch a URL once and return both the page title and cleaned body text.
 
     Always returns a PageData; fields are empty strings on failure. Sends a
@@ -425,7 +452,8 @@ def fetch_page(url: str, timeout: int = 20) -> PageData:
     fires when the URL doesn't already have a `www.` host, and only as a
     fallback after the bare-domain attempt has already failed.
     """
-    cookie = _cookie_for(url)
+    # send_cookie=False is for the subscriber check's one comparison request.
+    cookie = _cookie_for(url) if send_cookie else ""
     headers = dict(_BROWSER_HEADERS)
     if cookie:
         headers["Cookie"] = cookie

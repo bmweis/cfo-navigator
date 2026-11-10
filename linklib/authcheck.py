@@ -203,7 +203,7 @@ REASONS = {
     "rejected": "Rejected: HTTP 401 or 403",
     "login_redirect": "Redirected to login",
     "not_sent": "Cookie not sent (test post is on another host)",
-    "paywall": "Paywall text returned",
+    "paywall": "Paywall text on a post page",
     "unexpected": "Unexpected response",
 }
 
@@ -245,6 +245,45 @@ def classify_probe(page, post_url: str, cookie_sent: bool) -> tuple[bool, str]:
     return ok, "accepted"
 
 
+def paywall_comparison(with_cookie, without_cookie) -> dict:
+    """Compare the page fetched with the cookie to the same URL fetched once
+    without it. Returns the matched marker label, both sizes and one plain
+    line. Reads only sizes, status and the marker name, never the body."""
+    from .extract import PAYWALL_MARKER_LABELS
+    label = PAYWALL_MARKER_LABELS.get(with_cookie.paywall_marker, with_cookie.paywall_marker)
+    a, b = with_cookie.body_bytes, without_cookie.body_bytes
+    if without_cookie.fetch_error and not without_cookie.http_status:
+        line = "Without the cookie: could not fetch the page again"
+        same = None
+    elif without_cookie.http_status != with_cookie.http_status:
+        line = (f"Without the cookie: HTTP {without_cookie.http_status or 'error'} instead of "
+                f"HTTP {with_cookie.http_status} (cookie had an effect)")
+        same = False
+    else:
+        same_marker = without_cookie.paywall_marker == with_cookie.paywall_marker
+        close = a > 0 and abs(a - b) <= max(1, int(a * 0.02))
+        same = bool(same_marker and close)
+        if same:
+            line = "Same page without the cookie: identical (cookie ignored)"
+        else:
+            how = "longer" if b > a else "shorter" if b < a else "same-size"
+            wording = "same paywall wording" if same_marker else (
+                "no paywall wording" if not without_cookie.paywall_marker else "different paywall wording")
+            line = (f"Without the cookie: {b:,} bytes vs {a:,} with it, {how}, {wording} "
+                    f"(cookie had an effect)")
+    wo = PAYWALL_MARKER_LABELS.get(without_cookie.paywall_marker, without_cookie.paywall_marker)
+    present = ("present with and without the cookie" if wo and wo == label
+               else "present with the cookie only" if not wo
+               else f"different wording without the cookie ({wo})")
+    if same is not None:
+        line += f". Matched wording: {label} ({present}); response {a:,} bytes with, {b:,} without"
+    return {"paywall_marker": label, "paywall_marker_without_cookie": wo,
+            "bytes_with_cookie": a, "bytes_without_cookie": b,
+            "text_chars_with_cookie": len(with_cookie.content or ""),
+            "text_chars_without_cookie": len(without_cookie.content or ""),
+            "same_without_cookie": same, "compare_text": line}
+
+
 def check_auth_cookies(lib: Library, opml_path: str) -> dict:
     """Probe each configured auth-cookie domain and persist a health record.
     Returns the status dict. No-op (empty) when no cookies are configured.
@@ -275,8 +314,14 @@ def check_auth_cookies(lib: Library, opml_path: str) -> dict:
         ok, code = classify_probe(page, url, sent)
         if not summ["sendable"]:
             code = "bad_header"
+        extra: dict = {}
+        if code == "paywall":
+            # One extra request, only on this branch, never carrying the cookie.
+            extra = paywall_comparison(page, fetch_page(url, send_cookie=False))
         fh, fp = _host_path(page.final_url)
         text = REASONS[code]
+        if code == "paywall":
+            text += f" (cookie sent, {page.body_bytes:,} bytes)"
         if code == "unexpected":
             if page.http_status:
                 text += f" (HTTP {page.http_status}" + ("" if page.content else ", empty body") + ")"
@@ -284,10 +329,12 @@ def check_auth_cookies(lib: Library, opml_path: str) -> dict:
             detail = f"full text fetched ({len(page.content):,} chars)"
         else:
             detail = text
+        if extra:
+            detail += " · " + extra["compare_text"]
         status[dom] = {"ok": ok, "checked_at": now, "title": title, "detail": detail,
                        "reason": code, "reason_text": text,
                        "http_status": page.http_status, "final_host": fh, "final_path": fp,
-                       "post_host": _host_path(url)[0], "cookie_sent": sent, **sent_info}
+                       "post_host": _host_path(url)[0], "cookie_sent": sent, **sent_info, **extra}
     lib.set_setting(STATUS_KEY, json.dumps(status))
     return status
 

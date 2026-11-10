@@ -868,6 +868,9 @@ worth of hand-picked values from PR 12/PR 529):
 | Wide | 800px | 6–7 |
 | Extra wide | 960px | 8+ |
 
+One named exception: the feeds table (`/admin/reader/feeds`, nine columns, two of them wide) uses
+`_TABLE_FLOOR_FEEDS` (1380px) and scrolls inside its frame below that.
+
 Defined as named constants in `webapp/app.py` (`_TABLE_FLOOR_NARROW` /
 `_TABLE_FLOOR_MEDIUM` / `_TABLE_FLOOR_WIDE` / `_TABLE_FLOOR_XWIDE`), not
 repeated literals. The point of a bucket system is that adding a column to
@@ -919,6 +922,8 @@ above:
 | `_COL_WIDTH_STATUS` | 110px | A short status/state badge or label |
 | `_COL_WIDTH_COUNT` | 80px | A small count/number column |
 | `_COL_WIDTH_MESSAGE` | 320px, as `min-width` | A free-text column that is the point of its row (a contact message, an error, a flagged summary). A floor, not a fixed width: on the contact table it measured 109px at both 390px and 874px because the width-hinted Date, Name and Email columns took the table's 800px minimum first. The contact table's floor is now `_TABLE_FLOOR_XWIDE`, so it scrolls on a phone and landscape tablet instead of squeezing the message |
+| `_COL_WIDTH_STATUS_AGE` | 190px | A status word plus a relative age on one line (the feeds table's Cookie column) |
+| `_COL_WIDTH_LAST_CHECK` | 320px | A check's reason, HTTP line and cookie line, three lines (the feeds table's Last check column); the full path is in the cell's Details fold, never only a tooltip |
 | `_COL_WIDTH_PERSON` | 160px | A person's name (a contact's name), narrower than `_COL_WIDTH_NAME`, which is for software and community names |
 | `_COL_WIDTH_VENDOR` | 160px | A short vendor/company label, or a username (the FP&A Buddy report's Asker column, which used `_COL_WIDTH_NAME` and left the Question column about 100px wide) — deliberately narrower than `_COL_WIDTH_NAME`, which is calibrated for a full software/community name, not a one- or two-word vendor label (overhead spend fixes, 2026-09) |
 

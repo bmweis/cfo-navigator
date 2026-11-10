@@ -427,7 +427,8 @@ to force one.
 
 Each domain reports one of three states (working, expired, untested).
 Each check now records a **reason** from a closed list (2026-11), shown in the
-feed's Cookie cell under the status, plus HTTP status, where the response ended
+feed's **Last check** column (the **Cookie** column keeps the status and age),
+plus HTTP status, where the response ended
 up (host and path only), the cookie **names** and header byte length the app
 holds, and whether the header was sent to the test post's host. Cookie values
 are never stored or shown.
@@ -438,12 +439,18 @@ are never stored or shown.
 | Rejected: HTTP 401 or 403 | The site refused the request. A stale or wrong login. |
 | Redirected to login | The post sent the request to a sign-in page. |
 | Bot challenge (Cloudflare or similar) | The site blocked this server before looking at the login. A fresh cookie alone may not fix it. |
-| Paywall text returned | The post loaded but showed the preview. Cookie missing, stale or not accepted. |
+| Paywall text on a post page | The post loaded and the page contains paywall wording (the row names which wording). The check then fetches the same post once more **without** the cookie and says either "Same page without the cookie: identical (cookie ignored)" or "Without the cookie: ... (cookie had an effect)". Identical means the site ignores this cookie from Railway, or the test post is free and the wording is a subscribe block. The paywall wording is searched in the whole page source, not only visible text. |
 | Cookie not sent (test post is on another host) | The probe's post is not on the cookie's domain, so the header was not attached. Not a stale login. |
 | Variable has a line break or unsupported character | The pasted value cannot be sent as a header. Re-paste it on one line. |
 | Could not reach the site (timeout or DNS) | Network failure, not a cookie problem. |
 | Unexpected response (HTTP nnn) | Anything else. |
 | No recent post found to test | Status **untested**; see 5.5. |
+
+For "Paywall text on a post page" with an identical comparison, replacing the
+cookie again will not help: open the post named in the row in a logged-out
+window. Full text there means the post is free and the cookie may be fine; a
+preview means the site is not honoring this cookie from this server (the login
+is probably tied to your browser).
 
 Every reason except "Cookie accepted" and "No recent post found to test" still
 shows as **expired** (red). That is the original rule, kept on purpose; the

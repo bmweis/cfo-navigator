@@ -46,8 +46,8 @@ def test_stale_when_paywalled(lib, monkeypatch):
     monkeypatch.setattr(authcheck, "_recent_post_url",
                         lambda dom, opml: ("https://mostlymetrics.com/p/x", "A Post"))
     monkeypatch.setattr(extract, "fetch_page",
-                        lambda url, timeout=20: PageData(title="A Post", content="",
-                                                         blocked=True))
+                        lambda url, timeout=20, send_cookie=True: PageData(
+                            title="A Post", content="", blocked=True))
     status = authcheck.check_auth_cookies(lib, "ignored.opml")
     assert status["mostlymetrics.com"]["ok"] is False
     assert authcheck.stale_domains(status) == ["mostlymetrics.com"]

@@ -258,14 +258,15 @@ def test_feeds_table_has_a_min_width_and_scrolls_instead_of_squeezing(app_env):
     included) to fit whatever container width it was given, at any
     viewport down to the 820px mobile-card breakpoint. Fixed the same way
     every other wide (8+-column) admin table on this site already is: a
-    real min-width (_TABLE_FLOOR_XWIDE, the 8+-column bucket — Name, URL,
-    Section, Cookie, Subscriber, Current Feed, Order, Actions) plus the
+    real min-width (_TABLE_FLOOR_FEEDS, a named exception: nine columns, two of
+    them wide — Name, URL, Section, Cookie, Last check, Subscriber, Current
+    Feed, Order, Actions) plus the
     shared overflow-x:auto scroll wrapper and "Scroll for more" hint, so a
     narrower container scrolls instead of squeezing every column."""
     from webapp import app as appmod
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert f'.ff-table{{min-width:{appmod._TABLE_FLOOR_XWIDE}px;}}' in html
+    assert f'.ff-table{{min-width:{appmod._TABLE_FLOOR_FEEDS}px;}}' in html
     assert 'id="cmp-scroll-wrap"' in html
     assert appmod._ADMIN_SCROLL_HINT_HTML in html
     assert "initAdminScrollHint();" in html
@@ -455,8 +456,8 @@ def test_checkbox_columns_are_centre_justified(app_env):
         assert m, f"no centred sortable <th> found for {label}"
         assert "text-align:center;" in m.group(1)
     assert "Read only</th>" not in html
-    assert 'width:15%;" data-sort="name"' in html
-    assert 'width:11%;" data-sort="section"' in html
+    assert 'width:10%;" data-sort="name"' in html
+    assert 'width:8%;" data-sort="section"' in html
 
 
 # ---------------------------------------------------------------------------
