@@ -79,6 +79,11 @@ def app_env(monkeypatch, tmp_path):
         monkeypatch.setenv(extract_mod._cookie_env_var(d), "x=1")
     opml = tmp_path / "sites.opml"
     shutil.copy(REPO_OPML, opml)
+    # An unticked Subscriber box means "not checked" (2026-11); these tests
+    # exercise every health state, so seed all three paid domains as ticked.
+    from linklib.db import Library as _Lib
+    monkeypatch.setattr(_Lib, "_ACTIVE_SUBSCRIPTION_SEED_DOMAINS",
+                        ("mostlymetrics.com", "stratechery.com", "publiccomps.com"))
     monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "app.db"))
     monkeypatch.setenv("LINKLIB_SITES_OPML", str(opml))
     monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")

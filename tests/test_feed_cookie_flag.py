@@ -653,7 +653,7 @@ def test_form_helper_copy_says_it_is_informational(app_env):
 def test_page_footnote_explains_the_flag(app_env):
     with _client(app_env) as client:
         html = client.get("/admin/reader/feeds").text
-    assert "<strong>Subscriber</strong> is a note to yourself" in html
+    assert "<strong>Subscriber</strong> says whether you pay for a source" in html
 
 
 def test_mobile_labels_the_subscription_cell_unconditionally(app_env):
