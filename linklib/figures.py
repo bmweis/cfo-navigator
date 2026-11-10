@@ -1339,7 +1339,9 @@ def _edition_key(r: dict) -> tuple:
 
 _SHARE_PREFIX = re.compile(r"^\s*(?:percent of employees by department|headcount distribution by function|headcount mix by department|"
                            r"headcount share|headcount mix|share of headcount|headcount)\s*[:,\-]?\s*", re.I)
-_SHARE_NOT_A_FUNCTION = re.compile(r"\bsums?\b|not assigned|unassigned|\bpoints\b|\btotal of\b", re.I)
+_SHARE_NOT_A_FUNCTION = re.compile(r"\bsums?\b|not assigned|unassigned|\bpoints\b|\btotal of\b|\bspend\b|\bexpenses?\b|\bshare of \w+ headcount\b", re.I)
+# A label that groups functions but is not one: "By Department", "Function", "All".
+_GENERIC_FUNCTION_LABEL = re.compile(r"^(?:by\s+)?(?:departments?|functions?|teams?|all|total|other functions?)$", re.I)
 
 
 def share_function(r: dict) -> str:
@@ -1358,7 +1360,8 @@ def mix_function_ok(r: dict) -> bool:
     "points not assigned" row, and a function can be read from its metric name or its segment."""
     if _SHARE_NOT_A_FUNCTION.search(str(r.get("metric") or "")) or _SHARE_NOT_A_FUNCTION.search(str(r.get("segment") or "")):
         return False
-    return bool(share_function(r))
+    fn = share_function(r).strip()
+    return bool(fn) and not _GENERIC_FUNCTION_LABEL.match(fn)
 
 
 def function_key(text) -> str:

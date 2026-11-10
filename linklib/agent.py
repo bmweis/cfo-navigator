@@ -1175,7 +1175,11 @@ def answer_question(
                 tinfo = {}
                 if prestep.table_kinds:
                     text, tinfo = _tr.render_tables(text, prestep.table_rows, _cite)
-                text, n_cited = _tr.cite_shifts(text, list(getattr(prestep, "shifts", []) or []), _cite)
+                _sh = list(getattr(prestep, "shifts", []) or [])
+                text, sinfo = _tr.render_shifts(text, _sh, _cite)
+                if sinfo.get("lines") or sinfo.get("fallback"):
+                    tinfo["shifts"] = sinfo
+                text, n_cited = _tr.cite_shifts(text, _sh, _cite)
                 if n_cited:
                     tinfo["shift_lines_cited"] = n_cited
                 if tinfo:

@@ -334,11 +334,57 @@ def function_share_problems(text: str, rows: list[dict] | None) -> list[dict]:
     return out
 
 
+_PCT_NEAR = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+_FWORD = re.compile(r"[A-Za-z&][A-Za-z&/]*")
+_CANNOT_SHOW = re.compile(r"(?:mix )?table (?:cannot|can't|can not|does not|doesn't) show\b[^.\n]*", re.I)
+
+
+def mix_prose_problems(text: str, rows: list[dict] | None, mix_rendered: bool = True) -> list[dict]:
+    """Flag-only. When the system builds the headcount mix table, a sentence outside any table that pairs a function with
+    a percent the sent figures do not print for THAT function ("20% sales" when Sales is 13 and 19 and CS is 20), and a
+    sentence saying the table cannot show something it does (a Derived people column when a total is sent). Nothing
+    is changed. A pair the sent rows print for the function is not flagged: repeating a row is another rule's job."""
+    if not rows or not mix_rendered:
+        return []
+    from . import figures as fg
+    shares: dict[str, set[float]] = {}
+    for r in rows:
+        if fg.row_table_kind(r) != "headcount_share" or r.get("value_num") is None or not fg.mix_function_ok(r):
+            continue
+        fk = fg.function_key(fg.share_function(r))
+        if fk:
+            shares.setdefault(fk, set()).add(round(float(r["value_num"]), 1))
+    out: list[dict] = []
+    for line in (text or "").split("\n"):
+        if line.strip().startswith("|") or not line.strip():
+            continue
+        plain = re.sub(r"\[\d+\]|\*", "", line)
+        for m in _PCT_NEAR.finditer(plain):
+            v = round(float(m.group(1)), 1)
+            after = _FWORD.findall(plain[m.end():m.end() + 60])[:4]
+            before = _FWORD.findall(plain[max(m.start() - 60, 0):m.start()])[-4:]
+            hit = None
+            cands = [after[:k] for k in (3, 2, 1)] + [before[-k:] for k in (3, 2, 1)]
+            for words in cands:
+                fk = fg.function_key(" ".join(words)) if words else ""
+                if fk in shares:
+                    hit = (fk, " ".join(words))
+                    break
+            if hit and v not in shares[hit[0]]:
+                out.append({"phrase": "function share in prose does not match the table",
+                            "snippet": f"{m.group(1)}% next to {hit[1]}; the sent figures print {sorted(shares[hit[0]])} for it: {line.strip()[:160]}"})
+                break
+        if any(fg.is_total_fte_row(r) for r in rows) and _CANNOT_SHOW.search(plain) \
+                and re.search(r"head ?count|people|count", plain, re.I):
+            out.append({"phrase": "says the table cannot show what it shows", "snippet": line.strip()[:200]})
+    return out
+
+
 def lint_answer(text: str, shifts: list | None = None, rows: list | None = None) -> list[dict]:
     """[{phrase, snippet}] for each likely breach; [] for a clean answer. `shifts` (the computed shift lines
     the turn was given; [] when none) turns on the check that a "up N points" claim matches one of them."""
     flags: list[dict] = (list(what_shifted_problems(text, shifts)) + change_claim_problems(text, shifts) + label_problems(text, rows)
-                         + left_out_cell_problems(text) + table_order_problems(text) + function_share_problems(text, rows) + inference_problems(text))
+                         + left_out_cell_problems(text) + table_order_problems(text) + function_share_problems(text, rows) + mix_prose_problems(text, rows) + inference_problems(text))
     # A citation marker after a table row's closing pipe breaks the row in a renderer that does not repair it.
     for line in (text or "").split("\n"):
         if _ROW_MARKER_AFTER_PIPE.match(line):

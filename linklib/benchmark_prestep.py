@@ -675,6 +675,24 @@ MIX_UNIT_MAX = 12      # function rows kept together for one report edition, ban
 MIX_UNITS_MAX = 3      # publishers whose mix is kept whole in one part
 
 
+def _original_anchor(rows: list[dict], share: list[int], a: dict):
+    """Index of an original publisher's share row that `a` (a republisher's row) reprints: no cited_source of its
+    own, the same band and data period, and `a`'s cited_source names its source and year. None when
+    `a` is not a reprint or the original's rows were not among the candidates."""
+    cs = _norm(a.get("cited_source"))
+    if not cs:
+        return None
+    for j in share:
+        r = rows[j]
+        if r.get("cited_source") or r["report_slug"] == a["report_slug"]:
+            continue
+        if (fg._band_key(r["band"]), fg._year_num(r["data_period"])) != (fg._band_key(a["band"]), fg._year_num(a["data_period"])):
+            continue            # the statistic may differ: a reprint says "share" where the original says "mean"
+        if _norm(r["source"]) and _norm(r["source"]) in cs and str(r.get("report_year") or "") in cs:
+            return j
+    return None
+
+
 def mix_units(rows: list[dict]) -> list[list[int]]:
     """Index lists, one per publisher: the headcount-share rows (a function's percent of headcount, never a
     total or a sum row) of that publisher's newest edition, from the one report, band, data period and statistic
@@ -693,6 +711,11 @@ def mix_units(rows: list[dict]) -> list[list[int]]:
             continue
         seen_pub.add(pub)
         a = rows[i]
+        # A republisher's mix (cited_source set) gives way to the original's own rows for the same band and
+        # period when the original is among the candidates: the original is cited, the reprint is not sent.
+        orig = _original_anchor(rows, share, a)
+        if orig is not None:
+            a = rows[orig]
         key = (a["report_slug"], fg._band_key(a["band"]), fg._year_num(a["data_period"]), _norm(a["statistic"]))
         unit, funcs = [], set()
         for j in share:
@@ -706,6 +729,24 @@ def mix_units(rows: list[dict]) -> list[list[int]]:
             unit.append(j)
             if len(unit) >= MIX_UNIT_MAX:
                 break
+        if orig is not None:
+            # A function only the reprint prints is kept too, so the table can say the original does not print it.
+            rep = rows[i]
+            for j in share:
+                r = rows[j]
+                if len(unit) >= MIX_UNIT_MAX:
+                    break
+                if r["report_slug"] != rep["report_slug"] or j in unit:
+                    continue
+                if (fg._band_key(r["band"]), fg._year_num(r["data_period"]), _norm(r["statistic"])) != \
+                        (fg._band_key(rep["band"]), fg._year_num(rep["data_period"]), _norm(rep["statistic"])):
+                    continue
+                fk = fg.function_key(fg.share_function(r))
+                if fk not in funcs:
+                    funcs.add(fk)
+                    unit.append(j)
+        if not unit or unit in units:
+            continue
         units.append(unit)
         if len(units) >= MIX_UNITS_MAX:
             break
@@ -836,6 +877,15 @@ def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
                 break
             if r not in chosen:
                 chosen.append(r)
+        # One extra slot for a closest-band row of a publisher not yet shown, when its edition is newer than the
+        # oldest chosen one: exact-before-adjacent ranking alone let older exact bands crowd it out.
+        oldest_yr = min((fg._year_num(c.get("report_year")) for c in chosen), default=99999)
+        for r in grp:
+            pub = _norm(r.get("series") or r["source"])
+            if (r not in chosen and r["match"] == "adjacent_band" and pub not in pubs
+                    and fg._year_num(r.get("report_year")) > oldest_yr):
+                chosen.append(r)
+                break
         for r in grp:
             if r not in chosen:
                 keep.discard(id(r))
@@ -1464,8 +1514,10 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
         return NO_SHIFTS_NOTE
     return ("COMPUTED SHIFTS (worked out by the system from the stored reports above; these lines are exact):\n"
             + "\n".join(f"  {i}. {x['line']}" for i, x in enumerate(ps.shifts, 1))
-            + "\nUnder a short heading \"What shifted\", write at most the first two of these lines (they are in the order to print), each ending "
-              "\"(derived from stored reports)\", with the figures shown. No cause and no forecast. Never work out, add or "
+            + "\nUnder a short heading \"What shifted\", write {{shifts}} on a line of its own, once. The system inserts the first "
+              "two of these lines there (they are in the order to print), exact, each with its sources and the tag "
+              "\"(derived from stored reports)\". Do not type a computed number yourself. After it you may write one "
+              "sentence saying what a report states as the cause, or that none does. No forecast. Never work out, add or "
               "mention any other change over time yourself.")
 
 
