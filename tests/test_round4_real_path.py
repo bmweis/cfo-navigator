@@ -137,9 +137,9 @@ def test_the_mix_table_gets_one_edition_the_newest_and_the_spend_table_two_rows_
     for r in kept:
         if fg.row_table_kind(r) == "spend_share":
             per_line[r["metric"]] = per_line.get(r["metric"], 0) + 1
-    assert per_line == {"G&A expense": 2, "R&D expense": 2}, per_line
-    assert len(dropped) == 7 + (7 - 2) + (4 - 2)
-    assert sum(1 for r in kept) <= 5 + 2 + 2             # the id 53 shape was 12 + 12 mix and spend rows
+    assert per_line == {"G&A expense": 3, "R&D expense": 2}, per_line   # two plus one newer adjacent-band edition
+    assert len(dropped) == 7 + (7 - 3) + (4 - 2)
+    assert sum(1 for r in kept) <= 5 + 3 + 2             # the id 53 shape was 12 + 12 mix and spend rows
 
 
 def test_the_spend_rows_kept_are_the_closest_band_and_one_per_publisher_first():
@@ -182,3 +182,15 @@ def test_the_answer_rules_say_levels_only_without_a_computed_line_and_no_restati
     from linklib import answer_rules as ar
     assert "describe levels only" in ar.ANSWER_RULES and "different editions" in ar.ANSWER_RULES
     assert "Do not repeat a table's rows in a sentence" in ar.SHAPE_RULES
+
+
+def test_a_newer_adjacent_band_edition_is_shown_next_to_older_exact_band_rows_and_stays_labelled_adjacent():
+    old1 = _spend("S&M", 40, "o1", "PubOld1", 2022, "$20-50M")
+    old2 = _spend("S&M", 35, "o2", "PubOld2", 2023, "$20-50M")
+    new_adj = _spend("S&M", 38, "n", "PubNew", 2025, "$25-50M", match="adjacent_band")
+    keep, _ = bp.shape_for_tables([old1, old2, new_adj])
+    assert id(new_adj) in keep and id(old1) in keep and id(old2) in keep
+    assert new_adj["match"] == "adjacent_band"
+    same_year = _spend("S&M", 41, "s", "PubSame", 2022, "$25-50M", match="adjacent_band")
+    keep, _ = bp.shape_for_tables([old1, old2, same_year])
+    assert id(same_year) not in keep                     # no extra slot unless the edition is newer
