@@ -187,6 +187,11 @@ def test_cookie_value_never_in_the_record_log_or_stored_status(lib, monkeypatch,
 def appmod(tmp_path, monkeypatch):
     for d in ("mostlymetrics.com", "stratechery.com", "blog.publiccomps.com"):
         monkeypatch.setenv(extract._cookie_env_var(d), f"x={SECRET}")
+    # An unticked Subscriber box means "not checked" (2026-11); these tests
+    # exercise every health state, so seed all three paid domains as ticked.
+    from linklib.db import Library as _Lib
+    monkeypatch.setattr(_Lib, "_ACTIVE_SUBSCRIPTION_SEED_DOMAINS",
+                        ("mostlymetrics.com", "stratechery.com", "publiccomps.com"))
     opml = tmp_path / "sites.opml"
     shutil.copy(REPO_OPML, opml)
     monkeypatch.setenv("LINKLIB_DB", str(tmp_path / "app.db"))
