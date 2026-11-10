@@ -877,6 +877,15 @@ def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
                 break
             if r not in chosen:
                 chosen.append(r)
+        # One extra slot for a closest-band row of a publisher not yet shown, when its edition is newer than the
+        # oldest chosen one: exact-before-adjacent ranking alone let older exact bands crowd it out.
+        oldest_yr = min((fg._year_num(c.get("report_year")) for c in chosen), default=99999)
+        for r in grp:
+            pub = _norm(r.get("series") or r["source"])
+            if (r not in chosen and r["match"] == "adjacent_band" and pub not in pubs
+                    and fg._year_num(r.get("report_year")) > oldest_yr):
+                chosen.append(r)
+                break
         for r in grp:
             if r not in chosen:
                 keep.discard(id(r))
