@@ -294,7 +294,10 @@ def check_auth_cookies(lib: Library, opml_path: str) -> dict:
     post's host at all. Cookie values are never read into the record."""
     from .extract import _auth_cookies, _cookie_for, cookie_summary, fetch_page
 
-    domains = list(_auth_cookies().items())
+    # A domain whose feeds are all unticked as Subscriber is not checked, and
+    # (because the whole record is rewritten below) its stored status is dropped.
+    skip = unsubscribed_domains(lib)
+    domains = [(d, c) for d, c in _auth_cookies().items() if d not in skip]
     status: dict = {}
     now = datetime.now(timezone.utc).isoformat()
     for dom, cookie in domains:
@@ -339,11 +342,37 @@ def check_auth_cookies(lib: Library, opml_path: str) -> dict:
     return status
 
 
+def _feed_domain(url: str) -> str:
+    host = (urlsplit(url or "").netloc or "").lower().split(":")[0]
+    return host[4:] if host.startswith("www.") else host
+
+
+def unsubscribed_domains(lib: Library) -> set[str]:
+    """Domains that feeds name and where no feed has Subscriber ticked.
+
+    The Subscriber box on /admin/reader/feeds is the decision about whether a
+    source is paid. A domain with at least one ticked feed is checked; a domain
+    whose feeds are all unticked is not. A domain with no feed row at all is
+    not in this set (nothing was decided), so it is checked as before."""
+    named: set[str] = set()
+    ticked: set[str] = set()
+    for f in lib.list_feeds():
+        hosts = {_feed_domain(f["xml_url"]), _feed_domain(f.get("html_url") or "")} - {""}
+        named |= hosts
+        if f.get("has_active_subscription"):
+            ticked |= hosts
+    return named - ticked
+
+
 def get_auth_status(lib: Library) -> dict:
+    """The stored record, minus any domain whose feeds are all unticked as
+    Subscriber. The box takes effect at once, before the next Re-check."""
     try:
-        return json.loads(lib.get_setting(STATUS_KEY) or "{}")
+        status = json.loads(lib.get_setting(STATUS_KEY) or "{}")
     except Exception:
         return {}
+    skip = unsubscribed_domains(lib)
+    return {d: s for d, s in status.items() if d not in skip} if skip else status
 
 
 def stale_domains(status: dict) -> list[str]:

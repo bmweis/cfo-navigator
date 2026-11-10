@@ -31313,7 +31313,8 @@ def _cookie_check_facts(s: dict) -> str:
     return " · ".join(bits)
 
 
-def _cf_cookie_cell_html(domain: str, configured: bool, status: dict, feed_name: str) -> str:
+def _cf_cookie_cell_html(domain: str, configured: bool, status: dict, feed_name: str,
+                         subscriber: bool = True) -> str:
     """Cookie column cell — status AND last-checked live where the feed is,
     not in a banner at the top of the page (2026-09). Before this, the
     column only ever said "configured", which means an env var exists, not
@@ -31330,6 +31331,10 @@ def _cf_cookie_cell_html(domain: str, configured: bool, status: dict, feed_name:
     """
     if not domain:
         return '<span style="color:var(--muted);font-size:13px;">&mdash;</span>'
+    if not subscriber:
+        return ('<span aria-label="Cookie for {n}: not checked, Subscriber unticked" '
+                'title="Subscriber is unticked, so this source is not checked." '
+                'style="color:var(--muted);font-size:13px;">&mdash;</span>').format(n=_esc(feed_name))
     st = _cookie_health_state(domain, configured, status)
     if not st["configured"]:
         if st.get("var_state") == "empty":
@@ -31365,7 +31370,8 @@ def _shorten_middle(text: str, limit: int) -> str:
 _LAST_CHECK_PATH_CHARS = 30   # a path longer than this is shortened in the cell
 
 
-def _cf_lastcheck_cell_html(domain: str, configured: bool, status: dict, feed_name: str) -> str:
+def _cf_lastcheck_cell_html(domain: str, configured: bool, status: dict, feed_name: str,
+                            subscriber: bool = True) -> str:
     """Last check column (2026-11): the reason first, then one line with the
     HTTP status and where the check ended up, then one line with what was sent
     (cookie names and size, never values). Three lines at the column's width.
@@ -31373,7 +31379,7 @@ def _cf_lastcheck_cell_html(domain: str, configured: bool, status: dict, feed_na
     cookie comparison live in a Details fold in the same cell (a native
     <details>, so it works on touch). Every state says something; nothing is
     blank."""
-    if not domain:
+    if not domain or not subscriber:
         return '<span style="color:var(--muted);font-size:13px;">&mdash;</span>'
     st = _cookie_health_state(domain, configured, status)
     if not st["configured"]:
@@ -31458,11 +31464,14 @@ def _auth_cookie_controls(request: Request,
     lib = _lib()
     try:
         status = authcheck.get_auth_status(lib)
+        checkable = set(cookies) - authcheck.unsubscribed_domains(lib)
     finally:
         lib.close()
 
     age = authcheck.status_age_seconds(status)
-    if age is None or age > 12 * 3600:          # stale or never run -> refresh in background
+    # stale or never run -> refresh in the background, unless every configured
+    # domain has Subscriber unticked (nothing would be checked)
+    if checkable and (age is None or age > 12 * 3600):
         background_tasks.add_task(_auth_recheck_background)
 
     stale = authcheck.stale_domains(status)
@@ -32013,7 +32022,8 @@ def _publish_feeds(lib) -> None:
     lib.write_opml(OPML_PATH)
 
 
-def _feed_cookie_readout(xml_url: str, status: dict | None = None) -> str:
+def _feed_cookie_readout(xml_url: str, status: dict | None = None,
+                         subscriber: bool = True) -> str:
     """Read-only line showing this feed's cookie state — computed live, not
     a stored declaration. Only rendered when a URL is already known (the
     edit form), since the add form has nothing to compute against until
@@ -32037,7 +32047,9 @@ def _feed_cookie_readout(xml_url: str, status: dict | None = None) -> str:
         return ""
     configured = has_configured_cookie(domain)
     st = _cookie_health_state(domain, configured, status or {})
-    if not st["configured"]:
+    if configured and not subscriber:
+        color, label = "var(--muted)", "Not checked (Subscriber is unticked)"
+    elif not st["configured"]:
         color, label = "var(--muted)", "No cookie configured for this domain"
     elif st["state"] == "unchecked":
         color, label = st["color"], "Cookie configured, not yet checked"
@@ -32159,7 +32171,8 @@ def _feed_form_fields(sections: list, values: dict, auth_status: dict | None = N
     lab = "display:block;font-size:14px;font-weight:500;color:var(--navy);margin-bottom:6px;"
     hint = "font-size:12.5px;color:var(--muted);margin:6px 0 0;line-height:1.5;"
     sub_checked = " checked" if values.get("has_active_subscription") else ""
-    cookie_readout = _feed_cookie_readout(values.get("xml_url", ""), auth_status)
+    cookie_readout = _feed_cookie_readout(values.get("xml_url", ""), auth_status,
+                                          bool(values.get("has_active_subscription")))
     current_feed_value = values.get("current_feed_side") or "" if values.get("show_on_current_feed") else ""
     current_feed_opts = _current_feed_select_options(current_feed_value)
     return f"""  <div>
@@ -32312,7 +32325,9 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
         if _cookie_domain.startswith("www."):
             _cookie_domain = _cookie_domain[4:]
         _cookie_configured = bool(_cookie_domain) and has_configured_cookie(_cookie_domain)
-        _cookie_sort = _cookie_health_state(_cookie_domain, _cookie_configured, auth_status)["state"]
+        _row_sub = bool(f["has_active_subscription"])
+        _cookie_sort = (_cookie_health_state(_cookie_domain, _cookie_configured, auth_status)["state"]
+                        if _row_sub else "not_checked")
         _effective_side = f["current_feed_side"] if f["show_on_current_feed"] else ""
         _cf_label = dict(_CURRENT_FEED_SELECT_CHOICES).get(_effective_side, "Hidden")
         _order_sort = f"{_side_sort_rank.get(_effective_side, 2)}-{(f['current_feed_order'] or 0):04d}"
@@ -32328,8 +32343,8 @@ def admin_feeds(request: Request, background_tasks: BackgroundTasks,
         style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;background:#fff;">{opts}</select>
     </form>
   </td>
-  <td class="ff-cookie">{_cf_cookie_cell_html(_cookie_domain, _cookie_configured, auth_status, f['name'])}</td>
-  <td class="ff-lastcheck">{_cf_lastcheck_cell_html(_cookie_domain, _cookie_configured, auth_status, f['name'])}</td>
+  <td class="ff-cookie">{_cf_cookie_cell_html(_cookie_domain, _cookie_configured, auth_status, f['name'], _row_sub)}</td>
+  <td class="ff-lastcheck">{_cf_lastcheck_cell_html(_cookie_domain, _cookie_configured, auth_status, f['name'], _row_sub)}</td>
   <td class="ff-sub">
     <form method="post" action="/admin/reader/feeds/{f['id']}/subscription" style="margin:0;">
       <input type="checkbox" name="has_active_subscription" value="1" onchange="this.form.submit()"
@@ -32569,8 +32584,8 @@ initAdminScrollHint();
 <ul style="color:var(--muted);margin:0 0 14px;padding-left:20px;font-size:13px;line-height:1.65;">
 <li>Click a heading to sort, click again to reverse. The sort sticks across reloads until you clear site data.</li>
 <li><strong>Sources</strong> in the Reader only lists feeds with items currently in view, so a quiet feed can be here and not there&mdash;expected, not a sync problem.</li>
-<li><strong>Cookie</strong>: a dash means no <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable is set; once one is, the dot shows whether fetching actually works, not just that a variable exists. The value itself is never stored here. See <code>RUNBOOK.md</code> &sect;5.</li>
-<li><strong>Subscriber</strong> is a note to yourself for whether you pay for a source&mdash;nothing reads it or gates on it.</li>
+<li><strong>Cookie</strong>: a dash means no <code>LINKLIB_COOKIE_&lt;DOMAIN&gt;</code> variable is set, or Subscriber is unticked so the source is not checked; once a variable is set and Subscriber is ticked, the dot shows whether fetching actually works, not just that a variable exists. The value itself is never stored here. See <code>RUNBOOK.md</code> &sect;5.</li>
+<li><strong>Subscriber</strong> says whether you pay for a source. Unticked, the cookie re-check skips it, its stored status is dropped, and it never raises the expired banner. Unticking does not delete or stop using the cookie variable, so page fetches still send it.</li>
 <li><strong>Current Feed</strong> controls whether and on which side a feed shows on <a href="/current-feed" style="color:var(--accent);">/current-feed</a>. New feeds start Hidden. Presentation only&mdash;web search still covers every feed regardless.</li>
 <li>Sorting by <strong>Order</strong> is the one sort that shows a feed's real rank: every other sort leaves the table in its default order, so a correctly-disabled arrow on a row that isn't visibly first or last can look stuck. Sorted by Order, row position and rank actually match.</li>
 </ul>
