@@ -583,6 +583,19 @@ If it still reads expired: the cookie was probably copied from a logged-out
 session or a different browser profile. Redo 5.2 after confirming you can
 actually read a full post in that same profile.
 
+### 5.4a A source that is no longer paid
+
+If a source drops its paywall (or you stop paying), untick **Subscriber** on
+its row in `/admin/reader/feeds`. That is the decision the check follows:
+**Re-check subscriber access** skips the domain, its stored status is dropped
+(and is ignored from the moment you untick, before any re-check), its Cookie and
+Last check cells show a dash, and it never raises the coral panel or the
+Reader's stale banner. If other feeds share the domain and any is ticked, the
+domain is still checked. Unticking does **not** remove the
+`LINKLIB_COOKIE_<DOMAIN>` variable and page fetches still send it; delete the
+variable in Railway yourself when you want that to stop. Tick the box again to
+bring the check back.
+
 ### 5.5 If it reports "untested"
 
 `no recent post found to test` means the probe couldn't find a post URL to

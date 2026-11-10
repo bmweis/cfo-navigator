@@ -528,9 +528,10 @@ def test_toggling_the_flag_leaves_the_generated_opml_byte_identical(seeded):
 
 
 def test_nothing_outside_the_admin_surface_reads_the_flag(app_env):
-    """Informational only. If a future change makes it functional that should
-    be a deliberate decision, not something inherited from the column
-    existing — so this pins the current contract."""
+    """One reader outside the admin surface, on purpose (2026-11): the
+    subscriber-cookie check (linklib/authcheck.py) skips a domain whose feeds
+    are all unticked. Any other reader should be a deliberate decision too, so
+    this pins the list."""
     import pathlib as _pl
     root = _pl.Path(__file__).resolve().parents[1]
     readers = []
@@ -538,7 +539,7 @@ def test_nothing_outside_the_admin_surface_reads_the_flag(app_env):
         text = path.read_text(encoding="utf-8")
         if "has_active_subscription" in text and path.name != "db.py":
             readers.append(path.name)
-    assert readers == [], f"unexpected readers of the flag: {readers}"
+    assert readers == ["authcheck.py"], f"unexpected readers of the flag: {readers}"
 
 
 def test_feed_table_has_an_active_subscription_column(app_env):
