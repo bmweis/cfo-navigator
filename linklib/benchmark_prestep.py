@@ -753,7 +753,53 @@ def mix_units(rows: list[dict]) -> list[list[int]]:
     return units
 
 
-def pick_rows(rows: list[dict], cap: int) -> list[dict]:
+LINE_FLOOR_MAX = 4      # rows the expense-line floor may add to one part, inside the part's own cap
+
+
+def _band_fit(r: dict, ask: dict | None) -> tuple:
+    """How close a row's printed band is to the asked size: (match rank, gap, minus overlap). Equal keys are a tie:
+    an ask that straddles two printed bands ($20M-$30M between $10M-$25M and $25M-$50M) is as close to both."""
+    rank = fg._MATCH_RANK.get(r.get("match"), 9)
+    b = fg.parse_band(r.get("band")) if ask else None
+    if not b or not ask or b["kind"] != ask["kind"]:
+        return (rank, 0.0, 0.0)
+    lo, hi = max(b["lo"], ask["lo"]), min(b["hi"], ask["hi"])
+    return (rank, max(lo - hi, 0.0), -max(hi - lo, 0.0))
+
+
+def _line_floor(rows: list[dict], chosen: list[int], newest_ed: dict, band: str) -> list[int]:
+    """Indexes to add so every publisher's newest edition shows each expense line it prints (S&M, R&D, G&A, sales,
+    marketing...) at its closest band, not only the one row the publisher floor kept. The publisher floor
+    alone kept KeyBanc/Sapphire 2025's G&A $10M-$25M row and cut its S&M $25M-$50M row. A line already shown for the
+    publisher is left alone. Only rows of the one expense-line mapping the spend table uses (`expense_line_of`)."""
+    ask = fg.parse_band(band) if band else None
+    have: dict[tuple, list[int]] = {}
+    left: dict[tuple, list[int]] = {}
+    for i, r in enumerate(rows):
+        try:
+            line = fg.expense_line_of(r["metric"], r.get("denominator", ""), r.get("unit", ""))
+        except KeyError:
+            continue
+        if not line or fg._year_num(r.get("report_year")) != newest_ed.get(_norm(r["source"])):
+            continue
+        (have if i in chosen else left).setdefault((_norm(r["source"]), line), []).append(i)
+    add: list[int] = []
+    for k, idx in left.items():
+        mine = have.get(k, [])
+        best = min(_band_fit(rows[i], ask) for i in idx + mine)
+        if mine and min(_band_fit(rows[i], ask) for i in mine) == best and not ask:
+            continue                                 # without an asked size there is no tie to keep
+        room = 2 - len(mine)                         # at most two rows of one line for one publisher (a tie)
+        if room <= 0:
+            continue
+        # A shown row at a worse band than a stored one is not "the closest": the closest is added beside it.
+        add += [(bool(mine), i) for i in idx if _band_fit(rows[i], ask) == best][:room]
+    # A line the publisher has no row for at all comes before a second, tied neighbour of a line it already shows.
+    add.sort(key=lambda t: (t[0], -fg._year_num(rows[t[1]].get("report_year")), t[1]))
+    return [i for _, i in add[:LINE_FLOOR_MAX]]
+
+
+def pick_rows(rows: list[dict], cap: int, band: str = "") -> list[dict]:
     """At most `cap` rows from rows already sorted best first (basis group, match, band,
     sample, newest year). Before the rest is filled, the best row of every publisher and of
     every basis group is kept, then up to BASIS_RESERVE rows of each basis group, so a cap never
@@ -805,6 +851,8 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
     # If the floor alone would overfill the cap, newer editions keep their slot and older ones are cut first.
     floor.sort(key=lambda i: (-fg._year_num(rows[i].get("report_year")), i))
     chosen += floor[:max(cap - len(chosen), 0)]
+    # The expense-line floor: inside the same cap, never past it. Newer editions and the closest band first.
+    chosen += [i for i in _line_floor(rows, chosen, newest_ed, band) if i not in chosen][:max(cap - len(chosen), 0)]
     per_basis: dict[str, int] = {}
     for i in chosen:
         b = rows[i].get("basis_group") or ""
@@ -1091,7 +1139,7 @@ def pick(lib, sub: Sub, tier: str, row_cap: int) -> None:
     """Apply the row cap to one part and build its definition cards. The figure documents are built
     later, once, for the whole turn (merge_figure_docs). Reads only."""
     names = list(sub.metrics)
-    rows = pick_rows(sub.candidates, row_cap)
+    rows = pick_rows(sub.candidates, row_cap, sub.band)
     sub.picked = rows
     sub.capped_rows = len(sub.candidates) - len(rows)
     if sub.capped_rows:
