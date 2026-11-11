@@ -182,6 +182,7 @@ class Prestep:
     shifts_outliers: list = field(default_factory=list)      # flag-only: a shift endpoint far from other publishers' values
     table_rows: list = field(default_factory=list, repr=False)   # rows really sent in the figures documents (the code-built tables read these)
     table_kinds: list = field(default_factory=list)          # which tables the code builds this turn: "spend", "margins"
+    period_note: dict = field(default_factory=dict)          # the 2020 to 2022 site note: shown or not, the periods that triggered it (admin row)
     tables: dict = field(default_factory=dict)               # what the renderer did: rendered / fallback / selfcheck (admin row)
 
     def log(self) -> dict:
@@ -210,7 +211,7 @@ class Prestep:
                         "directional": x["directional"]} for x in self.shifts],
             "shifts_suppressed": self.shifts_suppressed, "shifts_skipped": self.shifts_skipped,
             "shifts_unpaired": self.shifts_unpaired, "shifts_unpaired_groups": self.shifts_unpaired_groups, "shifts_outliers": self.shifts_outliers,
-            "table_rows_shaped": self.table_rows_shaped, "tables": self.tables,
+            "table_rows_shaped": self.table_rows_shaped, "tables": self.tables, "period_note": self.period_note,
             "left_out_detail": dict(sorted(self.left_out_detail.items(), key=lambda kv: -kv[1])),
             "extra_cost_usd": round(self.cost_usd, 6), "est_extra_usd": round(self.est_extra_usd, 6),
             "remaining_usd": None if self.remaining_usd is None else round(self.remaining_usd, 4),
