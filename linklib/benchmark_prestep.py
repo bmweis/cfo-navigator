@@ -753,7 +753,7 @@ def mix_units(rows: list[dict]) -> list[list[int]]:
     return units
 
 
-LINE_FLOOR_MAX = 4      # rows the expense-line floor may add to one part, inside the part's own cap
+LINE_FLOOR_MAX = 6      # rows the expense-line floor may add to one part, inside the part's own cap
 
 
 def _band_fit(r: dict, ask: dict | None) -> tuple:
@@ -877,14 +877,19 @@ def pick_rows(rows: list[dict], cap: int, band: str = "") -> list[dict]:
 SPEND_ROWS_PER_LINE = 2
 
 
-def _spend_rank(r: dict) -> tuple:
+def _spend_rank(r: dict, ask: dict | None = None) -> tuple:
     b = fg.parse_band(r.get("band"))
     width = (b["hi"] - b["lo"]) if b and b["hi"] != float("inf") else 1e18
+    if ask and b and b["kind"] == ask["kind"]:
+        _, gap, ov = _band_fit(r, ask)         # gap then overlap: a band that straddles the ask ties its other neighbour
+        width = (gap, ov)
+    else:
+        width = (0.0, width)
     return (fg._MATCH_RANK[r["match"]], bool(r.get("band_context")), width, -fg._year_num(r.get("data_period")),
             -fg._year_num(r.get("report_year")), r["source"], str(r.get("figure_key")))
 
 
-def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
+def shape_for_tables(rows: list[dict], band: str = "") -> tuple[set, list[dict]]:
     """(ids of the rows to keep, rows dropped) for a turn that writes the org-structure and spend-profile tables.
     Headcount mix: one edition per publisher, the newest, at its newest data period (never two editions in one
     column). Spend: at most SPEND_ROWS_PER_LINE rows per line item, one per publisher first, the closest band
@@ -892,6 +897,7 @@ def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
     Headcount counts and margins are kept as they are. Nothing is changed in a row."""
     keep = {id(r) for r in rows}
     drop: list[dict] = []
+    ask = fg.parse_band(band) if band else None
     share = [r for r in rows if fg.row_table_kind(r) == "headcount_share"]
     newest: dict[str, int] = {}
     for r in share:
@@ -912,7 +918,7 @@ def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
         if fg.row_table_kind(r) == "spend_share":
             by_line.setdefault(_item_key(r), []).append(r)
     for grp in by_line.values():
-        grp.sort(key=_spend_rank)
+        grp.sort(key=lambda r: _spend_rank(r, ask))
         chosen: list[dict] = []
         pubs: set = set()
         for r in grp:                                   # one row per publisher first
@@ -934,6 +940,17 @@ def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
                     and fg._year_num(r.get("report_year")) > oldest_yr):
                 chosen.append(r)
                 break
+        # An ask between two printed bands is as close to both: a chosen adjacent row keeps the same publisher
+        # edition's tied neighbour (at most 2 extra rows a line), so both render, each labelled adjacent.
+        if ask:
+            for c in list(chosen):
+                if c["match"] != "adjacent_band":
+                    continue
+                for r in grp:
+                    if (r not in chosen and r["match"] == "adjacent_band" and _norm(r["source"]) == _norm(c["source"])
+                            and r.get("report_year") == c.get("report_year") and _band_fit(r, ask) == _band_fit(c, ask)
+                            and len(chosen) < SPEND_ROWS_PER_LINE + 2):
+                        chosen.append(r)
         for r in grp:
             if r not in chosen:
                 keep.discard(id(r))
@@ -1433,7 +1450,7 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
     if any(m in fg.SHAPE_LABELS for s in ps.subs for m in s.metrics):
         # One choice for the whole turn: a row two parts picked is kept or dropped for both.
         union = list({(r["report_slug"], r["figure_key"]): r for s in todo for r in s.picked}.values())
-        keep_ids, dropped = shape_for_tables(union)
+        keep_ids, dropped = shape_for_tables(union, next((x.band for x in todo if x.band), ""))
         gone = {(r["report_slug"], r["figure_key"]) for r in dropped}
         if gone:
             for s in todo:

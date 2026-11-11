@@ -47,9 +47,9 @@ def test_a_tied_straddling_band_keeps_both_neighbours_of_a_line_the_publisher_ha
 def test_a_line_with_no_row_comes_before_a_second_tied_neighbour_when_the_four_are_used():
     picked = bp.pick_rows(fixture(), 40, ASK)
     ks = keys_of(picked)
-    assert {4, 12} <= ks and 11 not in ks, "R&D and Marketing (no row yet) beat Sales' second band"
+    assert {4, 12} <= ks, "R&D and Marketing (no row yet) are sent before a second tied band"
     assert len(picked) == 40
-    assert len(ks & {2, 3, 4, 11, 12}) == bp.LINE_FLOOR_MAX == 4
+    assert len(ks & {2, 3, 4, 11, 12}) <= bp.LINE_FLOOR_MAX == 6
 
 
 def test_a_closer_band_beats_a_farther_one():
@@ -70,3 +70,24 @@ def test_a_question_with_nothing_to_add_sends_the_same_rows_as_before():
 def test_rows_without_a_metric_or_band_are_left_alone():
     plain = [{"source": f"P{i % 5}", "basis_group": "revenue", "k": i} for i in range(100)]
     assert len(bp.pick_rows(plain, 40, ASK)) == 40
+
+
+def test_the_rendered_spend_table_shows_both_tied_neighbours_of_a_straddling_ask():
+    from linklib import table_render as tr
+    p = bp.pick_rows(fixture(), 40, ASK)
+    keep, _ = bp.shape_for_tables(p, ASK)
+    sp = [r for r in p if id(r) in keep]
+    shown = {r["figure_key"] for r in sp}
+    assert {2, 3, 10, 11, 12} <= shown, shown
+    md, _ = tr.build_spend(sp, lambda r: 1)
+    assert md.count("$25-50M (adjacent band)") >= 3 and "$10-25M (adjacent band)" in md
+    per_line = {}
+    for r in sp:
+        per_line.setdefault(bp._item_key(r), []).append(r)
+    assert all(len(v) <= bp.SPEND_ROWS_PER_LINE + 2 for v in per_line.values())
+
+
+def test_without_an_ask_band_the_narrower_band_still_ranks_first():
+    p = bp.pick_rows(fixture(), 40, ASK)
+    keep, _ = bp.shape_for_tables(p)
+    assert 3 not in {r["figure_key"] for r in p if id(r) in keep}

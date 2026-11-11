@@ -12135,3 +12135,6 @@ UI only; the answer pipeline is untouched. `/tools/fpa-buddy/questions` and `/as
 - Premise check: the turn-67 parts were under the 40-row cap in the brief's count, but the S&M candidate set alone is 74 rows (read-only, production), so the cap did bind. KeyBanc/Sapphire 2025 and Mostly Metrics are separate publishers by `source`; both the S&M $25M-$50M row (29805) and Mostly Metrics' Sales and Marketing rows were candidates. Cause: the publisher floor kept one row per publisher.
 - Not changed: `shape_for_tables` still keeps two spend rows per line and ranks a narrower band first, so the rendered spend table can still show the $10M-$25M KeyBanc row and Mostly Metrics' $5M-$25M row although the closer $25M-$50M row is now sent (rendering was out of scope).
 - Tests: `tests/test_step5_line_floor.py`.
+
+
+Rank change (same PR): `shape_for_tables(rows, band)` ranks each expense line's rows by `_band_fit` to the asked band (match rank, gap, overlap) instead of narrowest band first; when the ask straddles two printed bands a chosen adjacent row keeps its publisher edition's tied neighbour (at most 2 extra rows per line), newest edition first, each still tagged `adjacent_band`. Display cap `SPEND_ROW_CAP` is unchanged; no asked band falls back to narrowest-first.
