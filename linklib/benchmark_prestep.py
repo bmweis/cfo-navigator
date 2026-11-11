@@ -1572,7 +1572,26 @@ def derived_counts_note(picked: list[dict]) -> str:
             + " | ".join(lines))
 
 
-def table_cite(citations: list, sent_docs: list[dict]):
+def unsent_report_source(lib):
+    """`extra` for table_cite: a Sources entry for a report a computed shift reads from but no document was sent for, built
+    from the stored report record (title from the endpoint's own printed source, report and year; the report's landing URL, or
+    none and then it is cited by name). None when the report is not on file, so a marker is never invented."""
+    state: dict = {}
+
+    def extra(row: dict):
+        if "reports" not in state:
+            state["reports"] = {r["report_slug"]: r for r in lib.list_benchmark_reports()}
+            state["landings"] = fg.resolve_landings(lib)
+        slug = row.get("report_slug") or ""
+        if not slug or slug not in state["reports"]:
+            return None
+        link = (state["landings"].get(slug) or {}).get("url", "")
+        return {"title": _doc_title(row), "url": link, "type": "library", "figures": True,
+                "label": make_label(source=row["source"], title=row["report"], year=row["report_year"], url=link, kind="report")}
+    return extra
+
+
+def table_cite(citations: list, sent_docs: list[dict], extra=None):
     """cite(row) -> the [n] the Sources list uses for the row's report document, or None when that report was not
     sent. A report the prose already cited keeps its number; one it did not is appended to `citations` (same
     entry shape extract_citations builds, next number), so every table row's marker resolves to a Sources entry."""
@@ -1580,6 +1599,12 @@ def table_cite(citations: list, sent_docs: list[dict]):
 
     def cite(row: dict):
         d = by_ident.get(_row_identity(row))
+        if d is None and extra is not None:
+            # A report that was not sent but a computed shift line reads from: its Sources entry is built from the stored
+            # report record, once. `extra(row)` returns {title, url, type, label?} or None.
+            d = extra(row)
+            if d:
+                by_ident[_row_identity(row)] = d
         if d is None:
             return None
         for c in citations:

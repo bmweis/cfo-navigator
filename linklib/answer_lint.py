@@ -336,6 +336,8 @@ def function_share_problems(text: str, rows: list[dict] | None) -> list[dict]:
 
 _PCT_NEAR = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 _FWORD = re.compile(r"[A-Za-z&][A-Za-z&/]*")
+# A sentence about spend, expense or a percent of revenue or ARR is not a headcount mix claim ("sales at 38% of revenue").
+_SPEND_BASIS = re.compile(r"\bof\s+(?:total\s+)?(?:revenue|arr)\b|\bspend\b|\bexpenses?\b|\bopex\b|\bcost of revenue\b", re.I)
 _CANNOT_SHOW = re.compile(r"(?:mix )?table (?:cannot|can't|can not|does not|doesn't) show\b[^.\n]*", re.I)
 
 
@@ -359,7 +361,8 @@ def mix_prose_problems(text: str, rows: list[dict] | None, mix_rendered: bool = 
         if line.strip().startswith("|") or not line.strip():
             continue
         plain = re.sub(r"\[\d+\]|\*", "", line)
-        for m in _PCT_NEAR.finditer(plain):
+        spend_line = bool(_SPEND_BASIS.search(plain))
+        for m in ([] if spend_line else _PCT_NEAR.finditer(plain)):
             v = round(float(m.group(1)), 1)
             after = _FWORD.findall(plain[m.end():m.end() + 60])[:4]
             before = _FWORD.findall(plain[max(m.start() - 60, 0):m.start()])[-4:]
