@@ -106,3 +106,75 @@ def test_end_to_end_off_when_empty(lib, monkeypatch):
     lib.set_setting(pn.NOTE_KEY, "")
     ans, _ = ttr.run_turn(lib, monkeypatch, ttr.PROSE)
     assert "Note: " not in ans.text
+
+
+# --- where the note shows: the stored row, the CSV, the server-rendered history, both renderers ----------------
+
+import json, os, shutil, subprocess, tempfile  # noqa: E402
+
+NOTE_LINE = "Note: " + pn.DEFAULT_NOTE
+
+
+def _noted_answer(lib, monkeypatch):
+    _age(lib, "eb-2025", "Q2 2022")
+    ans, _ = ttr.run_turn(lib, monkeypatch, ttr.PROSE)
+    assert NOTE_LINE in ans.text
+    return ans
+
+
+@pytest.fixture
+def app_env(monkeypatch):
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    import importlib, webapp.app as appmod
+    importlib.reload(appmod)
+    yield appmod, db
+    if os.path.exists(db):
+        os.remove(db)
+
+
+def test_note_is_in_the_stored_row_the_csv_and_the_history_page(lib, monkeypatch, app_env):
+    from fastapi.testclient import TestClient
+    from linklib.db import Library
+    ans = _noted_answer(lib, monkeypatch)
+    appmod, db = app_env
+    store = Library(db)
+    uid = store.create_user("member1", "supersecret", role="user")
+    store.record_ask_question(uid, "Org structure?", ans.text, ans.model, "standard", True, False, False,
+                              cost_usd=0.03, citations=ans.citations)
+    assert NOTE_LINE in store.conn.execute("SELECT answer FROM ask_questions").fetchone()[0]   # the stored row
+    store.create_user("boss", "adminadmin", role="admin")
+    store.close()
+    c = TestClient(appmod.app)
+    c.post("/login", data={"username": "boss", "password": "adminadmin"}, follow_redirects=False)
+    csv_text = c.get("/admin/fpa-buddy/report/export.csv").text
+    assert "Figures covering 2020 to 2022" in csv_text and "Note: " in csv_text            # the CSV
+    c2 = TestClient(appmod.app)
+    c2.post("/login", data={"username": "member1", "password": "supersecret"}, follow_redirects=False)
+    page = c2.get("/ask/history").text
+    assert page.count("Figures covering 2020 to 2022") == 1                                # server-rendered history
+
+
+NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(not NODE, reason="node not available")
+def test_live_js_renderer_shows_the_note_and_matches_the_python_twin(lib, monkeypatch, tmp_path):
+    import webapp.app as appmod
+    ans = _noted_answer(lib, monkeypatch)
+    src = pathlib.Path(appmod.__file__).read_text()
+    i = src.index("function escapeHtml(s) {{")
+    j = src.index("// Below-answer list")
+    js = src[i:j].replace("{{", "{").replace("}}", "}").replace("\\\\", "\\")
+    cites = [{"url": c.get("url", ""), "title": c.get("title", "")} for c in ans.citations]
+    script = tmp_path / "md.js"
+    script.write_text("var CITES=" + json.dumps(cites) + ";\nvar CITE_SCOPE='';\n" + js +
+                      "\nprocess.stdout.write(mdToHtml(require('fs').readFileSync(0,'utf8')));")
+    live = subprocess.run([NODE, str(script)], input=ans.text, capture_output=True, text=True, check=True).stdout
+    assert "Figures covering 2020 to 2022" in live
+    # Whole-answer equality is not asserted: a citation with no link renders <sup> live and plain [n] on the server
+    # (a known, documented difference that has nothing to do with the note). The note paragraph itself is identical.
+    py = render_answer_markdown(ans.text, ans.citations, "")
+    assert live.rsplit("<p>", 1)[-1] == py.rsplit("<p>", 1)[-1] and live.rstrip().endswith("</p>")
