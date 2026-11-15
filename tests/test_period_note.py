@@ -178,3 +178,71 @@ def test_live_js_renderer_shows_the_note_and_matches_the_python_twin(lib, monkey
     # (a known, documented difference that has nothing to do with the note). The note paragraph itself is identical.
     py = render_answer_markdown(ans.text, ans.citations, "")
     assert live.rsplit("<p>", 1)[-1] == py.rsplit("<p>", 1)[-1] and live.rstrip().endswith("</p>")
+
+
+# ---------------------------------------------------------------------------
+# Replay: the note never reaches the model as conversation history
+# ---------------------------------------------------------------------------
+
+def _replay_env(monkeypatch):
+    import importlib
+    import os
+    import tempfile
+    db = tempfile.mktemp(suffix=".db")
+    monkeypatch.setenv("LINKLIB_DB", db)
+    monkeypatch.setenv("LINKLIB_PASSWORD", "adminpass")
+    monkeypatch.setenv("LINKLIB_SAVE_TOKEN", "tok-secret")
+    monkeypatch.setenv("LINKLIB_SECRET_KEY", "k")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    import webapp.app as appmod
+    importlib.reload(appmod)
+    from linklib.db import Library
+    lib = Library(db)
+    uid = lib.create_user("member1", "supersecret", role="user", name="Member One")
+    lib.close()
+    return appmod, uid, db
+
+
+def _followup_history(monkeypatch, stored_answer, setting=None):
+    import linklib.agent as agent
+    from fastapi.testclient import TestClient
+    from linklib.db import Library
+    appmod, uid, db = _replay_env(monkeypatch)
+    lib = Library(db)
+    if setting is not None:
+        lib.set_setting(pn.NOTE_KEY, setting, source="admin-edit")
+    cid = str(lib.record_ask_question(uid, "q0", stored_answer, "m", "standard",
+                                      True, False, True, conversation_id="", turn_index=0))
+    lib.close()
+    captured = {}
+
+    def fake_answer(lib, question, **kwargs):
+        captured["history"] = kwargs.get("history")
+        return agent.Answer(text="stub answer", model="m")
+
+    monkeypatch.setattr(agent, "answer_question", fake_answer)
+    c = TestClient(appmod.app, raise_server_exceptions=True)
+    c.post("/login", data={"username": "member1", "password": "supersecret"},
+           follow_redirects=False)
+    c.post("/ask", json={"question": "and next year?", "conversation_id": cid})
+    return captured["history"]
+
+
+def test_replayed_history_has_no_note_default(monkeypatch):
+    stored = f"Body of the answer [1].\n\n{pn.LABEL} {pn.DEFAULT_NOTE}"
+    hist = _followup_history(monkeypatch, stored)
+    assert hist[1] == {"role": "assistant", "content": "Body of the answer [1]."}
+    assert "Note:" not in hist[1]["content"]
+
+
+def test_replayed_history_has_no_note_edited_setting(monkeypatch):
+    custom = "Custom caution about older data."
+    stored = f"Body [1].\n\n{pn.LABEL} {custom}\n\nGo deeper: a report"
+    hist = _followup_history(monkeypatch, stored, setting=custom)
+    assert hist[1]["content"] == "Body [1].\n\nGo deeper: a report"
+
+
+def test_strip_note_is_exact_not_loose():
+    other = "Note: this is the author's own sentence, not the site note."
+    assert pn.strip_note(f"Body.\n\n{other}") == f"Body.\n\n{other}"
+    assert pn.strip_note("Body.") == "Body."

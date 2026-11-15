@@ -244,9 +244,13 @@ def _run_ask_turn(lib, user_id, question, *, model, effort, use_library, use_fee
                           "Start a new conversation to keep going.",
                 "sources": [], "feed_sources": [], "web_sources": [],
             }
+        from linklib import period_note as _pn
         for t in turns:
             history.append({"role": "user", "content": t["question"]})
-            history.append({"role": "assistant", "content": t["answer"]})
+            # The 2020-2022 site note is appended by code and is never shown
+            # to the model, replayed history included.
+            history.append({"role": "assistant",
+                            "content": _pn.strip_note(t["answer"], lib)})
 
     # Dollar-based rate limit — real spend this calendar month vs. the
     # user's effective cap (per-user override, else the global default).

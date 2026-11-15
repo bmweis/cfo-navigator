@@ -77,6 +77,28 @@ def note_text(lib) -> str:
     return (stored[0] if stored else DEFAULT_NOTE).strip()
 
 
+def strip_note(text: str, lib=None) -> str:
+    """Remove the appended note paragraph from a stored answer (for replay to the model).
+
+    Exact match on the "Note: <text>" paragraph, for the current stored/default
+    text and the built-in default. No loose pattern. A note whose text was
+    edited after the answer was stored is not recognised (known limit).
+    """
+    out = text or ""
+    candidates = {DEFAULT_NOTE.strip()}
+    if lib is not None:
+        try:
+            candidates.add(note_text(lib))
+        except Exception:
+            pass
+    for note in sorted((c for c in candidates if c), key=len, reverse=True):
+        para = f"{LABEL} {note}"
+        out = out.replace("\n\n" + para, "")
+        if out.startswith(para):
+            out = out[len(para):].lstrip("\n")
+    return out
+
+
 def apply_note(text: str, note: str, periods: list[str]) -> tuple[str, dict]:
     """(text with the note appended once, admin info). Nothing is appended when there is no note or no trigger."""
     info = {"shown": False, "periods": periods, "off": not note}
