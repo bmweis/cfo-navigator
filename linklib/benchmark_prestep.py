@@ -753,7 +753,53 @@ def mix_units(rows: list[dict]) -> list[list[int]]:
     return units
 
 
-def pick_rows(rows: list[dict], cap: int) -> list[dict]:
+LINE_FLOOR_MAX = 6      # rows the expense-line floor may add to one part, inside the part's own cap
+
+
+def _band_fit(r: dict, ask: dict | None) -> tuple:
+    """How close a row's printed band is to the asked size: (match rank, gap, minus overlap). Equal keys are a tie:
+    an ask that straddles two printed bands ($20M-$30M between $10M-$25M and $25M-$50M) is as close to both."""
+    rank = fg._MATCH_RANK.get(r.get("match"), 9)
+    b = fg.parse_band(r.get("band")) if ask else None
+    if not b or not ask or b["kind"] != ask["kind"]:
+        return (rank, 0.0, 0.0)
+    lo, hi = max(b["lo"], ask["lo"]), min(b["hi"], ask["hi"])
+    return (rank, max(lo - hi, 0.0), -max(hi - lo, 0.0))
+
+
+def _line_floor(rows: list[dict], chosen: list[int], newest_ed: dict, band: str) -> list[int]:
+    """Indexes to add so every publisher's newest edition shows each expense line it prints (S&M, R&D, G&A, sales,
+    marketing...) at its closest band, not only the one row the publisher floor kept. The publisher floor
+    alone kept KeyBanc/Sapphire 2025's G&A $10M-$25M row and cut its S&M $25M-$50M row. A line already shown for the
+    publisher is left alone. Only rows of the one expense-line mapping the spend table uses (`expense_line_of`)."""
+    ask = fg.parse_band(band) if band else None
+    have: dict[tuple, list[int]] = {}
+    left: dict[tuple, list[int]] = {}
+    for i, r in enumerate(rows):
+        try:
+            line = fg.expense_line_of(r["metric"], r.get("denominator", ""), r.get("unit", ""))
+        except KeyError:
+            continue
+        if not line or fg._year_num(r.get("report_year")) != newest_ed.get(_norm(r["source"])):
+            continue
+        (have if i in chosen else left).setdefault((_norm(r["source"]), line), []).append(i)
+    add: list[int] = []
+    for k, idx in left.items():
+        mine = have.get(k, [])
+        best = min(_band_fit(rows[i], ask) for i in idx + mine)
+        if mine and min(_band_fit(rows[i], ask) for i in mine) == best and not ask:
+            continue                                 # without an asked size there is no tie to keep
+        room = 2 - len(mine)                         # at most two rows of one line for one publisher (a tie)
+        if room <= 0:
+            continue
+        # A shown row at a worse band than a stored one is not "the closest": the closest is added beside it.
+        add += [(bool(mine), i) for i in idx if _band_fit(rows[i], ask) == best][:room]
+    # A line the publisher has no row for at all comes before a second, tied neighbour of a line it already shows.
+    add.sort(key=lambda t: (t[0], -fg._year_num(rows[t[1]].get("report_year")), t[1]))
+    return [i for _, i in add[:LINE_FLOOR_MAX]]
+
+
+def pick_rows(rows: list[dict], cap: int, band: str = "") -> list[dict]:
     """At most `cap` rows from rows already sorted best first (basis group, match, band,
     sample, newest year). Before the rest is filled, the best row of every publisher and of
     every basis group is kept, then up to BASIS_RESERVE rows of each basis group, so a cap never
@@ -805,6 +851,8 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
     # If the floor alone would overfill the cap, newer editions keep their slot and older ones are cut first.
     floor.sort(key=lambda i: (-fg._year_num(rows[i].get("report_year")), i))
     chosen += floor[:max(cap - len(chosen), 0)]
+    # The expense-line floor: inside the same cap, never past it. Newer editions and the closest band first.
+    chosen += [i for i in _line_floor(rows, chosen, newest_ed, band) if i not in chosen][:max(cap - len(chosen), 0)]
     per_basis: dict[str, int] = {}
     for i in chosen:
         b = rows[i].get("basis_group") or ""
@@ -829,14 +877,19 @@ def pick_rows(rows: list[dict], cap: int) -> list[dict]:
 SPEND_ROWS_PER_LINE = 2
 
 
-def _spend_rank(r: dict) -> tuple:
+def _spend_rank(r: dict, ask: dict | None = None) -> tuple:
     b = fg.parse_band(r.get("band"))
     width = (b["hi"] - b["lo"]) if b and b["hi"] != float("inf") else 1e18
+    if ask and b and b["kind"] == ask["kind"]:
+        _, gap, ov = _band_fit(r, ask)         # gap then overlap: a band that straddles the ask ties its other neighbour
+        width = (gap, ov)
+    else:
+        width = (0.0, width)
     return (fg._MATCH_RANK[r["match"]], bool(r.get("band_context")), width, -fg._year_num(r.get("data_period")),
             -fg._year_num(r.get("report_year")), r["source"], str(r.get("figure_key")))
 
 
-def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
+def shape_for_tables(rows: list[dict], band: str = "") -> tuple[set, list[dict]]:
     """(ids of the rows to keep, rows dropped) for a turn that writes the org-structure and spend-profile tables.
     Headcount mix: one edition per publisher, the newest, at its newest data period (never two editions in one
     column). Spend: at most SPEND_ROWS_PER_LINE rows per line item, one per publisher first, the closest band
@@ -844,6 +897,7 @@ def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
     Headcount counts and margins are kept as they are. Nothing is changed in a row."""
     keep = {id(r) for r in rows}
     drop: list[dict] = []
+    ask = fg.parse_band(band) if band else None
     share = [r for r in rows if fg.row_table_kind(r) == "headcount_share"]
     newest: dict[str, int] = {}
     for r in share:
@@ -864,7 +918,7 @@ def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
         if fg.row_table_kind(r) == "spend_share":
             by_line.setdefault(_item_key(r), []).append(r)
     for grp in by_line.values():
-        grp.sort(key=_spend_rank)
+        grp.sort(key=lambda r: _spend_rank(r, ask))
         chosen: list[dict] = []
         pubs: set = set()
         for r in grp:                                   # one row per publisher first
@@ -886,6 +940,17 @@ def shape_for_tables(rows: list[dict]) -> tuple[set, list[dict]]:
                     and fg._year_num(r.get("report_year")) > oldest_yr):
                 chosen.append(r)
                 break
+        # An ask between two printed bands is as close to both: a chosen adjacent row keeps the same publisher
+        # edition's tied neighbour (at most 2 extra rows a line), so both render, each labelled adjacent.
+        if ask:
+            for c in list(chosen):
+                if c["match"] != "adjacent_band":
+                    continue
+                for r in grp:
+                    if (r not in chosen and r["match"] == "adjacent_band" and _norm(r["source"]) == _norm(c["source"])
+                            and r.get("report_year") == c.get("report_year") and _band_fit(r, ask) == _band_fit(c, ask)
+                            and len(chosen) < SPEND_ROWS_PER_LINE + 2):
+                        chosen.append(r)
         for r in grp:
             if r not in chosen:
                 keep.discard(id(r))
@@ -1091,7 +1156,7 @@ def pick(lib, sub: Sub, tier: str, row_cap: int) -> None:
     """Apply the row cap to one part and build its definition cards. The figure documents are built
     later, once, for the whole turn (merge_figure_docs). Reads only."""
     names = list(sub.metrics)
-    rows = pick_rows(sub.candidates, row_cap)
+    rows = pick_rows(sub.candidates, row_cap, sub.band)
     sub.picked = rows
     sub.capped_rows = len(sub.candidates) - len(rows)
     if sub.capped_rows:
@@ -1385,7 +1450,7 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
     if any(m in fg.SHAPE_LABELS for s in ps.subs for m in s.metrics):
         # One choice for the whole turn: a row two parts picked is kept or dropped for both.
         union = list({(r["report_slug"], r["figure_key"]): r for s in todo for r in s.picked}.values())
-        keep_ids, dropped = shape_for_tables(union)
+        keep_ids, dropped = shape_for_tables(union, next((x.band for x in todo if x.band), ""))
         gone = {(r["report_slug"], r["figure_key"]) for r in dropped}
         if gone:
             for s in todo:
