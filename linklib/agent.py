@@ -1188,6 +1188,19 @@ def answer_question(
                         done["prestep"] = dict(done["prestep"], tables=tinfo)
             except Exception:
                 _log.exception("table render failed; answer left as written")
+        # The site's note on 2020 to 2022 data: added by code after everything the model wrote, never seen by the model,
+        # never a citation. Triggered by the periods of printed table rows and computed shift endpoints only.
+        if prestep.active:
+            try:
+                from . import period_note as _pn
+                _tp = list((getattr(prestep, "tables", None) or {}).get("periods") or [])
+                _trig = _pn.triggering_periods(_tp, getattr(prestep, "shifts", None))
+                text, pinfo = _pn.apply_note(text, _pn.note_text(lib), _trig)
+                prestep.period_note = pinfo
+                if isinstance(done.get("prestep"), dict):
+                    done["prestep"] = dict(done["prestep"], period_note=pinfo)
+            except Exception:
+                _log.exception("period note failed; answer left as written")
         return Answer(text=text, citations=citations, stripped=stripped,
                      input_tokens=in_tok, output_tokens=out_tok,
                      cache_creation_tokens=cache_w, cache_read_tokens=cache_r,

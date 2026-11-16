@@ -29186,6 +29186,9 @@ def admin_system_ai(request: Request):
                               "assigned": lib.roles_using(mid), "confirmed": lib.confirmed_roles(mid)}
                         for mid in _ed_ids}
         roles_log = lib.list_model_role_log()
+        from linklib import period_note as _pn
+        period_note_stored = lib.conn.execute("SELECT 1 FROM settings WHERE key=?", (_pn.NOTE_KEY,)).fetchone() is not None
+        period_note_text = _pn.note_text(lib)
     finally:
         lib.close()
     has_exa_key = bool(os.environ.get("EXA_API_KEY"))
@@ -29276,6 +29279,7 @@ def admin_system_ai(request: Request):
 {_card("Model pricing", _model_pricing_card_html(pricing_rows, model_status, role_info))}
 {_allowed_roles_card_html(roles_editor, roles_log)}
 {_card("Exa web search", _ai_exa_config_html(exa_enabled, has_exa_key))}
+{_card("2020 to 2022 data note", _period_note_card_html(period_note_text, period_note_stored))}
 
 <h2 style="margin:28px 0 4px;">Usage index</h2>
 <p style="color:var(--ink-soft);margin:-2px 0 14px;font-size:13.5px;line-height:1.6;">Which model or mechanism powers each surface, and whether it can be changed live or needs a code change. Read-only.</p>
@@ -29293,6 +29297,46 @@ def admin_system_ai(request: Request):
 {_card("Embeddings", openai_rows)}
 </div>"""
     return HTMLResponse(_page("AI configuration and usage—Admin", "Admin", body, authed=True))
+
+
+def _period_note_card_html(text: str, stored: bool) -> str:
+    """Editor for the site's note on 2020 to 2022 data (linklib/period_note.py)."""
+    state = "Off. No note is added to answers." if not text else "On. Added to an answer that prints 2020 to 2022 figures."
+    src = "" if stored else " Showing the built-in default; saving stores your wording."
+    return (f'<p id="pn-state" style="margin:0 0 8px;font-size:14px;"><strong>{_esc(state)}</strong>{_esc(src)}</p>'
+            f'<textarea id="pn-text" rows="4" style="width:100%;max-width:760px;padding:10px 14px;border:1px solid var(--line);'
+            f'border-radius:10px;font:inherit;font-size:15px;box-sizing:border-box;">{_esc(text)}</textarea>'
+            f'<div style="margin-top:8px;display:flex;gap:8px;align-items:center;">'
+            f'<button type="button" class="btn" onclick="savePeriodNote(false)">Save</button>'
+            f'<button type="button" class="btn btn-ghost" onclick="savePeriodNote(true)">Reset to default</button>'
+            f'<span id="pn-status" style="font-size:13px;color:var(--muted);"></span></div>'
+            f'<p style="font-size:12.5px;color:var(--muted);margin:10px 0 0;">Leave it empty to turn the note off.</p>'
+            f'<p style="font-size:12.5px;color:var(--muted);margin:6px 0 0;">When it shows: after the answer, once, when a table row or a computed shift '
+            f'the answer prints covers 2020 to 2022 (a range that overlaps counts; the data period is read, never the edition year). '
+            f'It is the site\'s note, added by code. The model never sees or writes it, it is not a citation, and no stored figure changes. '
+            f'The admin report row for each turn says whether it showed and which period triggered it.</p>'
+            f'<script>async function savePeriodNote(reset){{var t=document.getElementById("pn-status");t.textContent="Saving…";'
+            f'try{{var r=await fetch("/admin/system/ai/period-note/save",{{method:"POST",headers:{{"Content-Type":"application/json"}},'
+            f'body:JSON.stringify({{reset:reset,text:document.getElementById("pn-text").value}})}});var d=await r.json();'
+            f'if(!d.ok){{t.textContent=d.error||"Could not save.";return;}}location.reload();}}catch(e){{t.textContent="Could not save.";}}}}</script>')
+
+
+@app.post("/admin/system/ai/period-note/save")
+async def admin_system_ai_period_note_save(request: Request):
+    """Save the 2020 to 2022 note. Empty text turns it off; reset stores the built-in wording."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    payload = await request.json()
+    from linklib import period_note as _pn
+    text = _pn.DEFAULT_NOTE if payload.get("reset") else str(payload.get("text") or "").strip()
+    if len(text) > 600:
+        return JSONResponse({"ok": False, "error": "Keep it under 600 characters."}, status_code=400)
+    lib = _lib()
+    try:
+        lib.set_setting(_pn.NOTE_KEY, text, source="admin-edit")
+    finally:
+        lib.close()
+    return JSONResponse({"ok": True})
 
 
 @app.post("/admin/system/ai/model/save")
@@ -34051,6 +34095,14 @@ def _prestep_report_html(r: dict) -> str:
         bits.append("no split needed")
     rows = sum(s.get("figure_rows", 0) for s in d.get("subs") or [])
     bits.append(f"{rows} figure rows")
+    pn = d.get("period_note") or {}
+    if pn:
+        if pn.get("shown"):
+            bits.append("2020 to 2022 note: shown (" + _esc(", ".join(pn.get("periods") or [])) + ")")
+        elif pn.get("periods") and pn.get("off"):
+            bits.append("2020 to 2022 note: off (would have shown for " + _esc(", ".join(pn["periods"])) + ")")
+        else:
+            bits.append("2020 to 2022 note: not triggered")
     mix = d.get("match_mix") or {}
     if mix:
         bits.append("match: " + _esc(", ".join(f"{k} {v}" for k, v in sorted(mix.items()))))

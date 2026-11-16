@@ -257,7 +257,8 @@ def build_spend(rows: list[dict], cite) -> tuple[str, dict]:
     rng = _ranges(shown, cite)
     if rng:
         md += "\n\nRanges across the sent points:\n" + "\n".join(rng)
-    return md, {"rows": len(shown), "capped": capped, "ranges": len(rng), "dropped": _dropped(rows, kept)}
+    return md, {"rows": len(shown), "capped": capped, "ranges": len(rng), "dropped": _dropped(rows, kept),
+                "periods": [r.get("data_period") for r in shown]}
 
 
 def margin_sort_key(r: dict) -> tuple:
@@ -284,7 +285,7 @@ def build_margins(rows: list[dict], cite) -> tuple[str, dict]:
         body.append(row)
     note = "\n\n" + ORDER_NOTE
     return ("**Margins**\n\n" + _table(head, body) + note,
-            {"rows": len(shown), "capped": capped, "ranges": 0, "dropped": _dropped(rows, kept), "sort": "public first, band upper then lower edge, newest edition first, gross before other margins"})
+            {"rows": len(shown), "capped": capped, "ranges": 0, "dropped": _dropped(rows, kept), "periods": [r.get("data_period") for r in shown], "sort": "public first, band upper then lower edge, newest edition first, gross before other margins"})
 
 
 # --- headcount counts and headcount mix --------------------------------------------------------------
@@ -340,7 +341,8 @@ def build_headcount(rows: list[dict], cite) -> tuple[str, dict]:
         names = "; ".join(f"{_cell(r.get('source'))} {_cell(r.get('report_year'))} ({_cell(r.get('data_period'))}, {statistic_text(r)})"
                           for r in out[:4])
         md += f"\n\nNot shown, not a headcount count: {names}."
-    return md, {"rows": len(shown), "capped": capped, "ranges": 0, "excluded": len(out)}
+    return md, {"rows": len(shown), "capped": capped, "ranges": 0, "excluded": len(out),
+                "periods": [r.get("data_period") for r in shown]}
 
 
 def mix_share_rows(rows: list[dict]) -> list[dict]:
@@ -491,6 +493,8 @@ def build_mix(rows: list[dict], cite) -> tuple[str, dict]:
     if out_notes:
         md += "\n\n" + ". ".join(out_notes) + "."
     return md, {"rows": len(forder), "capped": 0, "ranges": 0, "columns": len(col_data), "derived": derived_idx is not None,
+                "periods": [r.get("data_period") for _hr, picked in col_data for r in picked.values()]
+                           + ([derived_total.get("data_period")] if derived_idx is not None else []),
                 "allowed_extra": allowed_extra, "not_shown": len(older) + len(extra_cols), "unnamed": len(unnamed)}
 
 
@@ -543,7 +547,9 @@ def render_tables(text: str, rows: list[dict], cite) -> tuple[str, dict]:
     def one(kind: str) -> str:
         # The mix builder needs the sent totals too (for the derived people column); it picks its own share rows.
         md, meta = _builder(kind)(rows if kind == "mix" else rows_for(kind, rows), lambda r, _c=cite: _c(r))
-        info["rendered"][kind] = {k: v for k, v in meta.items() if k not in ("allowed_extra", "dropped")}
+        info["rendered"][kind] = {k: v for k, v in meta.items() if k not in ("allowed_extra", "dropped", "periods")}
+        # The data periods of the rows this table really printed (read by the period note, not shown in the admin row).
+        info.setdefault("periods", []).extend(str(x) for x in (meta.get("periods") or []) if x)
         if meta.get("dropped"):
             info.setdefault("cap_dropped", []).extend(dict(d, kind=kind) for d in meta["dropped"])
         bad = selfcheck(md, rows, extra=meta.get("allowed_extra"))
