@@ -768,6 +768,16 @@ def _band_fit(r: dict, ask: dict | None) -> tuple:
     return (rank, max(lo - hi, 0.0), -max(hi - lo, 0.0))
 
 
+def _floor_fit(r: dict, ask: dict | None) -> tuple:
+    """Floor ordering across publishers: (match rank, gap to the asked size, band width). Unlike `_band_fit` it does
+    not prefer overlap, which ranks a very wide band that merely contains the ask ("<$100M") ahead of a narrow band
+    that straddles it ($25M-$50M). Equal keys tie, as in `_band_fit`."""
+    rank, gap, _ = _band_fit(r, ask)
+    b = fg.parse_band(r.get("band")) if ask else None
+    width = (b["hi"] - b["lo"]) if b and b["kind"] == ask["kind"] and b["hi"] != float("inf") else 1e18
+    return (rank, gap, width)
+
+
 def _line_floor(rows: list[dict], chosen: list[int], newest_ed: dict, band: str) -> list[int]:
     """Indexes to add so every publisher's newest edition shows each expense line it prints (S&M, R&D, G&A, sales,
     marketing...) at its closest band, not only the one row the publisher floor kept. The publisher floor
@@ -795,8 +805,9 @@ def _line_floor(rows: list[dict], chosen: list[int], newest_ed: dict, band: str)
             continue
         # A shown row at a worse band than a stored one is not "the closest": the closest is added beside it.
         add += [(bool(mine), i) for i in idx if _band_fit(rows[i], ask) == best][:room]
-    # A line the publisher has no row for at all comes before a second, tied neighbour of a line it already shows.
-    add.sort(key=lambda t: (t[0], -fg._year_num(rows[t[1]].get("report_year")), t[1]))
+    # The slots go to the closest band to the asked size first, across publishers and lines; then a line the
+    # publisher has no row for at all before a second, tied neighbour of a line it already shows; then newest edition.
+    add.sort(key=lambda t: (_floor_fit(rows[t[1]], ask), t[0], -fg._year_num(rows[t[1]].get("report_year")), t[1]))
     return [i for _, i in add[:LINE_FLOOR_MAX]]
 
 
