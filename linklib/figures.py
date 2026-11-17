@@ -1377,6 +1377,8 @@ _SHARE_NOT_A_FUNCTION = re.compile(r"\bsums?\b|not assigned|unassigned|\bpoints\
 # A label that groups functions but is not one: "By Department", "Function", "All".
 # Two functions printed as one row ("engineering plus product and design") is not one function's share.
 _COMBINED_FUNCTIONS = re.compile(r"\bplus\b|\+|\bcombined\b", re.I)
+# A headcount growth rate ("headcount growth", "yoy change") is a rate of change, not a function's share of headcount.
+_NOT_A_FUNCTION_SHARE = re.compile(r"\b(?:growth|rate|change)\b", re.I)
 _GENERIC_FUNCTION_LABEL = re.compile(r"^(?:by\s+)?(?:departments?|functions?|teams?|all|total|other functions?)$", re.I)
 
 
@@ -1393,10 +1395,13 @@ def share_function(r: dict) -> str:
 
 def mix_function_ok(r: dict) -> bool:
     """True when a headcount-share row is one function's share the data names: not a sum, a total or a
-    "points not assigned" row, and a function can be read from its metric name or its segment."""
+    "points not assigned" row, not a growth rate ("headcount growth", "yoy change"), and a function can be read
+    from its metric name or its segment."""
     if _SHARE_NOT_A_FUNCTION.search(str(r.get("metric") or "")) or _SHARE_NOT_A_FUNCTION.search(str(r.get("segment") or "")):
         return False
     fn = share_function(r).strip()
+    if _NOT_A_FUNCTION_SHARE.search(fn) or _NOT_A_FUNCTION_SHARE.search(str(r.get("metric") or "")):
+        return False
     return bool(fn) and not _GENERIC_FUNCTION_LABEL.match(fn) and not _COMBINED_FUNCTIONS.search(fn)
 
 

@@ -383,11 +383,30 @@ def mix_prose_problems(text: str, rows: list[dict] | None, mix_rendered: bool = 
     return out
 
 
+# Visible self-correction in the answer ("..., wait, actually $5M-$25M printed higher"). Flag only, never rewritten:
+# the answer is shown as the model wrote it and the admin row says it leaked. A clause-start "wait" (then a comma,
+# dash, full stop or "actually"), "hold on", "hmm" and "let me <verb>" count; a bare "actually" and "wait" inside a
+# sentence ("wait for the next edition", "wait time") do not.
+_CLAUSE_START = r"(?:^|[.!?;:,\u2014\u2013\-\(]\s*|\n\s*)"
+_DRAFT_LEAK = re.compile(
+    _CLAUSE_START + r"(?:wait\s*(?:[,.\u2014\u2013\-]|\.\.\.|actually\b)|hold on\s*[,.\u2014\u2013\-]|hmm+\b"
+    r"|let me (?:re|check|correct|redo|fix|try|look|see|think|recompute|recalculate|rethink|double)\w*)", re.I | re.M)
+
+
+def draft_leak_problems(text: str) -> list[dict]:
+    """Flag-only: [{phrase: "draft leak", snippet}] for each visible self-correction in the prose. Nothing is changed."""
+    out: list[dict] = []
+    for m in _DRAFT_LEAK.finditer(text or ""):
+        a = max(m.start() - 60, 0)
+        out.append({"phrase": "draft leak", "snippet": (text[a:m.end() + 80]).replace("\n", " ").strip()})
+    return out
+
+
 def lint_answer(text: str, shifts: list | None = None, rows: list | None = None) -> list[dict]:
     """[{phrase, snippet}] for each likely breach; [] for a clean answer. `shifts` (the computed shift lines
     the turn was given; [] when none) turns on the check that a "up N points" claim matches one of them."""
     flags: list[dict] = (list(what_shifted_problems(text, shifts)) + change_claim_problems(text, shifts) + label_problems(text, rows)
-                         + left_out_cell_problems(text) + table_order_problems(text) + function_share_problems(text, rows) + mix_prose_problems(text, rows) + inference_problems(text))
+                         + left_out_cell_problems(text) + table_order_problems(text) + function_share_problems(text, rows) + mix_prose_problems(text, rows) + inference_problems(text) + draft_leak_problems(text))
     # A citation marker after a table row's closing pipe breaks the row in a renderer that does not repair it.
     for line in (text or "").split("\n"):
         if _ROW_MARKER_AFTER_PIPE.match(line):
