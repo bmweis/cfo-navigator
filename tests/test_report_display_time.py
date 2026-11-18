@@ -62,8 +62,8 @@ def test_report_shows_eastern_time_with_the_abbreviation(env):
 def test_csv_adds_one_local_time_column_and_keeps_the_utc_date(env):
     c, _ = env
     rows = list(csv.reader(io.StringIO(c.get("/admin/fpa-buddy/report/export.csv").text)))
-    assert rows[0][0] == "date" and rows[0][-1] == "local_time" and rows[0].count("local_time") == 1
-    assert rows[1][0].startswith("2026-11-01T00:11") and rows[1][-1] == "2026-10-31 20:11 EDT"
+    assert rows[0][0] == "date" and rows[0][-2] == "local_time" and rows[0].count("local_time") == 1 and rows[0][-1] == "rewritten_question"
+    assert rows[1][0].startswith("2026-11-01T00:11") and rows[1][-2] == "2026-10-31 20:11 EDT"
 
 
 def test_the_zone_can_be_changed_and_a_bad_name_is_refused(env):

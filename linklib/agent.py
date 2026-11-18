@@ -313,7 +313,49 @@ def _clean_rewrite_output(raw: str) -> str:
     return line
 
 
-def _rewrite_followup(trimmed_history: list[dict], question: str) -> RewriteResult | None:
+def prior_turn_context(turns: list[dict]) -> dict:
+    """What the benchmark pre-step looked up on the conversation's last turn:
+    {"metrics": [...], "band": "$20-$30M" or ""}, or {} when it looked up
+    nothing. Read from the stored `prestep_json`; no new storage. The band is
+    only set when the prior turn named exactly one (two bands is ambiguous).
+    Used so a follow-up like "which of those lines is growing fastest?" keeps
+    the prior turn's metrics and size band instead of losing them."""
+    import json as _json
+    if not turns:
+        return {}
+    try:
+        log = _json.loads((turns[-1].get("prestep_json") or "") or "{}")
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(log, dict) or log.get("outcome") != "ran":
+        return {}
+    metrics: list[str] = []
+    for m in [m for s in (log.get("subs") or []) for m in (s.get("metrics") or [])] + list(log.get("detected") or []):
+        if isinstance(m, str) and m and m not in metrics:
+            metrics.append(m)
+    bands: list[str] = []
+    for b in list((log.get("signals") or {}).get("bands") or []) + [s.get("band") for s in (log.get("subs") or [])]:
+        if isinstance(b, str) and b and b not in bands:
+            bands.append(b)
+    if not metrics:
+        return {}
+    return {"metrics": metrics, "band": bands[0] if len(bands) == 1 else ""}
+
+
+def _prior_block(prior: dict) -> str:
+    """The short block the rewriter gets on a follow-up whose prior turn ran a benchmark lookup."""
+    lines = ["Prior turn's lookup (metrics: " + "; ".join(prior["metrics"]) + ")."]
+    if prior.get("band"):
+        lines.append(f"Size band asked: {prior['band']}.")
+    lines.append(
+        "When the follow-up refers to \"those lines\", \"it\", \"that\" or similar, it covers ALL of "
+        "the prior turn's metrics unless the follow-up names one; name them in the rewritten question. "
+        "Keep the size band unless the follow-up names a different one.")
+    return "\n".join(lines)
+
+
+def _rewrite_followup(trimmed_history: list[dict], question: str,
+                      prior: dict | None = None) -> RewriteResult | None:
     """Rewrite a follow-up into a standalone search question via one Haiku call.
 
     `trimmed_history` must already be bounded by _trim_history (the same cap
@@ -340,7 +382,8 @@ def _rewrite_followup(trimmed_history: list[dict], question: str) -> RewriteResu
             messages=[{
                 "role": "user",
                 "content": (f"Conversation so far:\n{transcript}\n\n"
-                            f"Follow-up question: {question}"),
+                            + (_prior_block(prior) + "\n\n" if prior else "")
+                            + f"Follow-up question: {question}"),
             }],
             timeout=REWRITE_TIMEOUT_SECONDS,
         )
@@ -399,6 +442,9 @@ class Answer:
     rewrite_input_tokens: int = 0
     rewrite_output_tokens: int = 0
     rewrite_cost_usd: float = 0.0
+    # The standalone question the rewrite produced ("" on turn one, when the
+    # call never ran, or when its output was unusable). Stored so it can be audited.
+    rewrite_text: str = ""
     # Query-time embedding call for hybrid library retrieval (#93) — zero
     # when vector search is unavailable or the embedding call failed (both
     # fall back to FTS5-only silently). This is a USER-CAP cost (embedding
@@ -913,6 +959,7 @@ def answer_question(
     opml_path: str | None = None,
     history: list[dict] | None = None,
     budget_usd: float | None = None,
+    prior_context: dict | None = None,
 ) -> Answer:
     """Answer a question from the configured sources.
 
@@ -948,6 +995,10 @@ def answer_question(
         budget_usd: what the user has left of their monthly budget, or None
             for no limit. Only the benchmark pre-step reads it, to decide how
             many parts of a split question it can afford (never to block).
+        prior_context: `prior_turn_context(...)` of the conversation's last
+            turn (metrics and size band its benchmark lookup used). Follow-ups
+            only: the rewriter sees it, and the pre-step inherits the band when
+            the rewritten question names none.
     """
     settings = EFFORT_SETTINGS.get(effort, EFFORT_SETTINGS["standard"])
     model = MODEL_ALIASES.get(model, model) or settings.get("model") or DEFAULT_MODEL
@@ -957,10 +1008,16 @@ def answer_question(
     # just the raw follow-up. Turn one (no history) skips this entirely —
     # zero added cost or latency for first questions.
     trimmed_history = _trim_history(history)
-    rewrite = _rewrite_followup(trimmed_history, question) if trimmed_history else None
+    if not trimmed_history:
+        rewrite = None
+    elif prior_context:
+        rewrite = _rewrite_followup(trimmed_history, question, prior=prior_context)
+    else:
+        rewrite = _rewrite_followup(trimmed_history, question)
     rw_in = rewrite.input_tokens if rewrite else 0
     rw_out = rewrite.output_tokens if rewrite else 0
     rw_cost = rewrite.cost_usd if rewrite else 0.0
+    rw_text = rewrite.text if rewrite else ""
     retrieval_question = (rewrite.text if rewrite and rewrite.text else question)
 
     lib_hits: list[dict] = []
@@ -986,7 +1043,8 @@ def answer_question(
             prestep = _bp.plan_turn(
                 lib, retrieval_question, tier=effort if effort in EFFORT_SETTINGS else "standard",
                 settings=settings, model=model, remaining_usd=budget_usd,
-                split_model=lib.get_role_model("prestep"))
+                split_model=lib.get_role_model("prestep"),
+                prior_band=(prior_context or {}).get("band", "") if trimmed_history else "")
         except Exception as _e:
             _log.exception("benchmark pre-step failed; answering without it")
             prestep = _bp.Prestep(split_fallback="prestep_error", outcome=f"error: {type(_e).__name__}")
@@ -1022,7 +1080,7 @@ def answer_question(
     common = dict(
         sources=lib_hits, feed_sources=feed_items, web_sources=exa_hits, model=model,
         cost_usd=rw_cost + embed_cost + exa_cost + prestep_cost, rewrite_input_tokens=rw_in,
-        rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost,
+        rewrite_output_tokens=rw_out, rewrite_cost_usd=rw_cost, rewrite_text=rw_text,
         embed_input_tokens=embed_in, embed_cost_usd=embed_cost,
         exa_result_count=exa_results, exa_cost_usd=exa_cost, web_scope=web_scope,
         prestep=prestep_log, prestep_cost_usd=prestep_cost,
