@@ -25,7 +25,7 @@ MIX_COLS_CAP = 4
 HEADER_MAX = 40       # characters of a mix column header before the period moves under the table
 
 _ITEM_ORDER = ("sm", "rd", "ga", "cs", "opex")
-_ITEM_LABEL = {"sm": "S&M", "rd": "R&D", "ga": "G&A", "cs": "Customer success", "opex": "Total opex"}
+_ITEM_LABEL = {"sales": "Sales", "mkt": "Marketing", "sm": "S&M", "rd": "R&D", "ga": "G&A", "cs": "Customer success", "opex": "Total opex"}
 
 
 def placeholder(kind: str) -> str:
@@ -269,16 +269,27 @@ def margin_sort_key(r: dict) -> tuple:
                                               str(r.get("source") or ""), str(r.get("figure_key")))
 
 
+def _margin_labels(rows: list[dict]) -> dict:
+    """One display form per margin name: the first letter capitalised, the rest as printed, and where two names differ
+    only by case ("gross margin", "Gross margin", "Gross Margin") the first one met in row order stands for all."""
+    out: dict = {}
+    for r in rows:
+        name = _cell(r.get("metric")) or "Margin"
+        out.setdefault(name.lower(), name[:1].upper() + name[1:])
+    return out
+
+
 def build_margins(rows: list[dict], cite) -> tuple[str, dict]:
     kept = select_rows(rows, MARGIN_ROW_CAP, lambda r: ("gross" not in _cell(r.get("metric")).lower(), _cell(r.get("metric")).lower(),
                                                        fg.statistic_rank(r.get("statistic"))))
     shown = sorted(kept, key=margin_sort_key)
     capped = max(len(rows) - len(shown), 0)
+    labels = _margin_labels(shown)
     show_seg = len({(_cell(r.get("segment")).lower()) for r in shown}) > 1
     head = ["Metric", "Band"] + (["Segment"] if show_seg else []) + ["Statistic", "Value", "Basis", "Report and period"]
     body = []
     for r in shown:
-        row = [_cell(r.get("metric")) or "Margin", _band_text(r)]
+        row = [labels[(_cell(r.get("metric")) or "Margin").lower()], _band_text(r)]
         if show_seg:
             row.append(_cell(r.get("segment")) or "All")
         row += [statistic_text(r), value_text(r), _cell(r.get("denominator")) or "not stated", _report_text(r, cite(r))]
