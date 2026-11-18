@@ -313,11 +313,40 @@ def _clean_rewrite_output(raw: str) -> str:
     return line
 
 
+_BAND_BASIS_WORDS = re.compile(r"\b(arr|revenue|rev|mrr)\b", re.I)
+
+
+def _band_norm(b: str) -> str:
+    """A band with its basis word, case and spacing removed, so "$20-$30m" and "$20-$30M ARR" compare equal."""
+    return re.sub(r"\s+", "", _BAND_BASIS_WORDS.sub("", b or "")).casefold()
+
+
+def _prior_shifts(turns: list[dict]) -> list[dict]:
+    """The computed shift lines of the nearest previous turn that stored any (stored `prestep_json.shifts`).
+    Nothing is recomputed. [] when no turn has them."""
+    import json as _json
+    for t in reversed(turns or []):
+        try:
+            log = _json.loads((t.get("prestep_json") or "") or "{}")
+        except (ValueError, TypeError):
+            continue
+        sh = log.get("shifts") if isinstance(log, dict) else None
+        if isinstance(sh, list):
+            lines = [x for x in sh if isinstance(x, dict) and isinstance(x.get("line"), str) and x["line"]]
+            if lines:
+                return lines
+    return []
+
+
 def prior_turn_context(turns: list[dict]) -> dict:
     """What the benchmark pre-step looked up on the conversation's last turn:
-    {"metrics": [...], "band": "$20-$30M" or ""}, or {} when it looked up
+    {"metrics": [...], "band": "$20-$30M" or "", "shifts": [...]}, or {} when it looked up
     nothing. Read from the stored `prestep_json`; no new storage. The band is
-    only set when the prior turn named exactly one (two bands is ambiguous).
+    only set when the prior turn named exactly one: spellings that differ only
+    in case, spacing or a basis word ("$20-$30m", "$20-$30M ARR") count as one,
+    two genuinely different bands is ambiguous and gives "". `shifts` are the
+    computed shift lines of the nearest previous turn that has any, carried so a
+    follow-up that runs no lookup of its own can still answer from them.
     Used so a follow-up like "which of those lines is growing fastest?" keeps
     the prior turn's metrics and size band instead of losing them."""
     import json as _json
@@ -335,11 +364,27 @@ def prior_turn_context(turns: list[dict]) -> dict:
             metrics.append(m)
     bands: list[str] = []
     for b in list((log.get("signals") or {}).get("bands") or []) + [s.get("band") for s in (log.get("subs") or [])]:
-        if isinstance(b, str) and b and b not in bands:
+        if isinstance(b, str) and b and _band_norm(b) not in [_band_norm(x) for x in bands]:
             bands.append(b)
     if not metrics:
         return {}
-    return {"metrics": metrics, "band": bands[0] if len(bands) == 1 else ""}
+    ctx = {"metrics": metrics, "band": bands[0] if len(bands) == 1 else ""}
+    shifts = _prior_shifts(turns)
+    if shifts:
+        ctx["shifts"] = shifts
+    return ctx
+
+
+def carried_shifts_block(shifts: list[dict]) -> str:
+    """The notes block that hands the previous answer's computed shift lines to a follow-up that has none of its own.
+    Same constraints as the normal COMPUTED SHIFTS block: exact lines, no recomputing, no other change over time."""
+    return ("COMPUTED SHIFTS (computed on the previous answer in this conversation; the system worked these out from the "
+            "stored reports then, and the lines are exact, with their band and basis):\n"
+            + "\n".join(f"  {i}. {x['line']}" for i, x in enumerate(shifts[:4], 1))
+            + "\nA question about what changed or grew may be answered from these lines. State each one as written, naming "
+              "its band and basis, and tag it \"(derived from stored reports)\". Do not use {{shifts}} or a table. Do not type "
+              "a number of your own, and never work out, add or mention any other change over time. A line item with no line "
+              "here has no computed change: say so, and give levels only. Do not cite an unrelated article for a change.")
 
 
 def _prior_block(prior: dict) -> str:
@@ -1144,8 +1189,17 @@ def answer_question(
     # History turns stay flat strings; only the current turn uses blocks.
     # The lookup notes and split plan (when there are any) sit just before it.
     user_content = doc_blocks
-    if prestep.active and prestep.plan_text:
-        user_content = user_content + [{"type": "text", "text": prestep.plan_text}]
+    plan_text = prestep.plan_text if prestep.active else ""
+    # A follow-up with no shifts of its own gets the previous answer's computed lines (no new lookup).
+    # Its own fresh lines always win; the "none" note is dropped when carrying, since it would contradict them.
+    carried: list[dict] = []
+    if trimmed_history and not (prestep.active and getattr(prestep, "shifts", None)):
+        carried = list((prior_context or {}).get("shifts") or [])
+        if carried:
+            plan_text = "\n".join(x for x in plan_text.split("\n") if not x.startswith("COMPUTED SHIFTS: none")).strip()
+            plan_text = (plan_text + "\n" if plan_text else "") + carried_shifts_block(carried)
+    if plan_text:
+        user_content = user_content + [{"type": "text", "text": plan_text}]
     user_content = user_content + [{"type": "text", "text": f"QUESTION: {question}"}]
     messages = trimmed_history + [{"role": "user", "content": user_content}]
     kwargs: dict = {
@@ -1214,7 +1268,7 @@ def answer_question(
             _log.exception("answer strip failed; answer left as written")
         try:
             from .answer_lint import lint_answer
-            lint = lint_answer(text, shifts=list(getattr(prestep, "shifts", []) or []),
+            lint = lint_answer(text, shifts=list(getattr(prestep, "shifts", []) or []) + carried,
                                rows=[r for sb in (getattr(prestep, "subs", []) or []) for r in (getattr(sb, "picked", []) or [])])
             if dropped_markers:
                 lint.append({"phrase": "marker with no source",
