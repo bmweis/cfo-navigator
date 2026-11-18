@@ -1380,11 +1380,16 @@ def _reserve_other_slot(subs: list[Sub], rest: str) -> list[Sub]:
 
 def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
               remaining_usd: float | None, split_model: str | None = None,
-              client_factory=None) -> Prestep:
+              client_factory=None, prior_band: str = "") -> Prestep:
     """Decide and prepare the pre-step for one turn. Reads the database,
-    makes at most one small model call, writes nothing."""
+    makes at most one small model call, writes nothing.
+
+    `prior_band` is the size band the conversation's previous turn asked
+    about. A follow-up whose (rewritten) question names no band inherits it;
+    a band the question names is never overridden."""
     ps = Prestep()
     sig = detect(lib, question)
+    inherit = prior_band if (prior_band and not sig["bands"]) else ""
     if not sig["metrics"]:
         ps.outcome = "skipped: no benchmark metric detected"
         return ps
@@ -1393,13 +1398,15 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
     ps.system_rules = True
     ps.detected = sig["metrics"]
     ps.signals = {k: sig[k] for k in ("bands", "over_time", "definition", "mixed", "rest_words", "split_reasons", "via_fts")}
+    if inherit:
+        ps.signals["band_inherited"] = inherit
     ps.remaining_usd = remaining_usd
     reports = {r["report_slug"]: r for r in lib.list_benchmark_reports()}
 
     # Rules-only single lookup: every detected metric against one retrieval.
     rules_intent = "definition" if sig["definition"] else "benchmark"
     single = Sub(intent=rules_intent, text=question, metrics=list(sig["terms"][:MAX_SUBQUERIES]),
-                 band=sig["bands"][0] if len(sig["bands"]) == 1 else "",
+                 band=sig["bands"][0] if len(sig["bands"]) == 1 else inherit,
                  year="all" if sig["over_time"] else "")
     ps.subs = [single]
     ps.requested_subs = 1
@@ -1422,6 +1429,10 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
                 ps.requested_subs = len(res.subs)
                 ps.rest_of_question = res.rest
                 subs = _guard_split(lib, res.subs, question, sig)
+                if inherit:
+                    for x in subs:
+                        if x.intent != "other" and not x.band:
+                            x.band = inherit
                 # The split call's parts are what get retrieved; the broader half of the
                 # question is retrieved only if the splitter made it a part. When it left it
                 # in rest_of_question alone, no article was ever searched for it (the

@@ -224,6 +224,7 @@ def _run_ask_turn(lib, user_id, question, *, model, effort, use_library, use_fee
     # can't continue any conversation — each of its questions is one-shot.
     history: list[dict] = []
     prior_questions = 0
+    prior_context: dict = {}
     if conversation_id:
         turns = lib.list_conversation_turns(conversation_id)
         if not turns:
@@ -245,6 +246,10 @@ def _run_ask_turn(lib, user_id, question, *, model, effort, use_library, use_fee
                 "sources": [], "feed_sources": [], "web_sources": [],
             }
         from linklib import period_note as _pn
+        from linklib.agent import prior_turn_context
+        # What the last turn's benchmark lookup covered, so "those lines" in a
+        # follow-up keeps its metrics and size band (read from stored prestep_json).
+        prior_context = prior_turn_context(turns)
         for t in turns:
             history.append({"role": "user", "content": t["question"]})
             # The 2020-2022 site note is appended by code and is never shown
@@ -284,6 +289,7 @@ def _run_ask_turn(lib, user_id, question, *, model, effort, use_library, use_fee
         opml_path=opml_path if (use_feed or use_web) else None,
         history=history,
         budget_usd=budget_left,
+        **({"prior_context": prior_context} if prior_context else {}),
     )
     duration_ms = int((time.monotonic() - _t0) * 1000)
     if duration_ms >= SLOW_TURN_MS:
@@ -316,6 +322,7 @@ def _run_ask_turn(lib, user_id, question, *, model, effort, use_library, use_fee
                 failed=True, error=ans.error,
                 prestep=getattr(ans, "prestep", None), prestep_cost_usd=getattr(ans, "prestep_cost_usd", 0.0),
                 duration_ms=duration_ms, request_id=request_id,
+                rewrite_text=getattr(ans, "rewrite_text", ""),
             )
             usage_line = {"spent": round(lib.ask_cost_this_month(user_id), 2),
                           "cap": round(lib.get_effective_ask_cap(user_id), 2)}
@@ -363,6 +370,7 @@ def _run_ask_turn(lib, user_id, question, *, model, effort, use_library, use_fee
             duration_ms=duration_ms, request_id=request_id,
             lint_flags=getattr(ans, "lint_flags", None),
             stripped=getattr(ans, "stripped", None),
+            rewrite_text=getattr(ans, "rewrite_text", ""),
         )
         new_conversation_id = conversation_id or str(row_id)
         turn_id = row_id

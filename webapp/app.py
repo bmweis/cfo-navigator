@@ -34187,7 +34187,9 @@ def admin_ask_report(request: Request, user: str = ""):
         # error: this report is admin-only and the cost is real spend.
         failed = (f'<div style="font-size:12px;margin-top:3px;"><span style="color:var(--alert);font-weight:600;">&#9888; Failed</span> '
                   f'<span style="color:var(--muted);">{_esc(r.get("error") or "No answer was produced.")}</span></div>') if r.get("failed") else ""
-        lookup = _prestep_report_html(r) + _lint_flags_html(r) + _stripped_html(r)
+        rewritten = (f'<div style="font-size:12px;margin-top:3px;color:var(--muted);">Rewritten as: '
+                     f'{_esc(r["rewrite_text"])}</div>') if (r.get("rewrite_text") or "") else ""
+        lookup = rewritten + _prestep_report_html(r) + _lint_flags_html(r) + _stripped_html(r)
         _ms = int(r.get("duration_ms") or 0)
         dur = (f'<div style="font-size:11px;font-weight:400;color:{"var(--alert)" if _ms >= 60000 else "var(--muted)"};white-space:nowrap;">'
                f'{_ms / 1000:.1f}s</div>') if _ms else ""
@@ -34383,7 +34385,7 @@ def admin_ask_report_export(request: Request, user: str = ""):
     writer.writerow(["date", "asker", "conversation_id", "turn", "question", "answer", "model", "effort",
                      "use_library", "use_feed", "use_web", "input_tokens", "output_tokens",
                      "cache_creation_tokens", "cache_read_tokens", "cost_usd", "rewrite_cost_usd",
-                     "citations", "web_scope", "local_time"])
+                     "citations", "web_scope", "local_time", "rewritten_question"])
     for r in rows:
         asker = r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
         writer.writerow([
@@ -34395,6 +34397,7 @@ def admin_ask_report_export(request: Request, user: str = ""):
             _csv_safe(_citations_text(r)),
             r.get("web_scope") or "",
             _display_time.local_stamp(r["created_at"], tz_name),
+            _csv_safe(r.get("rewrite_text") or ""),
         ])
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return Response(
