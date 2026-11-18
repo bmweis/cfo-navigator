@@ -658,9 +658,19 @@ def usable_segment(lib, segment) -> str:
     return seg if _lc(seg) in stored else ""
 
 
+_YEAR_4 = re.compile(r"(?<!\d)\d{4}(?!\d)")
+_YEAR_2 = re.compile(r"\b(?:CY|FY)[\s-]*'?(\d{2})(?!\d)", re.I)
+
+
 def _year_num(y) -> int:
-    m = re.search(r"\d{4}", str(y or ""))
-    return int(m.group()) if m else -1
+    """The year a period names, -1 when none. A four-digit year wins ("Q2 2023", "FY2025"); otherwise a two-digit
+    calendar or fiscal year ("CY-24", "CY-24 or LTM", "FY24") reads as 20xx. "LTM" alone names no year."""
+    text = str(y or "")
+    m = re.search(r"\d{4}", text)
+    if m:
+        return int(m.group())
+    m = _YEAR_2.search(text)
+    return 2000 + int(m.group(1)) if m else -1
 
 
 def mark_period_gap(rows: list[dict]) -> None:
@@ -1337,6 +1347,9 @@ def is_total_fte_row(row: dict) -> bool:
 _HEAD_DENOM = re.compile(r"\b(?:headcount|head count|employees?|ftes?|staff)\b")
 
 
+_INCLUDING_HEAD = re.compile(r"\b(?:including|incl\.?|inclusive of)\s+(?:total\s+)?(?:headcount|head count|personnel)(?:\s+costs?)?")
+
+
 def row_table_kind(row: dict) -> str:
     """Which table a stored row belongs in: "headcount_count" (a number of people), "headcount_share"
     (a percent of headcount: "Engineering headcount mix 32%"), "spend_share" (a percent of revenue or ARR)
@@ -1345,6 +1358,8 @@ def row_table_kind(row: dict) -> str:
     denom = _lc(row.get("denominator"))
     name = _lc(row.get("metric"))
     if _is_percent(unit):
+        # "% of ending ARR, including headcount" is a spend ratio whose cost base includes people, not a share of headcount.
+        denom = _INCLUDING_HEAD.sub("", denom)
         if _HEAD_DENOM.search(denom) or ("headcount" in name and "mix" in name) or ("headcount" in name and not re.search(r"revenue|arr", denom)):
             return "headcount_share"
         if re.search(r"\bmargin\b|\bprofit", name) and not expense_line_of(row.get("metric") or "", row.get("denominator") or "", unit):

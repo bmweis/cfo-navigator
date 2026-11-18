@@ -897,8 +897,15 @@ def _spend_rank(r: dict, ask: dict | None = None) -> tuple:
         width = (gap, ov)
     else:
         width = (0.0, width)
-    return (fg._MATCH_RANK[r["match"]], bool(r.get("band_context")), width, -fg._year_num(r.get("data_period")),
-            -fg._year_num(r.get("report_year")), r["source"], str(r.get("figure_key")))
+    stat = fg.statistic_rank(r.get("statistic"))
+    if _norm(r.get("statistic")) in ("other", "target", "targets", "benchmark target"):
+        stat = 6                                        # a target or other printed figure ranks after every measured statistic
+    try:
+        fk = (0, int(r.get("figure_key")))
+    except (TypeError, ValueError):
+        fk = (1, str(r.get("figure_key")))
+    return (fg._MATCH_RANK[r["match"]], bool(r.get("band_context")), width, stat, -fg._year_num(r.get("data_period")),
+            -fg._year_num(r.get("report_year")), r["source"], fk)
 
 
 def shape_for_tables(rows: list[dict], band: str = "") -> tuple[set, list[dict]]:
