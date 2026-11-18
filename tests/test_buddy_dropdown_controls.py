@@ -154,16 +154,17 @@ def test_tapping_ask_follow_up_after_typing_is_not_moved_by_the_controls_returni
     pg.wait_for_function("window.__calls.length === 2")
 
 
-def test_compact_summary_stays_until_a_tap_outside_or_on_the_summary(live):
+def test_controls_and_bubble_height_do_not_change_on_focus_blur_or_an_outside_tap(live):
     pg = live
     _ask(pg, "First question")
     pg.wait_for_selector("#fu-q")
+    _settle(pg)
+    h = lambda: pg.evaluate("document.getElementById('fu').getBoundingClientRect().height")
+    start = h()
     pg.focus("#fu-q")
-    assert pg.is_hidden("#fu .fu-meta") and pg.is_visible("#fu .fu-sum")
+    assert pg.is_visible("#fu .fu-meta") and h() == start
     pg.evaluate("document.getElementById('fu-q').blur()")
-    assert pg.is_hidden("#fu .fu-meta")              # blur alone does not expand it
-    pg.click("#fu .fu-sum")
-    assert pg.is_visible("#fu .fu-meta")
+    assert pg.is_visible("#fu .fu-meta") and h() == start
     pg.focus("#fu-q")
     pg.click("h1, .site-main", position={"x": 5, "y": 5})
-    assert pg.is_visible("#fu .fu-meta")
+    assert pg.is_visible("#fu .fu-meta") and h() == start

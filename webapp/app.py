@@ -25206,16 +25206,11 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .ask-recent-item.recent-hl{{border-color:var(--navy);box-shadow:0 0 0 2px var(--accent-light);}}
 .fu-meta{{display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:12px;color:var(--muted);}}
 .fu-meta .ask-dd-btn{{font-size:13px;}}
-.fu-sum{{display:none;font-size:12.5px;color:var(--muted);margin-top:6px;min-height:44px;align-items:center;justify-content:space-between;gap:10px;box-sizing:border-box;}}
-/* Compact while typing, driven by a class rather than :focus. Tapping the Ask
-   follow-up button blurs the textarea; if blur re-expanded the controls, the
-   bubble (sticky to the bottom) would grow upward and move the button out from
-   under the finger before the tap completed. The class is set on focus and
-   cleared only by a tap outside the bubble or on the summary line, so a tap
-   inside the bubble never changes its height. */
-.fu.fu-compact .fu-meta{{display:none;}}
-.fu.fu-compact .fu-sum{{display:flex;}}
-.fu-sum{{cursor:pointer;}}
+/* The follow-up bubble's Depth and Sources stay visible while typing, so its height
+   never changes on focus or blur. Each button is capped at the width of the
+   new-question form's (about 280px) and left-aligned, not stretched across the bubble. */
+.fu .ask-dd-row{{justify-content:flex-start;}}
+.fu .ask-dd-col{{flex:0 1 280px;}}
 @media(max-width:640px){{.fu{{max-width:100%;padding:8px 10px;}} .fu-meta{{font-size:11.5px;}}}}
 .ask-answer p{{margin:0 0 14px;}}
 .ask-answer h3,.ask-answer h4,.ask-answer h5,.ask-answer h6{{font-family:var(--font-head);color:var(--navy);font-weight:600;margin:18px 0 8px;letter-spacing:-0.01em;}}
@@ -25266,7 +25261,7 @@ function selectTier(el) {{
     t.setAttribute('aria-checked', on ? 'true' : 'false');
   }});
   updateEstimate();
-  fuSummary();
+  ddLabels();
   closeDds();
 }}
 
@@ -25278,7 +25273,7 @@ function toggleSource(el) {{
     t.setAttribute('aria-pressed', on ? 'true' : 'false');
   }});
   updateEstimate();
-  fuSummary();
+  ddLabels();
 }}
 
 // The per-depth cost text is fixed per depth (a typical simple question, rounded
@@ -25309,15 +25304,6 @@ function chipText(sel) {{
     return (n || t).textContent.trim();
   }});
 }}
-function fuSummary() {{
-  var srcs = chipText('.fpa-intro-area-controls .ask-tag[data-source].active').join(', ') || 'No sources';
-  var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
-  var sum = document.querySelector('.fu-sum');
-  if (sum) sum.innerHTML = '<span class="fu-sum-t"></span><span class="disclosure-caret" aria-hidden="true"></span>';
-  if (sum) sum.firstChild.textContent = [depthLabel(tier, selectedTier), srcs].filter(Boolean).join(' \u00b7 ');
-  ddLabels();
-}}
-
 // Dropdown buttons: the current value shows on the closed button, so state is never hidden.
 function ddLabels() {{
   var tier = chipText('.fpa-intro-area-controls .ask-tag[data-tier].active')[0] || '';
@@ -25354,11 +25340,6 @@ function placeDd(panel) {{
 }}
 document.addEventListener('click', function(e) {{
   if (!e.target.closest('.ask-dd')) closeDds();
-}});
-// A tap outside the follow-up bubble brings its controls back after typing.
-document.addEventListener('pointerdown', function(e) {{
-  var fu = document.getElementById('fu');
-  if (fu && !e.target.closest('#fu')) fu.classList.remove('fu-compact');
 }});
 document.addEventListener('keydown', function(e) {{
   if (e.key === 'Escape') closeDds();
@@ -25772,11 +25753,7 @@ function fuRender(state) {{
       meta.appendChild(dd);
     }}
     f.appendChild(meta);
-    var sum = document.createElement('div');
-    sum.className = 'fu-sum';
-    f.appendChild(sum);
     var fq = f.querySelector('#fu-q');
-    fq.addEventListener('focus', function() {{ f.classList.add('fu-compact'); closeDds(); }});
     var fb = f.querySelector('#fu-btn');
     function fuSync() {{
       fq.style.height = '44px'; fq.style.height = Math.min(fq.scrollHeight, 120) + 'px';
@@ -25784,7 +25761,6 @@ function fuRender(state) {{
     }}
     fq.addEventListener('input', fuSync);
     if (!busy) fb.disabled = true;
-    sum.addEventListener('click', function() {{ f.classList.remove('fu-compact'); }});
   }}
   // Footer: Done, lower right, in every state (ready, busy, limit).
   var foot = document.createElement('div');
@@ -25797,7 +25773,7 @@ function fuRender(state) {{
     '<button type="button" class="ask-ctl ask-ctl-sm ask-ctl-w" id="fu-done" onclick="doneThread()">Done</button>';
   f.appendChild(foot);
   thread.appendChild(f);
-  updateEstimate(); fuSummary();
+  updateEstimate(); ddLabels();
 }}
 // Flip the open conversation between private and shared. The server decides
 // (own conversations only); the page follows its answer.

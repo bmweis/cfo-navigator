@@ -689,6 +689,9 @@ that runs in CI and Chromium tests that measure computed visibility and geometry
 **Second change in the same PR, found by the existing tests:** the bubble's
 collapse-while-typing rule moved from `.fu:has(textarea:focus)` to a `.fu-compact`
 class (set on focus; cleared by a tap outside the bubble or on the summary line).
+**Superseded 2026-11:** the collapse is gone altogether; the bubble's Depth and
+Sources stay visible, each capped at 280px and left-aligned, and its height never
+changes on focus.
 With the taller controls block, blur re-expanded the sticky bubble upward on
 mousedown and the Ask follow-up button moved out from under the tap, so the
 follow-up never sent. Tests: `tests/test_buddy_dropdown_controls.py`.
@@ -5906,8 +5909,9 @@ Details worth knowing:
   ids, `selectTier`/`toggleSource` update every chip with the same
   `data-tier`/`data-source`, `activeSources()` reads only
   `.fpa-intro-area-controls` (an unscoped query would include Depth's chips and
-  the clones), and `fuSummary()` keeps the collapsed one-line summary current.
-  While the textarea is focused the chip row collapses to that summary
+  the clones), and `ddLabels()` keeps the dropdown values current.
+  (Superseded 2026-11: the chip row no longer collapses to a summary on focus.)
+  Formerly, while the textarea was focused the chip row collapsed to that summary
   (`.fu:has(textarea:focus)`, not `:focus-within`: tapping a chip focuses a
   button, and collapsing on that focus removed the chip between mousedown and
   mouseup). The live `mdInline` no longer turns `[text](https://...)` into an
