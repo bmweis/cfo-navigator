@@ -91,9 +91,10 @@ def test_phone_inputs_are_16px_and_the_bubble_has_44px_targets(phone):
     assert fs("#ask-q") == fs("#fu-q") == fs("#past-questions input[name=pq]") == "16px"
     assert pg.evaluate("document.getElementById('fu-q').getBoundingClientRect().height") >= 44
     pg.focus("#fu-q")
-    box = pg.evaluate("(() => { const r = document.querySelector('.fu-sum').getBoundingClientRect();"
+    # Focus no longer swaps the controls for a summary: they stay, inside the bubble.
+    box = pg.evaluate("(() => { const r = document.querySelector('#fu .fu-meta').getBoundingClientRect();"
                       " return [r.height, document.getElementById('fu').getBoundingClientRect().width - r.width]; })()")
-    assert box[0] >= 44 and box[1] < 30
+    assert box[0] >= 28 and box[1] < 30
     over = pg.evaluate("""(() => { const f = document.getElementById('fu').getBoundingClientRect();
         return [...document.querySelectorAll('#fu *')].filter(e => { const r = e.getBoundingClientRect();
         return r.width && (r.right > f.right + 0.5 || r.left < f.left - 0.5); }).length; })()""")
