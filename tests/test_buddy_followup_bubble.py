@@ -199,14 +199,29 @@ def test_bubble_chips_and_top_chips_share_one_state(live):
     assert "active" in pg.get_attribute("#fu .ask-tag[data-tier='deep']", "class")
 
 
-def test_typing_in_the_bubble_collapses_controls_to_a_summary(live):
+def _bubble_h(pg):
+    return pg.evaluate("document.getElementById('fu').getBoundingClientRect().height")
+
+
+def test_typing_in_the_bubble_keeps_controls_visible_and_the_height_unchanged(live):
+    """The controls used to collapse to a one-line summary on focus, which changed
+    the bubble's height and moved the text box under the cursor."""
     pg = live
     _ask(pg, "First question")
     pg.wait_for_selector("#fu-q")
-    assert pg.is_visible("#fu .fu-meta") and not pg.is_visible("#fu .fu-sum")
+    assert pg.is_visible("#fu .fu-meta") and pg.locator("#fu .fu-sum").count() == 0
+    # Offset within the bubble, not the viewport: focusing may scroll the page.
+    inner = "document.getElementById('fu-q').getBoundingClientRect().top - document.getElementById('fu').getBoundingClientRect().top"
+    before, top = _bubble_h(pg), pg.evaluate(inner)
     pg.focus("#fu-q")
-    assert not pg.is_visible("#fu .fu-meta") and pg.is_visible("#fu .fu-sum")
-    assert "Curated archive" in pg.inner_text("#fu .fu-sum")
+    assert pg.is_visible("#fu .ask-dd-btn[data-dd='depth']") and pg.is_visible("#fu .ask-dd-btn[data-dd='sources']")
+    assert _bubble_h(pg) == before
+    assert pg.evaluate(inner) == top
+    # Capped at the new-question form's width (about 280px) and left-aligned, not half the bubble each.
+    w = pg.evaluate("""() => { const q = s => document.querySelector(s).getBoundingClientRect();
+        const d = q('#fu .ask-dd-btn[data-dd=depth]'), s = q('#fu .ask-dd-btn[data-dd=sources]'), f = q('#fu');
+        return [d.width, s.width, d.left - f.left, s.right - f.left]; }""")
+    assert w[0] <= 290 and w[1] <= 290 and w[2] < 40 and w[3] < 640
 
 
 def test_limit_state_replaces_the_bubble_input_and_offers_a_new_question(live):
