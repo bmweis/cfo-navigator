@@ -673,7 +673,7 @@ def cite_shifts(text: str, shifts: list[dict], cite) -> tuple[str, int]:
 # --- the "What shifted" lines, built in code ---------------------------------------------------------------
 
 SHIFTS_PLACEHOLDER = re.compile(r"\{\{\s*shifts\s*\}\}", re.I)
-SHIFT_LINES = 2
+SHIFT_LINES = 4       # was 2: the gross margin shift ranked third and never printed (ask_questions id 78)
 _WHAT_SHIFTED = re.compile(r"^\s*(?:#{1,6}\s*|\*\*)?what shifted\b", re.I)
 _SECTION_END = re.compile(r"^\s*(?:#{1,6}\s+\S|\*\*[^*]+\*\*\s*$|(?:\*\*|_)?left out\b)", re.I)
 _DERIVED_SUFFIX = "; derived from stored reports"
@@ -693,7 +693,8 @@ def shift_line(sh: dict, cite) -> str:
         if n and f"[{n}]" not in marks:
             marks.append(f"[{n}]")
     base = base[:1].upper() + base[1:]
-    return " ".join(x for x in (base, " ".join(marks), _DERIVED_TAG) if x) + "."
+    carried = "(computed on the earlier answer in this conversation)" if sh.get("carried") else ""
+    return " ".join(x for x in (base, " ".join(marks), carried, _DERIVED_TAG) if x) + "."
 
 
 def render_shifts(text: str, shifts: list[dict], cite, max_lines: int = SHIFT_LINES) -> tuple[str, dict]:

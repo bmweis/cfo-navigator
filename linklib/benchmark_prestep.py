@@ -207,8 +207,7 @@ class Prestep:
                       "documents": s.documents,
                       "match_mix": s.match_mix} for s in self.subs],
             "documents": self.figure_documents,
-            "shifts": [{"line": x["line"], "kind": x["kind"], "size": x["size"], "threshold": x["threshold"],
-                        "directional": x["directional"]} for x in self.shifts],
+            "shifts": [shift_log_entry(x) for x in self.shifts],
             "shifts_suppressed": self.shifts_suppressed, "shifts_skipped": self.shifts_skipped,
             "shifts_unpaired": self.shifts_unpaired, "shifts_unpaired_groups": self.shifts_unpaired_groups, "shifts_outliers": self.shifts_outliers,
             "table_rows_shaped": self.table_rows_shaped, "tables": self.tables, "period_note": self.period_note,
@@ -1387,13 +1386,15 @@ def _reserve_other_slot(subs: list[Sub], rest: str) -> list[Sub]:
 
 def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
               remaining_usd: float | None, split_model: str | None = None,
-              client_factory=None, prior_band: str = "") -> Prestep:
+              client_factory=None, prior_band: str = "", prior_shifts: list[dict] | None = None) -> Prestep:
     """Decide and prepare the pre-step for one turn. Reads the database,
     makes at most one small model call, writes nothing.
 
     `prior_band` is the size band the conversation's previous turn asked
     about. A follow-up whose (rewritten) question names no band inherits it;
-    a band the question names is never overridden."""
+    a band the question names is never overridden.
+    `prior_shifts` are the computed shift lines stored on the conversation's earlier turn; they are merged into this
+    turn's own (own first, duplicates dropped, at most MAX_MERGED_SHIFT_LINES), never recomputed."""
     ps = Prestep()
     sig = detect(lib, question)
     inherit = prior_band if (prior_band and not sig["bands"]) else ""
@@ -1510,7 +1511,7 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
     for s in todo:
         for t, c in s.left_out_by_report.items():
             ps.left_out_detail[t] = ps.left_out_detail.get(t, 0) + c
-    shift_block = _shift_notes(lib, ps, todo)
+    shift_block = _shift_notes(lib, ps, todo, prior_shifts)
     for s_ in todo:
         order = _order_note(s_.picked)
         if order:
@@ -1552,13 +1553,78 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
 
 
 MAX_SHIFT_LINES = 4
+# A follow-up prints its own lines first and then the ones computed on the earlier answer, up to this many.
+# Four would drop every carried line when the follow-up has four of its own.
+MAX_MERGED_SHIFT_LINES = 6
+CARRIED_TAG = "computed on the earlier answer in this conversation"
+
+
+def shift_log_entry(x: dict) -> dict:
+    """One computed shift as stored in prestep_json. The endpoints (from, to) and the identity fields are stored so a
+    follow-up can code-render and cite a carried line like a fresh one; a row stored before this has only the first five."""
+    out = {"line": x["line"], "kind": x["kind"], "size": x["size"], "threshold": x["threshold"], "directional": x["directional"]}
+    for k in ("metric", "band", "segment", "statistic", "from", "to", "carried"):
+        if x.get(k):
+            out[k] = x[k]
+    return out
+
+
+def _shift_text_key(sh: dict) -> str:
+    line = str(sh.get("line", "")).strip().casefold()
+    line = re.sub(r";?\s*derived from stored reports\s*$", "", line)
+    return re.sub(r"\s+", " ", line)
+
+
+def same_shift(a: dict, b: dict) -> bool:
+    """The same computed change: same metric family, band and statistic with the same two endpoints. A row stored
+    before endpoints were kept falls back to comparing the line text, ignoring case."""
+    if a.get("from") and a.get("to") and b.get("from") and b.get("to") and a.get("metric") and b.get("metric"):
+        def ep(e: dict) -> tuple:
+            return (e.get("report_slug", ""), str(e.get("period", "")), str(e.get("value", "")))
+        return (fg.name_key(a["metric"]) == fg.name_key(b["metric"])
+                and str(a.get("band", "")).casefold() == str(b.get("band", "")).casefold()
+                and str(a.get("statistic", "")).casefold() == str(b.get("statistic", "")).casefold()
+                and ep(a["from"]) == ep(b["from"]) and ep(a["to"]) == ep(b["to"]))
+    return _shift_text_key(a) == _shift_text_key(b)
+
+
+def merge_shifts(own: list[dict], carried: list[dict] | None, cap: int = MAX_MERGED_SHIFT_LINES) -> list[dict]:
+    """The turn's own computed shifts first, then each carried one not already covered, marked carried; at most cap.
+    Nothing is recomputed or altered. With no carried lines the own list is returned as it is."""
+    merged = list(own or [])
+    if not carried:
+        return merged
+    for c in carried:
+        if not isinstance(c, dict) or not c.get("line"):
+            continue
+        if any(same_shift(c, m) for m in merged):
+            continue
+        merged.append(dict(c, carried=True))
+    return merged[:cap]
+
+
+def shifts_block(shifts: list[dict], cap: int | None = None) -> str:
+    """The one notes block that hands computed shift lines to the model, whether they are all fresh, all carried or
+    mixed. The system inserts the first `cap` at {{shifts}}; the model types no number of its own."""
+    cap = cap or (MAX_MERGED_SHIFT_LINES if any(x.get("carried") for x in shifts) else MAX_SHIFT_LINES)
+    n = ("zero", "one", "two", "three", "four", "five", "six")[min(cap, 6)]
+    body = "\n".join(f"  {i}. {x['line']}" + (f" [{CARRIED_TAG}]" if x.get("carried") else "")
+                     for i, x in enumerate(shifts, 1))
+    return ("COMPUTED SHIFTS (worked out by the system from the stored reports; these lines are exact; a line marked "
+            f"\"{CARRIED_TAG}\" was computed on the previous answer):\n" + body
+            + "\nUnder a short heading \"What shifted\", write {{shifts}} on a line of its own, once. The system inserts the "
+              f"first {n} of these lines there, or all of them if there are fewer (they are in the order to print; this turn's own lines come first), exact, each with its sources and the tag "
+              "\"(derived from stored reports)\". Do not type a computed number yourself. After it you may write one "
+              "sentence saying what a report states as the cause, or that none does. No forecast. Never work out, add or "
+              "mention any other change over time yourself. A line item with no line here has no computed change: say "
+              "\"no computed change\" for it, never that it is flat, stable or unchanged.")
 
 NO_SHIFTS_NOTE = ("COMPUTED SHIFTS: none. The system found no change over time above the threshold in the stored "
                   "reports. Write no \"What shifted\" section, no \"what changed\" claim, and no up, down or change "
                   "figure of your own. Do not subtract one report's number from another's.")
 
 
-def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
+def _shift_notes(lib, ps: "Prestep", subs: list[Sub], carried: list[dict] | None = None) -> str:
     """Compute the turn's shifts (figures.compute_shifts) from an all-editions, recent-window lookup of
     every benchmark part's metrics, and return the notes block that hands the exact lines to the model.
     No model call. Sets ps.shifts / shifts_suppressed / shifts_skipped. "" when nothing is above the
@@ -1595,7 +1661,7 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
     chosen, note = fg.rank_shifts(out["shifts"], MAX_SHIFT_LINES, asked_band=next((x.band for x in bench if x.band), ""),
                                   asked_segment=next((x.segment for x in bench if x.segment), ""), text=ask_text,
                                   quartile_asked=bool(fg.QUARTILE_ASK.search(ask_text)))
-    ps.shifts = chosen
+    ps.shifts = merge_shifts(chosen, carried)
     ps.shifts_suppressed = out["suppressed"] + note["over_cap"]
     ps.shifts_skipped = list(out["skipped"])
     if len(ps.shifts_skipped) > 10:
@@ -1607,13 +1673,7 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub]) -> str:
             ps.shifts_outliers.append(f"endpoint basis differs: {sh['metric_from']} (from) vs {sh['metric']} (to) in one computed line; check they are the same line item")
     if not ps.shifts:
         return NO_SHIFTS_NOTE
-    return ("COMPUTED SHIFTS (worked out by the system from the stored reports above; these lines are exact):\n"
-            + "\n".join(f"  {i}. {x['line']}" for i, x in enumerate(ps.shifts, 1))
-            + "\nUnder a short heading \"What shifted\", write {{shifts}} on a line of its own, once. The system inserts the first "
-              "two of these lines there (they are in the order to print), exact, each with its sources and the tag "
-              "\"(derived from stored reports)\". Do not type a computed number yourself. After it you may write one "
-              "sentence saying what a report states as the cause, or that none does. No forecast. Never work out, add or "
-              "mention any other change over time yourself.")
+    return shifts_block(ps.shifts)
 
 
 def _order_note(picked: list[dict]) -> str:
