@@ -402,11 +402,37 @@ def draft_leak_problems(text: str) -> list[dict]:
     return out
 
 
+# "no per-line change exists", "the archive has no time series", "cannot be answered directly": a claim that no change
+# is on file, made when the turn was given computed shift lines. Also a line called flat, stable or unchanged.
+_NO_CHANGE_EXISTS = re.compile(
+    r"\bno\s+(?:source|report|publisher)\b[^.\n]{0,80}\b(?:rate\s+of\s+change|year-over-year|change\s+by|growth\s+rate)\b"
+    r"|\b(?:does|do)\s+not\s+contain\s+a\s+time[- ]series\b|\bno\s+time[- ]series\b"
+    r"|\bno\s+(?:per-line|per\s+line|line-level)\s+(?:rate\s+of\s+)?change\b"
+    r"|\bcannot\s+be\s+answered\s+directly\b|\bno\s+change\s+(?:exists|is\s+on\s+file)\b", re.I)
+_CALLED_FLAT = re.compile(r"\b(?:flat|unchanged|did\s+not\s+change|stayed\s+(?:the\s+same|level))\b", re.I)
+
+
+def no_change_claim_problems(text: str, shifts: list | None) -> list[dict]:
+    """Flag-only. When the turn was given computed shift lines, a sentence saying no change or time series exists, or
+    calling a line flat or unchanged, contradicts them. A sentence that says "no computed change" is the allowed form.
+    Known false positive: "flat" or "unchanged" about something that is not a line (a fee, a definition)."""
+    if not shifts:
+        return []
+    out: list[dict] = []
+    for sent in _SENTENCE.split(text or ""):
+        low = re.sub(r"no computed change", " ", sent, flags=re.I)
+        if _NO_CHANGE_EXISTS.search(low):
+            out.append({"phrase": "no change exists claim with computed shifts", "snippet": sent.strip()[:200]})
+        elif _CALLED_FLAT.search(low) and not sent.strip().startswith("|"):
+            out.append({"phrase": "line called flat or unchanged", "snippet": sent.strip()[:200]})
+    return out
+
+
 def lint_answer(text: str, shifts: list | None = None, rows: list | None = None) -> list[dict]:
     """[{phrase, snippet}] for each likely breach; [] for a clean answer. `shifts` (the computed shift lines
     the turn was given; [] when none) turns on the check that a "up N points" claim matches one of them."""
     flags: list[dict] = (list(what_shifted_problems(text, shifts)) + change_claim_problems(text, shifts) + label_problems(text, rows)
-                         + left_out_cell_problems(text) + table_order_problems(text) + function_share_problems(text, rows) + mix_prose_problems(text, rows) + inference_problems(text) + draft_leak_problems(text))
+                         + left_out_cell_problems(text) + table_order_problems(text) + function_share_problems(text, rows) + mix_prose_problems(text, rows) + inference_problems(text) + draft_leak_problems(text) + no_change_claim_problems(text, shifts))
     # A citation marker after a table row's closing pipe breaks the row in a renderer that does not repair it.
     for line in (text or "").split("\n"):
         if _ROW_MARKER_AFTER_PIPE.match(line):

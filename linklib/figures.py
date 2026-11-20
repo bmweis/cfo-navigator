@@ -1195,7 +1195,7 @@ def shift_tier(sh: dict, asked_band: str = "", asked_segment: str = "", text: st
 def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segment: str = "", text: str = "",
                 quartile_asked: bool = False) -> tuple[list[dict], dict]:
     """(the shifts to print, in the order to print them, and a note dict). The CODE chooses and orders; the model
-    prints the first two of the list. Order: tier (headline series, then a named cohort, then other cohorts), median
+    prints the first four of the list (the system inserts them; six when lines carried from the earlier answer are merged). Order: tier (headline series, then a named cohort, then other cohorts), median
     before mean before other, then size. A bottom or top quartile shift is left out unless the question asked for a
     quartile. The best shift of each different metric comes before a second one of the same metric, so a spend line
     cannot push the headcount line off the list. Returns note {"quartile_left_out": n}."""

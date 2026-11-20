@@ -286,7 +286,11 @@ REWRITE_SYSTEM = (
     "and implicit references using the conversation — e.g. after a discussion "
     "of SaaS pricing benchmarks, \"what about for a Series A stage company?\" "
     "becomes \"SaaS pricing benchmarks for Series A stage companies\". Keep "
-    "every concrete term that matters for search. Output ONLY the rewritten "
+    "every concrete term that matters for search. When the follow-up refers "
+    "back to what the previous answer showed (\"those lines\", \"which of those\", "
+    "\"that one\"), name the specific lines or metrics the previous answer listed "
+    "(for example S&M, R&D, G&A, headcount) instead of a general category such as "
+    "\"expense categories\". Output ONLY the rewritten "
     "question — no preamble, no quotes, no explanation, under 40 words."
 )
 
@@ -375,18 +379,6 @@ def prior_turn_context(turns: list[dict]) -> dict:
     return ctx
 
 
-def carried_shifts_block(shifts: list[dict]) -> str:
-    """The notes block that hands the previous answer's computed shift lines to a follow-up that has none of its own.
-    Same constraints as the normal COMPUTED SHIFTS block: exact lines, no recomputing, no other change over time."""
-    return ("COMPUTED SHIFTS (computed on the previous answer in this conversation; the system worked these out from the "
-            "stored reports then, and the lines are exact, with their band and basis):\n"
-            + "\n".join(f"  {i}. {x['line']}" for i, x in enumerate(shifts[:4], 1))
-            + "\nA question about what changed or grew may be answered from these lines. State each one as written, naming "
-              "its band and basis, and tag it \"(derived from stored reports)\". Do not use {{shifts}} or a table. Do not type "
-              "a number of your own, and never work out, add or mention any other change over time. A line item with no line "
-              "here has no computed change: say so, and give levels only. Do not cite an unrelated article for a change.")
-
-
 def _prior_block(prior: dict) -> str:
     """The short block the rewriter gets on a follow-up whose prior turn ran a benchmark lookup."""
     lines = ["Prior turn's lookup (metrics: " + "; ".join(prior["metrics"]) + ")."]
@@ -395,6 +387,7 @@ def _prior_block(prior: dict) -> str:
     lines.append(
         "When the follow-up refers to \"those lines\", \"it\", \"that\" or similar, it covers ALL of "
         "the prior turn's metrics unless the follow-up names one; name them in the rewritten question. "
+        "Name each of them by the specific line items the previous answer's tables showed, not a general category. "
         "Keep the size band unless the follow-up names a different one.")
     return "\n".join(lines)
 
@@ -1089,7 +1082,8 @@ def answer_question(
                 lib, retrieval_question, tier=effort if effort in EFFORT_SETTINGS else "standard",
                 settings=settings, model=model, remaining_usd=budget_usd,
                 split_model=lib.get_role_model("prestep"),
-                prior_band=(prior_context or {}).get("band", "") if trimmed_history else "")
+                prior_band=(prior_context or {}).get("band", "") if trimmed_history else "",
+                prior_shifts=(prior_context or {}).get("shifts") if trimmed_history else None)
         except Exception as _e:
             _log.exception("benchmark pre-step failed; answering without it")
             prestep = _bp.Prestep(split_fallback="prestep_error", outcome=f"error: {type(_e).__name__}")
@@ -1190,14 +1184,18 @@ def answer_question(
     # The lookup notes and split plan (when there are any) sit just before it.
     user_content = doc_blocks
     plan_text = prestep.plan_text if prestep.active else ""
-    # A follow-up with no shifts of its own gets the previous answer's computed lines (no new lookup).
-    # Its own fresh lines always win; the "none" note is dropped when carrying, since it would contradict them.
-    carried: list[dict] = []
-    if trimmed_history and not (prestep.active and getattr(prestep, "shifts", None)):
-        carried = list((prior_context or {}).get("shifts") or [])
-        if carried:
+    # The computed shift lines this turn prints: its own plus the ones computed on the earlier answer (merged inside
+    # plan_turn when a lookup ran). A follow-up that ran no lookup of its own gets the earlier lines alone, through
+    # the same block. Nothing is recomputed; the "none" note is dropped when there are lines to give.
+    carried_in = list((prior_context or {}).get("shifts") or []) if trimmed_history else []
+    if prestep.active and getattr(prestep, "shifts", None):
+        shifts_all = list(prestep.shifts)
+    else:
+        shifts_all = _bp.merge_shifts([], carried_in)
+        if shifts_all:
             plan_text = "\n".join(x for x in plan_text.split("\n") if not x.startswith("COMPUTED SHIFTS: none")).strip()
-            plan_text = (plan_text + "\n" if plan_text else "") + carried_shifts_block(carried)
+            plan_text = (plan_text + "\n" if plan_text else "") + _bp.shifts_block(shifts_all)
+    carried = [x for x in shifts_all if x.get("carried")]
     if plan_text:
         user_content = user_content + [{"type": "text", "text": plan_text}]
     user_content = user_content + [{"type": "text", "text": f"QUESTION: {question}"}]
@@ -1268,7 +1266,7 @@ def answer_question(
             _log.exception("answer strip failed; answer left as written")
         try:
             from .answer_lint import lint_answer
-            lint = lint_answer(text, shifts=list(getattr(prestep, "shifts", []) or []) + carried,
+            lint = lint_answer(text, shifts=list(shifts_all),
                                rows=[r for sb in (getattr(prestep, "subs", []) or []) for r in (getattr(sb, "picked", []) or [])])
             if dropped_markers:
                 lint.append({"phrase": "marker with no source",
@@ -1280,15 +1278,15 @@ def answer_question(
             lint = []
         # The spend and margins tables are built last, from the rows that were really sent, so the strip and the
         # lint above only ever see what the model wrote. A failure leaves the text as written.
-        if prestep.active and (prestep.table_kinds or getattr(prestep, "shifts", None)):
+        if (prestep.active and prestep.table_kinds) or shifts_all:
             try:
                 from . import table_render as _tr
                 _cite = _bp.table_cite(citations, sent_docs, extra=_bp.unsent_report_source(lib))
                 tinfo = {}
-                if prestep.table_kinds:
+                if prestep.active and prestep.table_kinds:
                     text, tinfo = _tr.render_tables(text, prestep.table_rows, _cite)
-                _sh = list(getattr(prestep, "shifts", []) or [])
-                text, sinfo = _tr.render_shifts(text, _sh, _cite)
+                _sh = list(shifts_all)
+                text, sinfo = _tr.render_shifts(text, _sh, _cite, max_lines=_bp.MAX_MERGED_SHIFT_LINES if carried else _tr.SHIFT_LINES)
                 if sinfo.get("lines") or sinfo.get("fallback"):
                     tinfo["shifts"] = sinfo
                 text, n_cited = _tr.cite_shifts(text, _sh, _cite)

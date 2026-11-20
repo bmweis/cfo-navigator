@@ -136,7 +136,7 @@ def test_the_note_says_the_first_lines_are_in_print_order(lib):
     _headcount(lib)
     ps = bp.Prestep()
     block = bp._shift_notes(lib, ps, [_sub(["Headcount by function"])])
-    assert "first two of these lines" in block and "two largest" not in block
+    assert "first four of these lines" in block and "two largest" not in block
 
 
 def test_a_line_item_that_differs_between_the_two_editions_is_noted(lib):
