@@ -46,6 +46,7 @@ def _fold_first_turn(pg, first):
     pg.fill("#fu-q", "Second question")
     pg.click("#fu-btn")
     pg.wait_for_function("document.querySelectorAll('#ask-thread .ask-q-bubble').length === 2 && !document.querySelector('.ask-loading')")
+    pg.wait_for_timeout(900)          # the page smooth-scrolls to the new answer; measure after it settles
 
 
 def test_past_question_rows_are_collapsed_on_load_and_open_on_a_tap(phone):
