@@ -358,7 +358,7 @@ BRAND.md's Status chips and `tests/test_status_chips.py`.
 collapsed, click-expandable row. Past questions are `<details class="ask-pq-row">`
 (closed on load); a `?c=` load no longer fetches the transcript, it highlights the
 matching Recent conversations row; a follow-up folds earlier turns to
-`.ask-turn-row` buttons and keeps the newest open. The follow-up bubble's send
+`.ask-turn-row` containers (selectable question text plus a separate 44px `.ask-turn-toggle` button, `aria-expanded` and an "Show answer"/"Hide answer" label; the text itself never toggles) and keeps the newest open. The follow-up bubble's send
 control is an icon button (`.fu-send`, 44px hit area) and the three question inputs
 are 16px on phones. See CLAUDE.md's matching bullet and
 `tests/test_buddy_collapse_rows.py`.
