@@ -25197,10 +25197,15 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu-send:disabled{{cursor:not-allowed;}}
 .fu-send:disabled .fu-send-dot{{background:var(--line);}}
 .fu-send:focus-visible{{outline:2px solid var(--navy);outline-offset:2px;}}
-.ask-turn-row{{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;font:inherit;padding:11px 14px;min-height:44px;box-sizing:border-box;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;}}
-@media(hover:hover){{.ask-turn-row:hover{{border-color:var(--navy);}}}}
-.ask-turn-row[aria-expanded="true"] .ask-pq-rc{{transform:rotate(90deg);}}
-.ask-turn-rq{{font-weight:600;font-size:13.5px;color:var(--navy);min-width:0;flex:1;}}
+/* An earlier turn's row is a container, not a button: the question is plain selectable text
+   (a click, drag or double click on it does nothing) and only the toggle at the right end opens
+   the answer. The toggle is centered against the row so a wrapped question doesn't pin it to the top. */
+.ask-turn-row{{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;min-height:44px;padding:2px 2px 2px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);}}
+.ask-turn-rq{{font-weight:600;font-size:13.5px;color:var(--navy);min-width:0;flex:1;padding:8px 0;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text;cursor:text;}}
+.ask-turn-toggle{{flex:none;width:44px;height:44px;padding:0;border:0;border-radius:8px;background:transparent;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}}
+@media(hover:hover){{.ask-turn-toggle:hover{{background:var(--accent-light);}}}}
+.ask-turn-toggle[aria-expanded="true"] .ask-pq-rc{{transform:rotate(90deg);}}
+.ask-turn-toggle:focus-visible{{outline:2px solid var(--navy);outline-offset:-2px;}}
 .ask-turn.has-row>.ask-q-bubble{{display:none;}}
 .ask-turn.has-row:not(.open)>.ask-answer{{display:none;}}
 .ask-recent-item.recent-hl{{border-color:var(--navy);box-shadow:0 0 0 2px var(--accent-light);}}
@@ -25695,20 +25700,23 @@ function resetConvo() {{
   q.scrollIntoView({{behavior:'smooth', block:'center'}});
 }}
 
-// Earlier turns fold to one-line rows (chevron, tap to open). Nothing is
+// Earlier turns fold to rows (question text plus a toggle button that opens the answer). Nothing is
 // deleted; the newest turn stays open. A turn gets its row once.
 function collapseTurn(turn) {{
   if (!turn || turn.id === 'fu' || turn.classList.contains('has-row')) return;
   var b = turn.querySelector('.ask-q-bubble');
   if (!b) return;
   turn.classList.add('ask-turn', 'has-row');
-  var row = document.createElement('button');
-  row.type = 'button'; row.className = 'ask-turn-row'; row.setAttribute('aria-expanded', 'false');
-  row.innerHTML = '<span class="ask-pq-rc" aria-hidden="true"></span><span class="ask-turn-rq"></span>';
+  var row = document.createElement('div');
+  row.className = 'ask-turn-row';
+  row.innerHTML = '<span class="ask-turn-rq"></span>' +
+    '<button type="button" class="ask-turn-toggle" aria-expanded="false" aria-label="Show answer"><span class="ask-pq-rc" aria-hidden="true"></span></button>';
   row.querySelector('.ask-turn-rq').textContent = b.textContent;
-  row.addEventListener('click', function() {{
+  var tg = row.querySelector('.ask-turn-toggle');
+  tg.addEventListener('click', function() {{
     var o = turn.classList.toggle('open');
-    row.setAttribute('aria-expanded', o ? 'true' : 'false');
+    tg.setAttribute('aria-expanded', o ? 'true' : 'false');
+    tg.setAttribute('aria-label', o ? 'Hide answer' : 'Show answer');
   }});
   turn.insertBefore(row, turn.firstChild);
 }}

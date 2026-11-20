@@ -13,6 +13,41 @@ T_wait_recent = T._wait_recent
 # Re-bound by assignment so pytest finds the fixtures here.
 buddy_html, phone = T.buddy_html, T.phone
 
+import re
+
+import pytest
+
+
+@pytest.fixture
+def desktop(buddy_html):
+    """A 1280px mouse context (no touch): selection and double-click are pointer behaviour."""
+    html, _ = buddy_html
+    launched = T._launch()
+    if launched is None:
+        pytest.skip("no Chromium available")
+    pw, browser = launched
+    pg = browser.new_context(viewport={"width": 1280, "height": 800}).new_page()
+    pg.route(re.compile(r"^http://buddy\.test/.*"), T.Site(html).handle)
+    pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
+    yield pg
+    browser.close()
+    pw.stop()
+
+
+LONG_Q = ("What does the typical organization structure and spend profile look like for a high "
+          "performing mid-market SaaS business with a sales-led motion and twenty to thirty million "
+          "in annual revenue? How has that changed over the past few years?")
+
+
+def _fold_first_turn(pg, first):
+    """Ask `first`, then a follow-up, so turn one folds into its row."""
+    _open(pg)
+    _ask(pg, first)
+    pg.fill("#fu-q", "Second question")
+    pg.click("#fu-btn")
+    pg.wait_for_function("document.querySelectorAll('#ask-thread .ask-q-bubble').length === 2 && !document.querySelector('.ask-loading')")
+    pg.wait_for_timeout(900)          # the page smooth-scrolls to the new answer; measure after it settles
+
 
 def test_past_question_rows_are_collapsed_on_load_and_open_on_a_tap(phone):
     pg, _ = phone
@@ -65,10 +100,13 @@ def test_a_follow_up_folds_earlier_turns_and_keeps_only_the_newest_open(phone):
     assert not answers.nth(0).is_visible()
     assert answers.nth(1).is_visible()
     row = pg.locator("#ask-thread .ask-turn-row")
-    assert row.count() == 1 and row.get_attribute("aria-expanded") == "false"
+    toggle = row.locator(".ask-turn-toggle")
+    assert row.count() == 1 and toggle.get_attribute("aria-expanded") == "false"
+    assert toggle.get_attribute("aria-label") == "Show answer"
     assert "First question" in row.inner_text()
-    row.tap()
-    assert row.get_attribute("aria-expanded") == "true"
+    toggle.tap()
+    assert toggle.get_attribute("aria-expanded") == "true"
+    assert toggle.get_attribute("aria-label") == "Hide answer"
     assert answers.nth(0).is_visible() and answers.nth(1).is_visible()
     # A third turn folds the second too, and a tapped-open turn folds back to its row.
     pg.fill("#fu-q", "Third question")
@@ -114,3 +152,73 @@ def test_the_send_button_is_an_icon_with_a_44px_hit_area_and_a_disabled_state(ph
     assert pg.is_disabled("#fu-btn")                       # empty field
     pg.fill("#fu-q", "Something")
     assert not pg.is_disabled("#fu-btn")
+
+
+def test_the_row_is_a_container_and_only_the_toggle_is_a_button(phone):
+    pg, _ = phone
+    _fold_first_turn(pg, LONG_Q)
+    assert pg.locator("#ask-thread .ask-turn-row").evaluate("e => e.tagName") == "DIV"
+    assert pg.locator("#ask-thread .ask-turn-rq").evaluate("e => e.closest('button')") is None
+    toggle = pg.locator("#ask-thread .ask-turn-toggle")
+    assert toggle.evaluate("e => e.tagName") == "BUTTON" and toggle.get_attribute("type") == "button"
+    assert toggle.locator(".ask-pq-rc").count() == 1
+    # Full question stays visible, no clamp, collapsed or not.
+    q = pg.locator("#ask-thread .ask-turn-rq")
+    assert q.inner_text() == LONG_Q
+    assert q.evaluate("e => e.scrollHeight <= e.clientHeight + 1")
+
+
+def test_toggle_is_44px_centered_and_has_a_focus_ring(phone):
+    pg, _ = phone
+    _fold_first_turn(pg, LONG_Q)                       # wraps to several lines at 390px
+    row = pg.locator("#ask-thread .ask-turn-row").bounding_box()
+    tg = pg.locator("#ask-thread .ask-turn-toggle").bounding_box()
+    assert tg["width"] >= 44 and tg["height"] >= 44
+    assert row["height"] > 80                          # the question really wraps
+    assert abs((tg["y"] + tg["height"] / 2) - (row["y"] + row["height"] / 2)) <= 1.5
+    pg.keyboard.press("Tab")                            # land on something, then focus the toggle by keyboard
+    pg.locator("#ask-thread .ask-turn-toggle").focus()
+    pg.keyboard.press("Shift+Tab"); pg.keyboard.press("Tab")
+    outline = pg.locator("#ask-thread .ask-turn-toggle").evaluate("e => getComputedStyle(e).outlineStyle + '|' + getComputedStyle(e).outlineWidth")
+    assert outline.startswith("solid|2px")
+
+
+def test_toggle_works_from_the_keyboard_and_the_label_follows(phone):
+    pg, _ = phone
+    _fold_first_turn(pg, "First question")
+    toggle = pg.locator("#ask-thread .ask-turn-toggle")
+    answers = pg.locator("#ask-thread .ask-answer")
+    toggle.focus()
+    pg.keyboard.press("Enter")
+    assert toggle.get_attribute("aria-label") == "Hide answer" and answers.nth(0).is_visible()
+    pg.keyboard.press("Space")
+    assert toggle.get_attribute("aria-label") == "Show answer" and not answers.nth(0).is_visible()
+
+
+def test_clicking_or_selecting_the_question_text_never_toggles_and_it_can_be_copied(desktop):
+    pg = desktop
+    _fold_first_turn(pg, LONG_Q)
+    toggle = pg.locator("#ask-thread .ask-turn-toggle")
+    answer = pg.locator("#ask-thread .ask-answer").nth(0)
+    q = pg.locator("#ask-thread .ask-turn-rq")
+    box = q.bounding_box()
+    y = box["y"] + 10
+    # Drag across the text: it selects, it does not toggle.
+    pg.mouse.move(box["x"] + 2, y); pg.mouse.down(); pg.mouse.move(box["x"] + 300, y, steps=6); pg.mouse.up()
+    assert len(pg.evaluate("window.getSelection().toString()")) > 5
+    assert toggle.get_attribute("aria-expanded") == "false" and not answer.is_visible()
+    # Double and triple click select words and the paragraph, still no toggle.
+    pg.mouse.dblclick(box["x"] + 60, y)
+    assert pg.evaluate("window.getSelection().toString().trim()") != ""
+    assert toggle.get_attribute("aria-expanded") == "false"
+    pg.mouse.click(box["x"] + 60, y, click_count=3)
+    assert LONG_Q.startswith(pg.evaluate("window.getSelection().toString().trim()")[:40])
+    assert toggle.get_attribute("aria-expanded") == "false" and not answer.is_visible()
+    # Clicking the empty part of the row does not toggle either; only the button does.
+    row = pg.locator("#ask-thread .ask-turn-row").bounding_box()
+    pg.mouse.click(row["x"] + 2, row["y"] + row["height"] / 2)
+    assert toggle.get_attribute("aria-expanded") == "false"
+    toggle.click()
+    assert toggle.get_attribute("aria-expanded") == "true" and answer.is_visible()
+    toggle.click()
+    assert toggle.get_attribute("aria-expanded") == "false" and not answer.is_visible()
