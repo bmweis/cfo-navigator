@@ -211,7 +211,7 @@ def test_clicking_or_selecting_the_question_text_never_toggles_and_it_can_be_cop
     assert pg.evaluate("window.getSelection().toString().trim()") != ""
     assert toggle.get_attribute("aria-expanded") == "false"
     pg.mouse.click(box["x"] + 60, y, click_count=3)
-    assert LONG_Q.startswith(pg.evaluate("window.getSelection().toString().strip()")[:40])
+    assert LONG_Q.startswith(pg.evaluate("window.getSelection().toString().trim()")[:40])
     assert toggle.get_attribute("aria-expanded") == "false" and not answer.is_visible()
     # Clicking the empty part of the row does not toggle either; only the button does.
     row = pg.locator("#ask-thread .ask-turn-row").bounding_box()
