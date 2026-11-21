@@ -1797,6 +1797,10 @@ body{margin:0;font:16px/1.65 var(--font-body);color:var(--ink-soft);background:v
   .site-main.site-main table.admin-table-responsive.admin-table-responsive td,
   .site-main.site-main table.bk-stack.bk-stack td{border-top:0!important;}
 }
+/* FP&A Buddy report cards run to 1100px (_REPORT_CARD_BREAKPOINT; a test keeps the two equal). */
+@media(max-width:1100px){
+  .site-main.site-main table.rp-cards.rp-cards td{border-top:0!important;}
+}
 @media(max-width:820px){
   .site-main.site-main table.ff-table.ff-table td,
   .site-main.site-main table.fs-table.fs-table td{border-top:0!important;}
@@ -2287,6 +2291,9 @@ _COL_WIDTH_VENDOR = 160       # A short vendor/company label (Railway,
                               # full software/community name, not a one-
                               # or two-word vendor label (overhead spend
                               # fixes, 2026-09)
+_REPORT_CARD_BREAKPOINT = 1100  # FP&A Buddy report: below this the table becomes stacked cards, so a landscape
+                                # phone (about 844px) and a portrait iPad keep cards. The five columns need about
+                                # 1,040px (Question 420 + Date 140 + Asker 160 + Settings and Cost ~320).
 _COL_WIDTH_REPORT_TITLE = 420  # A report or digest title, which can run to 90+
                               # characters (the figures page's Report column,
                               # the digests preview's Title column). The cells
@@ -34276,12 +34283,19 @@ def admin_ask_report(request: Request, user: str = ""):
     def _asker(r: dict) -> str:
         return r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
 
-    def _turn_row(r: dict, gid: str = "", first_settings: str = "") -> str:
+    def _turn_row(r: dict, gid: str = "", first_settings: str = "", parent_q: str = "") -> str:
         # A per-turn row. Inside a conversation (gid set) the date, asker and
         # settings badge are not repeated: the Date cell carries "Turn N" and the
         # time, and Asker and Settings read "As above" unless the turn differs.
         q = (r.get("question") or "")[:160]
         attrs = f' data-convo="{_esc(gid)}" style="display:none;"' if gid else ""
+        # Nested turn rows carry .rp-turn (left rule, tint and indent, defined in the page
+        # style block); a turn whose question is the parent's own text says so instead of
+        # printing it a second time.
+        tr_cls = "turn-row rp-turn" if gid else "turn-row"
+        same_q = bool(gid) and (r.get("question") or "") == parent_q
+        q_html = ('<span class="m">Same as above</span>' if same_q else
+                  f'{_esc(q)}{"&hellip;" if len(r.get("question") or "") > 160 else ""}')
         # cost_usd is the turn TOTAL; the follow-up query rewrite's share is
         # broken out in rewrite_cost_usd. Split shown quietly, only when a
         # rewrite actually ran (turn-one and legacy rows have 0).
@@ -34302,10 +34316,10 @@ def admin_ask_report(request: Request, user: str = ""):
             settings_cell = badge if badge != first_settings else '<span class="m">As above</span>'
         else:
             date_cell, asker_cell, settings_cell = _esc(stamp), _esc(_asker(r)), _ask_settings_badge(r)
-        return f"""<tr class="turn-row"{attrs}>
+        return f"""<tr class="{tr_cls}"{attrs}>
   <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{date_cell}</td>
   <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{asker_cell}</td>
-  <td class="admin-table-cell rp-q" data-label="Question" style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}{lookup}</td>
+  <td class="admin-table-cell rp-q" data-label="Question" style="padding:8px 10px;font-size:13px;">{q_html}{lookup}</td>
   <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;">{settings_cell}</td>
   <td class="admin-table-cell" data-label="Cost" style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}{split}{dur}</td>
 </tr>"""
@@ -34339,7 +34353,8 @@ def admin_ask_report(request: Request, user: str = ""):
             gid = turns[0].get("conversation_id") or f"solo-{turns[0].get('id')}"
             parts.append(_rollup_row(turns, gid))
             first_badge = _ask_settings_badge(turns[0])
-            parts.extend(_turn_row(t, gid=gid, first_settings=first_badge) for t in turns)
+            parts.extend(_turn_row(t, gid=gid, first_settings=first_badge,
+                                   parent_q=turns[0].get("question") or "") for t in turns)
     table_rows = "".join(parts) or \
         '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--muted);">No questions asked yet.</td></tr>'
 
@@ -34387,11 +34402,11 @@ def admin_ask_report(request: Request, user: str = ""):
 </form>
 
 <div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
-  <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
+  <table class="admin-table-responsive rp-cards" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;">
     <thead><tr style="background:var(--bg);">
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_DATE}px;">Date and time</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;width:{_COL_WIDTH_VENDOR}px;">Asker</th>
-      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Question</th>
+      <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;min-width:{_COL_WIDTH_REPORT_TITLE}px;">Question</th>
       <th style="padding:8px 10px;text-align:left;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Settings</th>
       <th style="padding:8px 10px;text-align:right;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em;">Cost</th>
     </tr></thead>
@@ -34401,10 +34416,18 @@ def admin_ask_report(request: Request, user: str = ""):
 <p style="font-size:12px;color:var(--muted);margin-top:10px;">Showing the most recent 500{' matching' if user else ''} questions, grouped by conversation. Download the CSV for the full archive (flat, one row per turn).</p>
 <style>
 tbody tr{{border-top:1px solid var(--line);}}
-tr[data-convo]{{background:var(--bg);}}
+/* Landscape-phone fix: report cells sit at the top of their row, so date and asker line up with the
+   first line of the question instead of floating mid-row beside a tall turn. */
+.admin-table-responsive td.admin-table-cell{{vertical-align:top;}}
+/* An expanded turn is nested under its conversation: a navy-light rule on the left edge, a navy-wash
+   tint (--accent-light), and an indent. Classes only, no !important: a td has no background rule of its
+   own, so the tint rides on the row; the rule is an inset box-shadow, not a border. */
+/* Specificity (four classes) beats the sitewide table-row background rule without an !important. */
+.site-main.site-main table.rp-cards.rp-cards tr.rp-turn{{background:var(--accent-light);}}
+tr.rp-turn>td:first-child{{box-shadow:inset 4px 0 0 var(--navy-light);padding-left:22px!important;}}
 .rp-rw{{margin-top:4px;font-size:13px;color:var(--ink-soft);}}
 .rp-chips{{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}}
-.rp-chip{{display:inline-block;border-radius:999px;padding:2px 10px;font-size:11.5px;font-weight:600;background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);}}
+.rp-chip{{display:inline-block;border-radius:6px;white-space:normal;padding:2px 10px;font-size:11.5px;font-weight:600;background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);}}
 .rp-chip.rp-hot{{background:var(--coral-wash);border-color:var(--coral-wash);color:var(--navy);}}
 .rp-lab{{margin-top:8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);}}
 .rp-shifts,.rp-det ul{{margin:3px 0 0;padding-left:18px;font-size:12.5px;color:var(--ink);}}
@@ -34426,13 +34449,16 @@ tr[data-convo]{{background:var(--bg);}}
    documented 4-5-column bucket) — safe, since a table's real content
    still grows past a smaller min-width when it needs to; the floor only
    guards the narrow gap right below where cards take over. */
-@media(max-width:700px){{
+@media(max-width:{_REPORT_CARD_BREAKPOINT}px){{
   .admin-table-responsive thead{{display:none;}}
   .admin-table-responsive, .admin-table-responsive tbody,
   .admin-table-responsive tr, .admin-table-responsive td{{display:block;width:100%;min-width:0!important;}}
   .admin-table-responsive tr{{border-top:none!important;border-bottom:1px solid var(--line);padding:8px 0;}}
   .admin-table-responsive tbody tr:last-child{{border-bottom:0;}}
   .admin-table-cell{{padding:6px 12px!important;}}
+  tr.rp-turn{{box-shadow:inset 4px 0 0 var(--navy-light);}}
+  tr.rp-turn>td:first-child{{box-shadow:none;}}
+  tr.rp-turn>td{{padding-left:22px!important;}}
   .admin-table-cell[data-label]::before{{content:attr(data-label);display:block;
     font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
     color:var(--muted);margin-bottom:3px;}}
