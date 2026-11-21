@@ -25199,8 +25199,8 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu-send:focus-visible{{outline:2px solid var(--navy);outline-offset:2px;}}
 /* An earlier turn's row is a container, not a button: the question is plain selectable text
    (a click, drag or double click on it does nothing) and only the toggle at the right end opens
-   the answer. The toggle is centered against the row so a wrapped question doesn't pin it to the top. */
-.ask-turn-row{{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;min-height:44px;padding:2px 2px 2px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);}}
+   the answer. The toggle sits in the lower right corner, level with the last line of a wrapped question. */
+.ask-turn-row{{display:flex;align-items:flex-end;gap:6px;width:100%;box-sizing:border-box;min-height:44px;padding:2px 2px 2px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);}}
 .ask-turn-rq{{font-weight:600;font-size:13.5px;color:var(--navy);min-width:0;flex:1;padding:8px 0;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text;cursor:text;}}
 .ask-turn-toggle{{flex:none;width:44px;height:44px;padding:0;border:0;border-radius:8px;background:transparent;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}}
 @media(hover:hover){{.ask-turn-toggle:hover{{background:var(--accent-light);}}}}
@@ -26714,19 +26714,28 @@ def ask_history(request: Request, page: int = 1):
   {_resume_link(r)}
 </div>"""
 
-    def _turn_block(r: dict) -> str:
+    def _turn_block(r: dict, *, show_q: bool = True) -> str:
         # One turn inside an expanded conversation — same content and
-        # citation rendering as the flat card.
+        # citation rendering as the flat card. The first turn's question is the
+        # card heading, so it is not printed again here (show_q=False): that turn
+        # shows its cost and badges, then its answer.
         q = _esc(r.get("question") or "")
         a_html, src_html = _render_cited_answer(r.get("answer") or "",
                                                 r.get("citations_json") or "[]",
                                                 r.get("stop_reason") or "")
-        return f"""<div style="padding:14px 0 4px;border-top:1px solid var(--line);">
-  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        date_cost = f'{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}'
+        if show_q:
+            head = f"""<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
     <div style="flex:1 1 280px;min-width:0;font-weight:600;color:var(--navy);font-size:14px;">{q}</div>
-    <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((r["created_at"] or "")[:10])} &middot; ${r["cost_usd"]:.3f}</div>
+    <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{date_cost}</div>
   </div>
-  <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_hist_chips(r, private=False)}{_ask_settings_badge(r)}</div>
+  <div style="font-size:12px;color:var(--muted);margin:6px 0 8px;">{_hist_chips(r, private=False)}{_ask_settings_badge(r)}</div>"""
+        else:
+            head = (f'<div style="font-size:12px;color:var(--muted);margin:0 0 8px;">'
+                    f'{_hist_chips(r, private=False)}{_ask_settings_badge(r)}'
+                    f'<span style="white-space:nowrap;">This question: ${r["cost_usd"]:.3f}</span></div>')
+        return f"""<div style="padding:14px 0 4px;border-top:1px solid var(--line);">
+  {head}
   <div class="ask-hist-answer" style="margin-bottom:12px;">{a_html}</div>
   {src_html}
 </div>"""
@@ -26739,21 +26748,24 @@ def ask_history(request: Request, page: int = 1):
         n = len(turns) - 1
         label = f"{n} follow-up" + ("" if n == 1 else "s")
         q = _esc(first.get("question") or "")
-        # Native <details>: tap-to-expand with zero JS, works on any screen.
-        return f"""<details class="convo" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-bottom:12px;">
-  <summary style="padding:16px 18px;cursor:pointer;">
+        # A container, not a <details> (same standard as the Buddy conversation row): the
+        # heading is plain selectable text that does nothing on click, and the "N follow-ups"
+        # pill at the lower right is the one real <button> that opens the thread.
+        cid = _esc(str(first.get("conversation_id") or first.get("id")))
+        return f"""<div class="convo" style="background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-bottom:12px;">
+  <div style="padding:16px 18px 0;">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-      <div style="font-weight:600;color:var(--navy);font-size:14.5px;flex:1 1 180px;">{q}</div>
+      <div class="convo-q" style="font-weight:600;color:var(--navy);font-size:14.5px;flex:1 1 180px;">{q}</div>
       <div style="font-size:12px;color:var(--muted);white-space:nowrap;">{_esc((first["created_at"] or "")[:10])} &middot; ${total:.3f} total</div>
     </div>
     <div style="margin-top:8px;">{_hist_chips(first, counts=(sum(rating_counts.get(t["id"], (0, 0))[0] for t in turns), sum(rating_counts.get(t["id"], (0, 0))[1] for t in turns)))}</div>
-    <span class="convo-chip"><span class="disclosure-caret"></span>&nbsp;{label}</span>
-  </summary>
-  <div style="padding:0 18px 6px;">
-    {"".join(_turn_block(t) for t in turns)}
+  </div>
+  <div class="convo-foot"><button type="button" class="convo-toggle" aria-expanded="false" aria-controls="convo-{cid}" onclick="convoToggle(this)"><span class="convo-chip"><span class="ask-pq-rc" aria-hidden="true"></span>&nbsp;{label}</span></button></div>
+  <div class="convo-body" id="convo-{cid}" hidden style="padding:0 18px 6px;">
+    {"".join(_turn_block(t, show_q=(i > 0)) for i, t in enumerate(turns))}
     {_resume_link(turns)}
   </div>
-</details>"""
+</div><div class="convo-end"></div>"""
 
     # Plain pagination, newest first (2026-10): answers now render in full, so
     # 200 long answers made a multi-megabyte page. Every answer on a page is
@@ -26791,8 +26803,21 @@ def ask_history(request: Request, page: int = 1):
 {_ASK_CTL_CSS}
 {_ASK_CHIP_CSS}
 {_ASK_LIST_PAGE_CSS}
-.convo-chip{{display:inline-flex;align-items:center;margin-top:10px;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:4px 12px;}}
+.convo-q{{min-width:0;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text;cursor:text;}}
+.convo-foot{{display:flex;justify-content:flex-end;padding:0 10px 4px 18px;}}
+.convo-toggle{{min-height:44px;min-width:44px;padding:0 8px;border:0;border-radius:8px;background:transparent;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}}
+.convo-toggle:focus-visible{{outline:2px solid var(--navy);outline-offset:-2px;}}
+.convo-toggle[aria-expanded="true"] .ask-pq-rc{{transform:rotate(90deg);}}
+.convo-chip{{display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:var(--navy);background:var(--seafoam);border-radius:999px;padding:4px 12px;}}
 </style>
+<script>
+function convoToggle(btn) {{
+  var body = document.getElementById(btn.getAttribute('aria-controls'));
+  var open = btn.getAttribute('aria-expanded') !== 'true';
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (body) body.hidden = !open;
+}}
+</script>
 </div>"""
     return HTMLResponse(_page("Your FP&A Buddy history—Brian Weisberg", "CFO Toolbox", body, role=_role(request), request=request))
 

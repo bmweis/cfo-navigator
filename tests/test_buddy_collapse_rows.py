@@ -168,14 +168,22 @@ def test_the_row_is_a_container_and_only_the_toggle_is_a_button(phone):
     assert q.evaluate("e => e.scrollHeight <= e.clientHeight + 1")
 
 
-def test_toggle_is_44px_centered_and_has_a_focus_ring(phone):
+def test_toggle_is_44px_at_the_lower_right_and_has_a_focus_ring(phone):
+    """The toggle sits in the row's lower right corner, level with the question's last line
+    (not centered on a tall wrapped question), and is still a 44px target."""
     pg, _ = phone
     _fold_first_turn(pg, LONG_Q)                       # wraps to several lines at 390px
     row = pg.locator("#ask-thread .ask-turn-row").bounding_box()
     tg = pg.locator("#ask-thread .ask-turn-toggle").bounding_box()
     assert tg["width"] >= 44 and tg["height"] >= 44
     assert row["height"] > 80                          # the question really wraps
-    assert abs((tg["y"] + tg["height"] / 2) - (row["y"] + row["height"] / 2)) <= 1.5
+    assert (row["y"] + row["height"]) - (tg["y"] + tg["height"]) <= 4          # bottom edge
+    assert (row["x"] + row["width"]) - (tg["x"] + tg["width"]) <= 4           # right edge
+    # Level with the last line of text: toggle center within one line of the last line's center.
+    last = pg.locator("#ask-thread .ask-turn-rq").evaluate(
+        "e => { const r = document.createRange(); r.selectNodeContents(e); const l = r.getClientRects();"
+        " const x = l[l.length - 1]; return x.top + x.height / 2; }")
+    assert abs((tg["y"] + tg["height"] / 2) - last) <= 14
     pg.keyboard.press("Tab")                            # land on something, then focus the toggle by keyboard
     pg.locator("#ask-thread .ask-turn-toggle").focus()
     pg.keyboard.press("Shift+Tab"); pg.keyboard.press("Tab")
