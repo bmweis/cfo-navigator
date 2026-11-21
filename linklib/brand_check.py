@@ -609,6 +609,8 @@ TABLE_OVERRIDE_ALLOWLIST = {
         "mobile card layout: cells carry no top border (replaces the specificity-losing rule below)",
     ".site-main.site-main .table-frame.ask-table table td":
         "mobile card layout for answer tables on /tools/fpa-buddy and the history pages: cells carry no top border",
+    ".site-main.site-main table.rp-cards.rp-cards td":
+        "mobile card layout for the FP&A Buddy report (cards up to 1100px, so landscape phones keep them): cells carry no top border",
     ".site-main.site-main table.ff-table.ff-table td, .site-main.site-main table.fs-table.fs-table td":
         "mobile card layout for the feeds tables: cells carry no top border",
 }

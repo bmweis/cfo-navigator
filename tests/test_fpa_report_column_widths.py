@@ -72,8 +72,9 @@ def test_question_column_keeps_room_at_half_desktop_widths(admin_client, tmp_pat
         f.write_text(client.get("/admin/fpa-buddy/report").text, encoding="utf-8")
         page = browser.new_page(viewport={"width": width, "height": 900})
         page.goto(f.as_uri())
-        w = page.evaluate("""() => [...document.querySelectorAll('th')]
-            .find(t => t.textContent.trim() === 'Question').getBoundingClientRect().width""")
+        # At these widths the report is stacked cards (the header is hidden), so the Question cell is
+        # measured instead of its header: it takes the card's full width.
+        w = page.evaluate("""() => document.querySelector('td[data-label="Question"]').getBoundingClientRect().width""")
         page.close()
         assert w >= minimum, f"Question column is {w}px at {width}px viewport"
     finally:
