@@ -201,7 +201,7 @@ def test_each_row_shows_a_labelled_rating(site):
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     def meta(q):
         i = sec.index(q)
-        return sec[i:sec.index("</summary>", i)]
+        return sec[i:sec.index('<div class="ask-pq-body"', i)]
     h = meta("Helpful first question")
     assert 'aria-label="Rated helpful"' in h and "&#10003; Helpful" in h.replace('<span aria-hidden="true">', "").replace("</span>", "")
     assert "ask-chip" not in meta("Unrated first question")
@@ -219,7 +219,7 @@ def test_own_row_meta_order_is_rating_then_you_then_date(site):
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     def meta(q):
         i = sec.index(q)
-        return sec[i:sec.index("</summary>", i)]
+        return sec[i:sec.index('<div class="ask-pq-body"', i)]
     rated = meta("My own rated question")
     assert rated.index("ask-chip") < rated.index(">You<") < rated.index("ask-pq-date")
     plain = meta("My own question")

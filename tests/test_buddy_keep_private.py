@@ -65,10 +65,10 @@ def test_own_private_row_shows_lock_and_allow_sharing(site):
     client, ids, _ = site
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     i = sec.index("own private question")
-    row = sec[i:sec.index("</details>", i)] if "</details>" in sec[i:] else sec[i:]
+    row = sec[i:sec.index("</button>\n</div>", i)]
     assert "ask-chip-private" in row and ">Allow sharing</button>" in row
     j = sec.index("own shared question")
-    row2 = sec[j:sec.index("</details>", j)] if "</details>" in sec[j:] else sec[j:]
+    row2 = sec[j:sec.index("</button>\n</div>", j)]
     assert "&#128274;" not in row2 and "ask-chip-private" not in row2 and ">Make private</button>" in row2
 
 
@@ -76,7 +76,7 @@ def test_admin_sees_private_with_lock_and_full_name(site):
     client, ids, _ = site
     sec = _section(client("boss").get("/tools/fpa-buddy").text)
     i = sec.index("Private question from author")
-    row = sec[i:sec.index("</summary>", i)]
+    row = sec[i:sec.index('<div class="ask-pq-body"', i)]
     assert "ask-chip-private" in row and "author" in row
     assert "Hide" in sec
 
@@ -310,7 +310,7 @@ def test_hidden_marker_is_an_admin_only_status_with_label_and_order(site):
     for m in marks:
         assert 'aria-label="Hidden by an admin"' in m and "&#8856;" in m and "Hidden" in m
     i = sec.index("Private question from author")
-    row = sec[i:sec.index("</summary>", i)]
+    row = sec[i:sec.index('<div class="ask-pq-body"', i)]
     assert row.index("ask-chip-hidden") < row.index("ask-chip-private") < row.index("ask-pq-date")   # Hidden first, both before the date
     css = boss[boss.index(".ask-chip-hidden{"):]
     css = css[:css.index("}")]
