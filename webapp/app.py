@@ -25197,10 +25197,15 @@ def fpa_buddy_page(request: Request, q: str = "", pq: str = "", helpful: str = "
 .fu-send:disabled{{cursor:not-allowed;}}
 .fu-send:disabled .fu-send-dot{{background:var(--line);}}
 .fu-send:focus-visible{{outline:2px solid var(--navy);outline-offset:2px;}}
-.ask-turn-row{{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;font:inherit;padding:11px 14px;min-height:44px;box-sizing:border-box;border-radius:8px;border:1px solid var(--line);background:var(--surface);cursor:pointer;}}
-@media(hover:hover){{.ask-turn-row:hover{{border-color:var(--navy);}}}}
-.ask-turn-row[aria-expanded="true"] .ask-pq-rc{{transform:rotate(90deg);}}
-.ask-turn-rq{{font-weight:600;font-size:13.5px;color:var(--navy);min-width:0;flex:1;}}
+/* An earlier turn's row is a container, not a button: the question is plain selectable text
+   (a click, drag or double click on it does nothing) and only the toggle at the right end opens
+   the answer. The toggle is centered against the row so a wrapped question doesn't pin it to the top. */
+.ask-turn-row{{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;min-height:44px;padding:2px 2px 2px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);}}
+.ask-turn-rq{{font-weight:600;font-size:13.5px;color:var(--navy);min-width:0;flex:1;padding:8px 0;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text;cursor:text;}}
+.ask-turn-toggle{{flex:none;width:44px;height:44px;padding:0;border:0;border-radius:8px;background:transparent;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}}
+@media(hover:hover){{.ask-turn-toggle:hover{{background:var(--accent-light);}}}}
+.ask-turn-toggle[aria-expanded="true"] .ask-pq-rc{{transform:rotate(90deg);}}
+.ask-turn-toggle:focus-visible{{outline:2px solid var(--navy);outline-offset:-2px;}}
 .ask-turn.has-row>.ask-q-bubble{{display:none;}}
 .ask-turn.has-row:not(.open)>.ask-answer{{display:none;}}
 .ask-recent-item.recent-hl{{border-color:var(--navy);box-shadow:0 0 0 2px var(--accent-light);}}
@@ -25695,20 +25700,23 @@ function resetConvo() {{
   q.scrollIntoView({{behavior:'smooth', block:'center'}});
 }}
 
-// Earlier turns fold to one-line rows (chevron, tap to open). Nothing is
+// Earlier turns fold to rows (question text plus a toggle button that opens the answer). Nothing is
 // deleted; the newest turn stays open. A turn gets its row once.
 function collapseTurn(turn) {{
   if (!turn || turn.id === 'fu' || turn.classList.contains('has-row')) return;
   var b = turn.querySelector('.ask-q-bubble');
   if (!b) return;
   turn.classList.add('ask-turn', 'has-row');
-  var row = document.createElement('button');
-  row.type = 'button'; row.className = 'ask-turn-row'; row.setAttribute('aria-expanded', 'false');
-  row.innerHTML = '<span class="ask-pq-rc" aria-hidden="true"></span><span class="ask-turn-rq"></span>';
+  var row = document.createElement('div');
+  row.className = 'ask-turn-row';
+  row.innerHTML = '<span class="ask-turn-rq"></span>' +
+    '<button type="button" class="ask-turn-toggle" aria-expanded="false" aria-label="Show answer"><span class="ask-pq-rc" aria-hidden="true"></span></button>';
   row.querySelector('.ask-turn-rq').textContent = b.textContent;
-  row.addEventListener('click', function() {{
+  var tg = row.querySelector('.ask-turn-toggle');
+  tg.addEventListener('click', function() {{
     var o = turn.classList.toggle('open');
-    row.setAttribute('aria-expanded', o ? 'true' : 'false');
+    tg.setAttribute('aria-expanded', o ? 'true' : 'false');
+    tg.setAttribute('aria-label', o ? 'Hide answer' : 'Show answer');
   }});
   turn.insertBefore(row, turn.firstChild);
 }}
@@ -34012,7 +34020,7 @@ def _lint_flags_html(r: dict) -> str:
         return ""
     items = "".join(f'<li><b>{_esc(f.get("phrase", ""))}</b>: {_esc(f.get("snippet", ""))}</li>' for f in flags)
     return (f'<details style="margin-top:4px;font-size:12px;color:var(--ink-soft);"><summary style="cursor:pointer;">'
-            f'Answer rule flags: {len(flags)}</summary><ul style="margin:6px 0 0;padding-left:18px;">{items}</ul></details>')
+            f'<span class="disclosure-caret"></span> Answer rule flags: {len(flags)}</summary><ul style="margin:6px 0 0;padding-left:18px;">{items}</ul></details>')
 
 
 def _stripped_html(r: dict) -> str:
@@ -34036,14 +34044,16 @@ def _stripped_html(r: dict) -> str:
         + (f' <span style="color:var(--muted);">Kept: {_esc(i.get("kept", ""))}</span>' if i.get("kept") else "") + '</li>'
         for i in items)
     return (f'<details style="margin-top:4px;font-size:12px;color:var(--ink-soft);"><summary style="cursor:pointer;">'
-            f'{head}</summary><ul style="margin:6px 0 0;padding-left:18px;">{lis}</ul></details>')
+            f'<span class="disclosure-caret"></span> {head}</summary><ul style="margin:6px 0 0;padding-left:18px;">{lis}</ul></details>')
 
 
-def _prestep_report_html(r: dict) -> str:
+def _prestep_report_html(r: dict, compact: bool = False) -> str:
     """The benchmark lookup log of one turn for the admin report (issue 738, B4):
     one summary line, the full detail one tap away. Empty for a turn the
     pre-step did not touch. A fallback always shows, in words, so nothing
-    changes quietly."""
+    changes quietly. compact=True (the report page) puts the one-line summary
+    inside the closed disclosure labelled "Lookup details" and lists each report
+    once per turn (prestep_json's own deduped `documents`), not once per sub-lookup."""
     raw = r.get("prestep_json") or ""
     if not raw:
         return ('<div style="margin-top:4px;font-size:12px;color:var(--muted);">Benchmark lookup: '
@@ -34101,7 +34111,7 @@ def _prestep_report_html(r: dict) -> str:
         f'{" · " + _esc(s["editions_left_out"]) if s.get("editions_left_out") else ""}'
         + ("<ul style=\"margin:2px 0 0;padding-left:16px;\">" + "".join(
             f'<li>document: {_esc(x.get("title", ""))}: {int(x.get("rows", 0))} row{"" if int(x.get("rows", 0)) == 1 else "s"}</li>'
-            for x in s.get("documents") or []) + "</ul>" if s.get("documents") else "")
+            for x in s.get("documents") or []) + "</ul>" if (s.get("documents") and not (compact and d.get("documents"))) else "")
         + '</li>'
         for s in d.get("subs") or [])
     extras = ""
@@ -34112,9 +34122,129 @@ def _prestep_report_html(r: dict) -> str:
     est = d.get("est_extra_usd")
     if est:
         extras += f'<div>Estimated extra before running: ${float(est):.4f}; budget left ${float(d.get("remaining_usd") or 0):.4f}</div>' if d.get("remaining_usd") is not None else f'<div>Estimated extra before running: ${float(est):.4f}</div>'
+    if compact:
+        docs = d.get("documents") or []
+        doc_li = "".join(
+            f'<li>{_esc(x.get("title", ""))}: {int(x.get("rows", 0))} row{"" if int(x.get("rows", 0)) == 1 else "s"}'
+            + (f' (parts {_esc(", ".join(str(n) for n in x.get("parts") or []))})' if x.get("parts") else "") + '</li>'
+            for x in docs)
+        docs_html = (f'<div style="margin-top:6px;">Reports sent, each listed once ({len(docs)}):</div>'
+                     f'<ul style="margin:2px 0 0;padding-left:18px;">{doc_li}</ul>') if docs else \
+                    '<div style="margin-top:6px;">Reports sent: None</div>'
+        return (f'<details style="margin-top:6px;font-size:12px;color:var(--ink-soft);"><summary style="cursor:pointer;">'
+                f'<span class="disclosure-caret"></span> Lookup details</summary><div style="margin-top:4px;">Benchmark lookup: {" &middot; ".join(bits)}</div>'
+                f'<ul style="margin:6px 0 0;padding-left:18px;">{subs}</ul>{docs_html}{extras}</details>')
     return (f'<details style="margin-top:4px;font-size:12px;color:var(--muted);"><summary style="cursor:pointer;">'
             f'Benchmark lookup: {" · ".join(bits)}</summary>'
             f'<ul style="margin:6px 0 0;padding-left:18px;">{subs}</ul>{extras}</details>')
+
+
+def _report_chip(text: str, hot: bool = False) -> str:
+    return f'<span class="rp-chip{" rp-hot" if hot else ""}">{_esc(text)}</span>'
+
+
+def _report_turn_facts(r: dict) -> dict:
+    """What the admin report needs from one turn's stored JSON. `placed` is
+    prestep_json.tables.shifts.lines: the number of computed shift lines that
+    code (linklib.table_render.render_shifts) put into the answer text after the
+    model finished. It counts lines inserted by code; it is not a comparison with
+    the answer. None for a turn that did not store it."""
+    def _load(raw, default):
+        try:
+            v = json.loads(raw) if raw else default
+        except ValueError:
+            return default
+        return v if isinstance(v, type(default)) else default
+    p = _load(r.get("prestep_json"), {})
+    lint = _load(r.get("lint_flags"), [])
+    strip = _load(r.get("stripped_json"), [])
+    tables = p.get("tables") if isinstance(p.get("tables"), dict) else {}
+    sinfo = tables.get("shifts") if isinstance(tables.get("shifts"), dict) else None
+    return {
+        "p": p, "has_p": bool(p), "shifts": [x for x in (p.get("shifts") or []) if isinstance(x, dict)],
+        "placed": sinfo.get("lines") if sinfo and isinstance(sinfo.get("lines"), int) else None,
+        "tables": tables, "flags": len(lint),
+        "removed": sum(1 for i in strip if isinstance(i, dict) and i.get("action") in ("removed", "clause_removed")),
+        "sent": sum(int(x.get("figure_rows", 0) or 0) for x in p.get("subs") or [] if isinstance(x, dict)),
+        "left": sum(int(v or 0) for v in (p.get("left_out_detail") or {}).values()),
+    }
+
+
+def _report_summary_chips(f: dict) -> str:
+    """One line of chips per turn. Every chip states a value: a count, "None" or a note."""
+    if not f["has_p"]:
+        shifts = "Shifts: no lookup record"
+        rows = "Rows: no lookup record"
+    else:
+        shifts = f'Shifts: {len(f["shifts"])} computed' if f["shifts"] else "Shifts: None computed"
+        if f["placed"] is not None:
+            shifts += f' · {f["placed"]} placed in the answer by code'
+        rows = f'Rows: {f["sent"]} sent · {f["left"]} left out'
+    return ('<div class="rp-chips">' + _report_chip(shifts) + _report_chip(rows)
+            + _report_chip(f'Flags: {f["flags"]}' if f["flags"] else "Flags: None", hot=bool(f["flags"]))
+            + _report_chip(f'Removed: {f["removed"]}' if f["removed"] else "Removed: None", hot=bool(f["removed"]))
+            + '</div>')
+
+
+def _report_shift_lines_html(f: dict) -> str:
+    """The computed shift lines as text, from the stored endpoints (prestep_json.shifts[].line)."""
+    if not f["has_p"]:
+        return '<div class="rp-lab">Computed shifts</div><div class="rp-none">&mdash;</div>'
+    if not f["shifts"]:
+        return '<div class="rp-lab">Computed shifts</div><div class="rp-none">None</div>'
+    lis = "".join(f'<li>{_esc(x.get("line", ""))}</li>' for x in f["shifts"])
+    return f'<div class="rp-lab">Computed shifts ({len(f["shifts"])})</div><ul class="rp-shifts">{lis}</ul>'
+
+
+def _report_why_html(f: dict) -> str:
+    """Closed disclosure: why shifts did not compute and which rows never reached a table.
+    Every field shows a value; nothing is blank."""
+    p, tb = f["p"], f["tables"]
+
+    def _list(items, limit=10):
+        items = [i for i in items if i]
+        if not items:
+            return '<div class="rp-none">None</div>'
+        shown = "".join(f"<li>{_esc(i)}</li>" for i in items[:limit])
+        more = f'<li class="m">and {len(items) - limit} more</li>' if len(items) > limit else ""
+        return f'<ul>{shown}{more}</ul>'
+
+    unpaired = p.get("shifts_unpaired") or {}
+    groups = p.get("shifts_unpaired_groups") or {}
+    up_items = []
+    for reason, n in sorted(unpaired.items(), key=lambda kv: -int(kv[1] or 0)):
+        names = groups.get(reason) or []
+        up_items.append(f"{reason}: {n}" + (f" (e.g. {'; '.join(str(x) for x in names[:3])})" if names else ""))
+
+    def _cap(x):
+        if not isinstance(x, dict):
+            return str(x)
+        return " · ".join(str(x[k]) for k in ("metric", "report", "band", "kind") if x.get(k))
+
+    def _rows(label, items):
+        return f'<div class="rp-lab">{label} ({len(items)})</div>' + _list([_cap(x) for x in items])
+    below = p.get("shifts_suppressed")
+    return ('<details class="rp-det"><summary><span class="disclosure-caret"></span> Shift and table details</summary>'
+            f'<div class="rp-lab">Below the threshold</div><div>{below if below is not None else "&mdash;"}</div>'
+            '<div class="rp-lab">Did not pair, by reason</div>' + _list(up_items)
+            + '<div class="rp-lab">Skipped (a report prints two values)</div>' + _list(p.get("shifts_skipped") or [])
+            + '<div class="rp-lab">Endpoint warnings</div>' + _list(p.get("shifts_outliers") or [])
+            + _rows("Cut by the table row cap", tb.get("cap_dropped") or [])
+            + _rows("Not placed in any table", tb.get("not_in_table") or [])
+            + '</details>')
+
+
+def _report_turn_detail_html(r: dict) -> str:
+    """Everything under a turn's question on the report: the failure, the rewrite on its own line, the
+    summary chips, the computed shift lines, then closed disclosures (lookup, shift and table details,
+    flags, removed sentences)."""
+    f = _report_turn_facts(r)
+    rw = (f'<div class="rp-rw"><b>Rewritten as:</b> {_esc(r["rewrite_text"])}</div>') if (r.get("rewrite_text") or "") else ""
+    failed = (f'<div style="font-size:12px;margin-top:3px;"><span style="color:var(--alert);font-weight:600;">&#9888; Failed</span> '
+              f'<span style="color:var(--muted);">{_esc(r.get("error") or "No answer was produced.")}</span></div>') if r.get("failed") else ""
+    return (failed + rw + _report_summary_chips(f) + _report_shift_lines_html(f)
+            + _prestep_report_html(r, compact=True) + (_report_why_html(f) if f["has_p"] else "")
+            + _lint_flags_html(r) + _stripped_html(r))
 
 
 @app.get("/admin/fpa-buddy/report", response_class=HTMLResponse)
@@ -34146,34 +34276,37 @@ def admin_ask_report(request: Request, user: str = ""):
     def _asker(r: dict) -> str:
         return r.get("asker_name") or r.get("asker_username") or f'user #{r["user_id"]}'
 
-    def _turn_row(r: dict, gid: str = "") -> str:
-        # A per-turn row: today's flat row, optionally hidden under a
-        # conversation rollup (gid set) until the admin expands it.
+    def _turn_row(r: dict, gid: str = "", first_settings: str = "") -> str:
+        # A per-turn row. Inside a conversation (gid set) the date, asker and
+        # settings badge are not repeated: the Date cell carries "Turn N" and the
+        # time, and Asker and Settings read "As above" unless the turn differs.
         q = (r.get("question") or "")[:160]
         attrs = f' data-convo="{_esc(gid)}" style="display:none;"' if gid else ""
-        marker = ('<span style="color:var(--muted);">&#8627; turn '
-                  f'{(r.get("turn_index") or 0) + 1}</span> ') if gid else ""
         # cost_usd is the turn TOTAL; the follow-up query rewrite's share is
         # broken out in rewrite_cost_usd. Split shown quietly, only when a
         # rewrite actually ran (turn-one and legacy rows have 0).
         rw = float(r.get("rewrite_cost_usd") or 0)
         split = (f'<div style="font-size:11px;font-weight:400;color:var(--muted);white-space:nowrap;">'
                  f'${r["cost_usd"] - rw:.4f} + ${rw:.4f} rewrite</div>') if rw > 0 else ""
-        # A failed turn (no answer produced) is labelled here, with the raw
-        # error: this report is admin-only and the cost is real spend.
-        failed = (f'<div style="font-size:12px;margin-top:3px;"><span style="color:var(--alert);font-weight:600;">&#9888; Failed</span> '
-                  f'<span style="color:var(--muted);">{_esc(r.get("error") or "No answer was produced.")}</span></div>') if r.get("failed") else ""
-        rewritten = (f'<div style="font-size:12px;margin-top:3px;color:var(--muted);">Rewritten as: '
-                     f'{_esc(r["rewrite_text"])}</div>') if (r.get("rewrite_text") or "") else ""
-        lookup = rewritten + _prestep_report_html(r) + _lint_flags_html(r) + _stripped_html(r)
+        lookup = _report_turn_detail_html(r)
         _ms = int(r.get("duration_ms") or 0)
         dur = (f'<div style="font-size:11px;font-weight:400;color:{"var(--alert)" if _ms >= 60000 else "var(--muted)"};white-space:nowrap;">'
                f'{_ms / 1000:.1f}s</div>') if _ms else ""
+        stamp = _display_time.local_stamp(r["created_at"], tz_name)
+        if gid:
+            time_only = " ".join(stamp.split(" ")[1:]) or stamp
+            date_cell = (f'<span style="color:var(--ink-soft);font-weight:600;">&#8627; Turn {(r.get("turn_index") or 0) + 1}</span>'
+                         f'<div>{_esc(time_only)}</div>')
+            badge = _ask_settings_badge(r)
+            asker_cell = '<span class="m">As above</span>'
+            settings_cell = badge if badge != first_settings else '<span class="m">As above</span>'
+        else:
+            date_cell, asker_cell, settings_cell = _esc(stamp), _esc(_asker(r)), _ask_settings_badge(r)
         return f"""<tr class="turn-row"{attrs}>
-  <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{_esc(_display_time.local_stamp(r["created_at"], tz_name))}</td>
-  <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{_esc(_asker(r))}</td>
-  <td class="admin-table-cell" data-label="Question" style="padding:8px 10px;font-size:13px;">{marker}{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}{failed}{lookup}</td>
-  <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;">{_ask_settings_badge(r)}</td>
+  <td class="admin-table-cell" data-label="Date" style="padding:8px 10px;font-size:12px;color:var(--muted);white-space:nowrap;">{date_cell}</td>
+  <td class="admin-table-cell" data-label="Asker" style="padding:8px 10px;font-size:13px;font-weight:500;">{asker_cell}</td>
+  <td class="admin-table-cell rp-q" data-label="Question" style="padding:8px 10px;font-size:13px;">{_esc(q)}{'&hellip;' if len(r.get("question") or "") > 160 else ''}{lookup}</td>
+  <td class="admin-table-cell" data-label="Settings" style="padding:8px 10px;font-size:12px;white-space:nowrap;">{settings_cell}</td>
   <td class="admin-table-cell" data-label="Cost" style="padding:8px 10px;font-size:13px;font-weight:600;text-align:right;">${r["cost_usd"]:.4f}{split}{dur}</td>
 </tr>"""
 
@@ -34205,7 +34338,8 @@ def admin_ask_report(request: Request, user: str = ""):
         else:
             gid = turns[0].get("conversation_id") or f"solo-{turns[0].get('id')}"
             parts.append(_rollup_row(turns, gid))
-            parts.extend(_turn_row(t, gid=gid) for t in turns)
+            first_badge = _ask_settings_badge(turns[0])
+            parts.extend(_turn_row(t, gid=gid, first_settings=first_badge) for t in turns)
     table_rows = "".join(parts) or \
         '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--muted);">No questions asked yet.</td></tr>'
 
@@ -34268,6 +34402,16 @@ def admin_ask_report(request: Request, user: str = ""):
 <style>
 tbody tr{{border-top:1px solid var(--line);}}
 tr[data-convo]{{background:var(--bg);}}
+.rp-rw{{margin-top:4px;font-size:13px;color:var(--ink-soft);}}
+.rp-chips{{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}}
+.rp-chip{{display:inline-block;border-radius:999px;padding:2px 10px;font-size:11.5px;font-weight:600;background:var(--bg);border:1px solid var(--line);color:var(--ink-soft);}}
+.rp-chip.rp-hot{{background:var(--coral-wash);border-color:var(--coral-wash);color:var(--navy);}}
+.rp-lab{{margin-top:8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);}}
+.rp-shifts,.rp-det ul{{margin:3px 0 0;padding-left:18px;font-size:12.5px;color:var(--ink);}}
+.rp-shifts li,.rp-det li,.rp-q li{{overflow-wrap:anywhere;margin:2px 0;}}
+.rp-none{{font-size:12.5px;color:var(--muted);}}
+.rp-det{{margin-top:6px;font-size:12px;color:var(--ink-soft);}}.rp-det summary{{cursor:pointer;}}
+.rp-q{{overflow-wrap:anywhere;}}
 /* PR 31 (layout fix batch 4) — a per-question record (Date/Asker/Question/
    Settings/Cost) squeezed the Question column to ~95-105px at 390px, since
    Settings' own nowrap badge and the Date/Asker columns' suggested widths

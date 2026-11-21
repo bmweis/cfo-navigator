@@ -239,7 +239,7 @@ def test_admin_hide_is_visible_undoable_and_separate_from_private(site):
 def test_hover_backgrounds_sit_inside_a_hover_media_query(site):
     client, _, _ = site
     html = client("reader").get("/tools/fpa-buddy").text
-    for rule in (".ask-pq-sum:hover", ".ask-recent-item:hover", ".ask-turn-row:hover", ".ask-ctl:hover"):
+    for rule in (".ask-pq-sum:hover", ".ask-recent-item:hover", ".ask-turn-toggle:hover", ".ask-ctl:hover"):
         assert "@media(hover:hover){" + rule in html, rule
         assert ("\n" + rule) not in html, rule      # never also declared bare
 
