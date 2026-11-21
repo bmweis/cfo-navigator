@@ -151,7 +151,7 @@ def test_browser_heights_widths_and_touch_target(site):
             pg.route(re.compile(r"^http://buddy\.test/.*"), Site(html).handle)
             pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
             pg.goto("http://buddy.test/tools/fpa-buddy")
-            pg.evaluate("document.getElementById('pq-all').open=true; document.querySelectorAll('details.ask-pq-row').forEach(d=>d.open=true)")
+            pg.evaluate("document.getElementById('pq-all').open=true; document.querySelectorAll('.ask-pq-toggle').forEach(b=>b.click())")
             def box(sel):
                 return pg.locator(sel).first.bounding_box()
             search = box('#past-questions button:has-text("Search")')

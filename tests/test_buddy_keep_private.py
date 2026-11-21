@@ -239,7 +239,7 @@ def test_admin_hide_is_visible_undoable_and_separate_from_private(site):
 def test_hover_backgrounds_sit_inside_a_hover_media_query(site):
     client, _, _ = site
     html = client("reader").get("/tools/fpa-buddy").text
-    for rule in (".ask-pq-sum:hover", ".ask-recent-item:hover", ".ask-turn-toggle:hover", ".ask-ctl:hover"):
+    for rule in (".ask-pq-toggle:hover", ".ask-recent-item:hover", ".ask-turn-toggle:hover", ".ask-ctl:hover"):
         assert "@media(hover:hover){" + rule in html, rule
         assert ("\n" + rule) not in html, rule      # never also declared bare
 
@@ -281,7 +281,7 @@ def test_browser_hide_and_unhide_buttons_share_one_width_and_height(site):
             pg.route(re.compile(r"^http://buddy\.test/.*"), T.Site(html).handle)
             pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
             pg.goto("http://buddy.test/tools/fpa-buddy")
-            pg.evaluate("document.querySelectorAll('details.ask-pq-row').forEach(d=>d.open=true)")
+            pg.evaluate("document.querySelectorAll('.ask-pq-toggle').forEach(b=>b.click())")
             sizes = pg.evaluate("""()=>[...document.querySelectorAll('.admin-only')].map(b=>{
                 const r=b.getBoundingClientRect(); return [b.textContent, Math.round(r.width*10)/10, Math.round(r.height*10)/10]})""")
             assert {t for t, _, _ in sizes} == {"Hide", "Unhide"}

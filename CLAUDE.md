@@ -6406,9 +6406,12 @@ library.db            # NOT in git (personal data, large). Lives beside the code
 
 - **FP&A Buddy collapsed rows (2026-10).** One rule: an answer is expanded only
   when the reader just asked it or tapped its row. (1) **Past questions** are
-  native `<details class="ask-pq-row">` (the same fold element as the 675
-  "Search past questions" section; `<summary>` exposes expanded state to
-  assistive tech, so there is no hand-set `aria-expanded`), closed on every load:
+  a `<div class="ask-pq-row">` card (**2026-11 correction: it was a native `<details>`
+  whose `<summary>` header toggled on any click; the question is now plain selectable text and
+  only a separate `.ask-pq-toggle` button at the lower right opens the hidden body, with
+  `aria-expanded` and a Show answer/Hide answer label set by the inline handler in
+  `_pq_row_html`; the same markup serves `/tools/fpa-buddy` and `/tools/fpa-buddy/questions`;
+  `/ask/history` has its own cards and is untouched**), closed on every load:
   question, byline and chevron in the row; answer, sources and the admin buttons
   in the body. Rendered through the same `_render_cited_answer`, so citations are
   unchanged. (2) **A load, including a `?c=<id>` reload, expands nothing.** The
