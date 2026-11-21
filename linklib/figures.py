@@ -988,6 +988,47 @@ def _endpoint_outliers(shifts: list[dict], ok: list[dict], rules: dict | None) -
     return notes
 
 
+# A computed shift inside one report may say "same respondents and definition" only when nothing stored for
+# its two endpoints contradicts it. Either endpoint read from the report's TEXT, an endpoint with no sample
+# size, or two different notes on the rows means the stored rows do not prove it, so the line carries a plain
+# note of how each endpoint is printed instead (ask_questions id 85: a 2021 figure stated in the text, a 2022
+# figure read from a chart, the band labelled ARR in one and revenue in the other).
+SHIFT_OUTLIER_POINTS_PER_YEAR = 15      # a computed move of more than this many points a year is noted for the admin row
+_BASIS_WORD = re.compile(r"\b(ARR|revenue|GAAP)\b", re.I)
+
+
+def _endpoint_basis_word(r: dict) -> str:
+    m = _BASIS_WORD.search(str(r.get("note") or ""))
+    w = (m.group(1) if m else str(r.get("band_basis") or "")).strip()
+    return w.upper() if w.upper() in ("ARR", "GAAP") else w.lower()
+
+
+def _same_report_unproven(a: dict, b: dict) -> bool:
+    """True when the stored rows do not support "same respondents and definition" for two endpoints of one report."""
+    na, nb = _lc(a.get("note")), _lc(b.get("note"))
+    return (_lc(a.get("read_from")) == "text" or _lc(b.get("read_from")) == "text"
+            or not str(a.get("n") or "").strip() or not str(b.get("n") or "").strip()
+            or (bool(na or nb) and na != nb))
+
+
+def _endpoint_how(r: dict) -> str:
+    rf = _lc(r.get("read_from"))
+    n = str(r.get("n") or "").strip()
+    src = "stated in the report's text" if rf == "text" else "from its chart" if rf == "chart" else "from its table" if rf == "table" else "read from the report"
+    size = f"n={n}" if n else "no sample size"
+    return f"{r['data_period']} figure {src} ({size})"
+
+
+def same_report_note(a: dict, b: dict) -> str:
+    """The plain note that replaces the same-respondents claim. States how each endpoint is printed; never says
+    or implies the figure is wrong."""
+    parts = [_endpoint_how(a), _endpoint_how(b)]
+    wa, wb = _endpoint_basis_word(a), _endpoint_basis_word(b)
+    if wa and wb and wa.lower() != wb.lower():
+        parts.append(f"band labelled {wa} for {a['data_period']}, {wb} for {b['data_period']}")
+    return "; ".join(parts)
+
+
 def _within_report_pair(series_rows: list[dict]):
     """The best pair is one report's own history: when the newest edition of a publisher's series prints
     the same figure for two or more data periods (Q2 2022, 2023, 2024, 2025 in one table), its earliest to
@@ -1077,6 +1118,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
     for r in ok:
         groups.setdefault(base(r), {}).setdefault(_lc(r.get("series") or r["source"]), []).append(r)
     shifts: list[dict] = []
+    big_moves: list[str] = []
     suppressed = 0
 
     def _emit(a: dict, b: dict, directional: bool, within_report: bool = False) -> None:
@@ -1102,9 +1144,15 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
         line = (f"{b['metric']} at {b['band'] or 'no band'} ({b['statistic'] or 'statistic not stated'}{seg_txt}): {direction} {_num(size)} "
                 f"{unit_txt}, from {v(a)} ({_ends(a)}) to {v(b)} ({_ends(b)}){span}; "
                 + ("different surveys, directional only" if directional else
-                   (f"one series: {a['series'] or a['source']}, the same report's own history (same respondents and definition)"
+                   ((f"one series: {a['series'] or a['source']}, {same_report_note(a, b)}" if _same_report_unproven(a, b)
+                     else f"one series: {a['series'] or a['source']}, the same report's own history (same respondents and definition)")
                     if within_report else f"one series: {a['series'] or a['source']}"))
                 + "; derived from stored reports")
+        yrs = max(_year_num(b["data_period"]) - _year_num(a["data_period"]), 1)
+        if kind == "points" and size / yrs > SHIFT_OUTLIER_POINTS_PER_YEAR:
+            big_moves.append(f"large move: {b['metric']} at {b['band'] or 'no band'} ({b['statistic'] or 'statistic not stated'}), "
+                             f"{_num(size)} points over {yrs} year{'s' if yrs != 1 else ''}, {_ends(a)} to {_ends(b)}; "
+                             f"check the two endpoints measure the same thing")
         shifts.append({"metric": b["metric"], "band": b["band"], "segment": b["segment"], "statistic": b["statistic"], "unit": unit, "kind": kind,
                        "metric_from": a["metric"], "line_item_differs": _lc(a["metric"]) != _lc(b["metric"]),
                        "threshold": thr, "delta": round(delta, 4), "size": round(size, 4), "directional": directional,
@@ -1157,7 +1205,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
     shifts.sort(key=lambda s: (-s["_norm"], s["line"]))
     for s in shifts:
         s.pop("_norm", None)
-    outliers = _endpoint_outliers(shifts, ok, rules)
+    outliers = _endpoint_outliers(shifts, ok, rules) + big_moves
     return {"shifts": shifts, "suppressed": suppressed, "skipped": skipped, "unpaired": unpaired, "outliers": outliers,
             "unpaired_groups": unpaired_groups}
 
@@ -1262,6 +1310,7 @@ def _row_out(r: dict, landings: dict, canonical: str) -> dict:
         "metric": r["metric"], "canonical_metric": canonical, "denominator": r["denominator"],
         "statistic": r["statistic"], "value": r["value"], "value_num": r["value_num"],
         "unit": r["unit"], "n": r["n"], "page": r["page"],
+        "read_from": r["read_from"], "note": r["note"],
         "link": land["url"], "link_note": "" if land["url"] else NO_LINK_NOTE,
         "match": "exact", "gaps": [],
         # Republished figures: the original a report cites as its source, the series a row belongs to
