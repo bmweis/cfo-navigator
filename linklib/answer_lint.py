@@ -67,12 +67,43 @@ TREND = (
 DERIVED_CHANGE = re.compile(
     r"\b(?:a\s+)?(?:drop|decline|fall|decrease|increase|rise|gain)\s+of\s+\$?\d"
     r"|\b(?:down|up)\s+\$?\d[\d.,]*\s*(?:%|points?|pts|pp|percentage points)?"
-    r"|\b\d[\d.,]*%\s+(?:(?:higher|lower|more|less)\b|(?:above|below)\b(?!\s*(?:\$|\d|the\s+\$)))", re.I)
+    r"|\b\d[\d.,]*%\s+(?:(?:higher|lower|more|less)\b|(?:above|below)\b(?!\s*(?:\$|\d|the\s+\$"
+    r"|(?:it|that|this|them|those|these|(?:the\s+)?(?:median|threshold|line|band))\b)))", re.I)
 DERIVED_LABEL = "derived, not in report"
 # A computed shift line is labelled this way instead (figures.compute_shifts).
 DERIVED_LABELS = (DERIVED_LABEL, "derived from stored reports")
 
 _SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+# A change the sentence states is a computed one when its magnitude AND unit match a computed shift line
+# (points against percent). Magnitude and unit only: it does not check which metric the sentence names, so a
+# right number on the wrong metric clears the label flag (known residual risk; reopen if a production answer shows it).
+_CHANGE_NUM = re.compile(r"\d[\d.,]*")
+_CHANGE_UNIT = re.compile(r"\s*(%|percent\b|percentage\s+points?|points?\b|pts\b|pp\b)", re.I)
+
+
+def _change_matches_computed(sent: str, shifts: list | None) -> bool:
+    """True when `sent` has at least one DERIVED_CHANGE match and every match carries a magnitude and a unit that
+    equal a computed shift's size and kind (points for "points/pts/pp", relative for "%") within 0.1."""
+    if not shifts:
+        return False
+    found = False
+    for m in DERIVED_CHANGE.finditer(sent):
+        found = True
+        n = _CHANGE_NUM.search(m.group(0))
+        if not n:
+            return False
+        try:
+            mag = float(n.group(0).replace(",", "").rstrip("."))
+        except ValueError:
+            return False
+        u = _CHANGE_UNIT.match(sent, m.start() + n.end())
+        if not u:
+            return False
+        kind = "relative" if u.group(1).lower() in ("%", "percent") else "points"
+        if not any(x.get("kind") == kind and abs(mag - float(x.get("size", -1))) < 0.1 for x in shifts):
+            return False
+    return found
 _MARKER = re.compile(r"\[\d+\]")
 _NUMBER = re.compile(r"\$?\d[\d,]*(?:\.\d+)?%?|\d+x")
 _WORD = re.compile(r"\S+")
@@ -466,7 +497,8 @@ def lint_answer(text: str, shifts: list | None = None, rows: list | None = None)
             for phrase, rx in TREND:
                 if rx.search(sent):
                     flags.append({"phrase": phrase, "snippet": sent[:200]})
-        if DERIVED_CHANGE.search(sent) and not any(lab in sent.lower() for lab in DERIVED_LABELS) and not sent.lstrip().startswith("|"):
+        if DERIVED_CHANGE.search(sent) and not any(lab in sent.lower() for lab in DERIVED_LABELS) and not sent.lstrip().startswith("|") \
+                and not _change_matches_computed(sent, shifts):
             flags.append({"phrase": "derived change without label", "snippet": sent[:200]})
         if _MARKER.search(sent):
             continue
