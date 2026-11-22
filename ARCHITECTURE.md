@@ -6926,7 +6926,12 @@ tables; `tests/test_mcp_figures.py` refuses a non-admin token on every tool.
   no agreeing row keeps its rows, flagged. A requested band keeps the
   containing printed band, else the bands either side (per report and basis),
   flagged `adjacent_band`. Bands are parsed (`parse_band`) only for ordering;
-  the printed text is untouched. A band that cannot be placed ("All") is
+  the printed text is untouched. `parse_band` reads `MM` and `million` as
+  millions ("$5MM-$10MM", "$1 - $3 Million") and "Greater than" as open-ended
+  like `$50M+`; a unit is read only when it ends at a non-letter, so
+  "5 months" stays unitless. Forms still read as a single point: "N or less" and
+  "N or more". `tests/fixtures/band_labels.json` holds every stored band label
+  with its expected parse. A band that cannot be placed ("All") is
   counted in `unplaced_bands` and a note, never silently dropped.
 - **Editions.** Default is the newest `report_year` per publisher and report
   family (the report name with its year removed). Older editions left out, and
