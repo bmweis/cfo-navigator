@@ -433,10 +433,14 @@ def draft_leak_problems(text: str) -> list[dict]:
     return out
 
 
+# A sentence about what a source prints or states ("No report prints a growth rate for this band") is not a claim that no
+# change exists; the verb exemption on the first alternative reverses part of the #795 wording. Known gap: a real claim
+# worded only that way ("No source prints year-over-year change by line, so growth can't be compared") is not flagged.
 # "no per-line change exists", "the archive has no time series", "cannot be answered directly": a claim that no change
 # is on file, made when the turn was given computed shift lines. Also a line called flat, stable or unchanged.
 _NO_CHANGE_EXISTS = re.compile(
-    r"\bno\s+(?:source|report|publisher)\b[^.\n]{0,80}\b(?:rate\s+of\s+change|year-over-year|change\s+by|growth\s+rate)\b"
+    r"\bno\s+(?:source|report|publisher)\b(?![^.\n]{0,40}\b(?:prints?|printed|states?|stated|publish(?:es|ed)?)\b)"
+    r"[^.\n]{0,80}\b(?:rate\s+of\s+change|year-over-year|change\s+by|growth\s+rate)\b"
     r"|\b(?:does|do)\s+not\s+contain\s+a\s+time[- ]series\b|\bno\s+time[- ]series\b"
     r"|\bno\s+(?:per-line|per\s+line|line-level)\s+(?:rate\s+of\s+)?change\b"
     r"|\bcannot\s+be\s+answered\s+directly\b|\bno\s+change\s+(?:exists|is\s+on\s+file)\b", re.I)
