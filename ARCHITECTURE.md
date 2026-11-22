@@ -6949,6 +6949,17 @@ tables; `tests/test_mcp_figures.py` refuses a non-admin token on every tool.
   reports table on `/admin/reader/figures` shows each report's landing URL
   (or "Not set"); it is edited on the report's own edit page (see "Per-report edit page"); `scripts/report_figure_landings.py`
   reports the resolved count read-only.
+- **Alignment audit (`scripts/audit_benchmark_alignment.py`).** A read-only,
+  reusable report for the counts the MCP cannot return (row counts, distinct
+  metric/denominator/statistic/unit/`read_from`/band values, which raw metric
+  strings resolve, unplaced bands, duplicate and conflicting cells, editions per
+  family). It calls the app's own `resolve_metric`, `parse_band`, `_family`,
+  `denominator_basis`, `is_illustrative` and `dedupe_cells`, opens the database
+  with `mode=ro` plus `PRAGMA query_only`, reads only `benchmark_*` and
+  `metric_*` tables, and writes ten CSVs and `summary.txt` to a new or empty
+  `--out-dir`. Worked-example rows are left out of every count and tallied in the
+  summary. Run it after each figures ingest. It changes no figure, report, alias,
+  band or family.
 - **Metric cards.** `metric_card` finds the workbook definition at the
   registry's card URL, else the digest article `saas-metric-<name>`.
 
