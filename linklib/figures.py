@@ -619,9 +619,37 @@ def _basis_key(s) -> str:
 _YEAR_IN_NAME = re.compile(r"\b(?:19|20)\d{2}\b")
 
 
+def _family_name(row: dict) -> str:
+    """The series part of a report's family key: its "Same series as" override when one is set,
+    else its title with years removed. Lower case, spacing collapsed. The override only groups
+    editions; the title a report is shown under is never changed."""
+    name = (row.get("series_override") or "").strip() or (row.get("report") or "")
+    return _lc(_YEAR_IN_NAME.sub("", name))
+
+
 def _family(row: dict) -> tuple[str, str]:
-    name = _YEAR_IN_NAME.sub("", row.get("report") or "")
-    return (_lc(row.get("source")), _lc(name))
+    return (_lc(row.get("source")), _family_name(row))
+
+
+def family_members(reports: list[dict], rep: dict) -> tuple[str, list[dict]]:
+    """(effective series name, the OTHER reports in the same family, newest year first) for the
+    edit page. `reports` are Library.list_benchmark_reports() rows."""
+    fam = _family(rep)
+    others = [r for r in reports if r["report_slug"] != rep["report_slug"] and _family(r) == fam]
+    others.sort(key=lambda r: (-_year_num(r["report_year"]), r["report_slug"]))
+    return fam[1], others
+
+
+def family_name_options(reports: list[dict]) -> list[str]:
+    """Series names already in use, for the edit page's pick list: each report's override, else its
+    title without the year, spelled as printed. One entry per distinct lower-case name."""
+    seen: dict[str, str] = {}
+    for r in reports:
+        label = " ".join(((r.get("series_override") or "").strip()
+                          or _YEAR_IN_NAME.sub("", r.get("report") or "")).split())
+        if label:
+            seen.setdefault(label.lower(), label)
+    return sorted(seen.values(), key=str.lower)
 
 
 # A row from a worked example is not survey data. Matched on the fields a loader fills
@@ -1277,13 +1305,14 @@ def apply_report_overrides(lib, rows: list[dict]) -> None:
     edit page (benchmark_reports.*_override). The stored rows stay as the CSV printed them; this is
     applied on read, so a reload of the zip can never undo an edit."""
     edited = {r["report_slug"]: r for r in lib.list_benchmark_reports()
-              if r["source_override"] or r["report_override"] or r["year_override"]}
+              if r["source_override"] or r["report_override"] or r["year_override"] or r["series_override"]}
     if not edited:
         return
     for row in rows:
         rep = edited.get(row.get("report_slug"))
         if rep:
             row["source"], row["report"], row["report_year"] = rep["source"], rep["report"], rep["report_year"]
+            row["series_override"] = rep["series_override"]  # read by _family; never shown
 
 
 def _fts_metric_rows(lib, text: str, cap: int = 400) -> list[dict]:
@@ -1304,6 +1333,7 @@ def _fts_metric_rows(lib, text: str, cap: int = 400) -> list[dict]:
 def _row_out(r: dict, landings: dict, canonical: str) -> dict:
     land = landings.get(r["report_slug"], {"url": "", "how": "none"})
     return {
+        "series_override": r.get("series_override", ""),  # internal: read by _family, removed before find_figures returns
         "figure_key": r["id"], "report_slug": r["report_slug"], "source": r["source"], "report": r["report"],
         "report_year": r["report_year"], "data_period": r["data_period"],
         "band_basis": r["band_basis"], "band": r["band"], "segment": r["segment"],
@@ -1887,6 +1917,8 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
             rows = [r for r in rows if r in keep[r["basis_group"]]]
         else:
             rows = rows[:limit]
+    for r in rows:
+        r.pop("series_override", None)
     return {"rows": rows, "resolution": resolution, "notes": notes, "groups": groups_out, "total_matching": total,
             "returned": len(rows), "truncated": truncated, "unplaced_bands": unplaced,
             "illustrative_left_out": illustrative_left_out, "illustrative_ids": illustrative_ids}

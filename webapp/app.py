@@ -39212,6 +39212,7 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
     try:
         rep = lib.get_benchmark_report(slug)
         landings = _fg.resolve_landings(lib) if rep else {}
+        all_reports = lib.list_benchmark_reports() if rep else []
     finally:
         lib.close()
     if rep is None:
@@ -39220,7 +39221,7 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
                                   '<h1>Report not found</h1><p>That report is not loaded.</p></div>', authed=True), status_code=404)
     v = values or {"source": rep["source"], "report": rep["report"], "report_year": rep["report_year"],
                    "landing_url": rep["landing_url_manual"], "cited_source": rep["cited_source"],
-                   "cited_source_metric": rep["cited_source_metric"]}
+                   "cited_source_metric": rep["cited_source_metric"], "series_override": rep["series_override"]}
     msg = (_digest_notice(_esc(error)) if error else "") + (_digest_notice(_esc(notice), "info") if notice else "")
     land = landings.get(slug, {"url": "", "how": "none"})
     how = {"manual": "set here", "landing_url": "the stored landing URL", "article": "the linked digest",
@@ -39239,6 +39240,19 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
         if rep[key] != rep[key + "_loaded"]:
             return f' The file said &ldquo;{_esc(rep[key + "_loaded"])}&rdquo;; clearing the box goes back to that.'
         return ""
+    # "Same series as": show what the family is right now, and who else is in it.
+    fam_now = _fg._family_name(dict(rep, series_override=v.get("series_override", "")))
+    _, fam_others = _fg.family_members(all_reports, dict(rep, series_override=v.get("series_override", "")))
+    if (v.get("series_override") or "").strip():
+        fam_line = f"Grouped under &ldquo;{_esc(fam_now)}&rdquo; (set here)."
+    else:
+        fam_line = f"Not set. Grouped by its title without the year: &ldquo;{_esc(fam_now)}&rdquo; (derived from the report title)."
+    if fam_others:
+        fam_line += " Same series now: " + "; ".join(
+            f"{_esc(o['report'])} ({_esc(o['report_year'] or 'no year')})" for o in fam_others) + "."
+    else:
+        fam_line += " No other report is in this series."
+    fam_opts = "".join(f'<option value="{_esc(n)}">' for n in _fg.family_name_options(all_reports))
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/reader/figures" style="font-size:13px;color:var(--muted);">&larr; Benchmark figures</a></p>
 <h1>{_esc(rep["report"])}</h1>
@@ -39263,6 +39277,10 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
   <label for="rf-citedm" style="{lab}">Only for metrics containing</label>
   <input type="text" id="rf-citedm" name="cited_source_metric" value="{_esc(v["cited_source_metric"])}" maxlength="120" style="{inp}">
   <p style="{hp}">Optional. If only some of this report&rsquo;s metrics are reprinted, type a word from their names, for example headcount. Blank means every metric.</p>
+  <label for="rf-series" style="{lab}">Same series as</label>
+  <input type="text" id="rf-series" name="series_override" value="{_esc(v.get("series_override", ""))}" maxlength="120" list="rf-series-list" autocomplete="off" style="{inp}">
+  <datalist id="rf-series-list">{fam_opts}</datalist>
+  <p style="{hp}">Use when the publisher renamed this report between editions, so Buddy treats the editions as one series (it uses only the newest by default and can compare across years). Pick a name already in use, or type one; give every edition of the series the same text. Leave blank to group by title. This never changes the title Buddy prints. {fam_line}</p>
   <p style="{lab}">Slug</p>
   <p style="margin:0;font-size:15px;"><code>{_esc(slug)}</code></p>
   <p style="{hp}">Can&rsquo;t be edited. The stored figures, the digest link and the next zip load all find this report by its slug.</p>
@@ -39292,7 +39310,8 @@ async def admin_figures_edit_save(request: Request, report_slug: str):
     _digest_gate(request, post=True)
     form = await request.form()
     vals = {k: str(form.get(k) or "") for k in
-            ("source", "report", "report_year", "landing_url", "cited_source", "cited_source_metric")}
+            ("source", "report", "report_year", "landing_url", "cited_source", "cited_source_metric",
+             "series_override")}
 
     def _work():
         lib = _lib()
