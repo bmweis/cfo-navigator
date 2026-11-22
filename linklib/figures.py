@@ -1066,7 +1066,138 @@ def is_estimate(r: dict) -> bool:
     return bool(_ESTIMATE.search(str(r.get("data_period") or "")) or _ESTIMATE.search(str(r.get("metric") or "")))
 
 
-def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
+# --- cross-edition chart-total guard -------------------------------------------------------------------------
+# A publisher can change what a chart shows between editions (Mostly Metrics' spend chart: summed totals near
+# 130 percent of revenue in two editions, near 100 in the next, with the same six lines). Pairing any one line
+# across that break reads one change of method as a one-year collapse. The summed stack total (the six function
+# lines summed) of one band is compared edition to edition; when it moves more than this many points between
+# consecutive editions, no line of that chart is paired across them. A total in points between editions, not per year.
+STACK_BREAK_POINTS = 15
+STACK_FUNCTIONS = ("sales", "marketing", "product", "engineering", "g&a", "support")
+_STACK_ALIASES = {"general and administrative": "g&a", "general & administrative": "g&a", "g and a": "g&a",
+                  "r&d": "engineering"}
+_MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_MONTH_WORD = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+((?:19|20)\d{2})\b", re.I)
+
+
+def stack_function(r: dict) -> str:
+    """The function a "spend: <Function>" percent-of-revenue row belongs to (one of STACK_FUNCTIONS), else ""."""
+    m = re.match(r"\s*spend\s*:\s*(.+?)\s*$", str(r.get("metric") or ""), re.I)
+    if not m or "revenue" not in _lc(r.get("denominator")):
+        return ""
+    f = _lc(m.group(1))
+    f = _STACK_ALIASES.get(f, f)
+    return f if f in STACK_FUNCTIONS else ""
+
+
+def _edition_month(r: dict) -> int:
+    """Months since year 0 of the edition, from the month and year its title prints ("February 2026 edition"),
+    else from the last ISO date of its data period, else 0 (unknown; editions then order by year only)."""
+    m = _MONTH_WORD.search(str(r.get("report") or ""))
+    if m:
+        return int(m.group(2)) * 12 + _MONTHS[m.group(1).lower()[:3]]
+    pm = _period_months(r.get("data_period"))
+    return pm or 0
+
+
+def _edition_order(r: dict) -> tuple:
+    return (_year_num(r.get("report_year")), _edition_month(r), _year_num(r.get("data_period")), str(r.get("report_slug") or ""))
+
+
+def _stack_series_key(r: dict) -> tuple:
+    return (_lc(r.get("series") or r.get("source")), _band_key(r.get("band")), _seg_key(r.get("segment")),
+            _basis_key(r.get("band_basis")), _series_denom(r), _lc(r.get("statistic")))
+
+
+def stack_totals(rows: list[dict]) -> list[dict]:
+    """The summed stack total of every (report, band, segment, basis, denominator, period, statistic) group in which
+    ALL six STACK_FUNCTIONS are stored with one value each: [{key, report_slug, order, total, row}]. A group with a
+    function missing, or a function stored with two different values, gets no total (never estimated). `row` is one
+    of the group's rows, for naming the edition and page."""
+    groups: dict[tuple, dict[str, list[dict]]] = {}
+    for r in rows:
+        f = stack_function(r)
+        if not f or r.get("value_num") is None or not _is_percent(r.get("unit")):
+            continue
+        gk = (r.get("report_slug") or r.get("report"),) + _stack_series_key(r) + (_lc(r.get("data_period")),)
+        groups.setdefault(gk, {}).setdefault(f, []).append(r)
+    out = []
+    for gk, by_f in groups.items():
+        if set(by_f) != set(STACK_FUNCTIONS):
+            continue
+        vals = {f: {round(x["value_num"], 6) for x in rs} for f, rs in by_f.items()}
+        if any(len(v) != 1 for v in vals.values()):
+            continue
+        rep = by_f["sales"][0]
+        out.append({"key": gk[1:7], "report_slug": rep.get("report_slug") or "", "order": _edition_order(rep),
+                    "total": sum(next(iter(v)) for v in vals.values()), "row": rep})
+    return out
+
+
+def load_stack_rows(lib, rows: list[dict]) -> list[dict]:
+    """Every stored "spend: <Function>" percent-of-revenue row of each report that has one in `rows`, so a stack
+    total can be summed even when the lookup asked for one function. [] when `rows` holds no such line."""
+    slugs = sorted({r.get("report_slug") for r in rows if r.get("report_slug") and stack_function(r)})
+    if not slugs:
+        return []
+    marks = ",".join("?" for _ in slugs)
+    found = [dict(x) for x in lib.conn.execute(
+        f"SELECT * FROM benchmark_figures WHERE report_slug IN ({marks}) AND lower(metric) LIKE 'spend:%'", tuple(slugs))]
+    apply_report_overrides(lib, found)
+    return [_row_out(x, {}, "") for x in found]
+
+
+def _edition_label(r: dict) -> str:
+    m = _MONTH_WORD.search(str(r.get("report") or ""))
+    if m:
+        return f"{m.group(1).capitalize()[:3]} {m.group(2)}"
+    return str(r.get("report") or r.get("report_year") or "").strip()
+
+
+def stack_break(a: dict, b: dict, totals: list[dict]) -> dict:
+    """Judge a cross-edition pair of one chart's lines. Returns {"state": ...}:
+    "none" (not a stack line, or the same report); "ok" (no consecutive-edition total between the two endpoints,
+    inclusive, moved more than STACK_BREAK_POINTS); "unknown" (a total could not be built for an endpoint, so the
+    pair is allowed and the admin row says the check was not possible); "break" with `breaks` = [(earlier, later,
+    total_earlier, total_later), ...] over the consecutive editions between the endpoints, and `after` = the
+    report_slugs of the editions after the last break (the newest side)."""
+    fa = stack_function(a)
+    if not fa or stack_function(b) != fa or (a.get("report_slug") or "") == (b.get("report_slug") or ""):
+        return {"state": "none"}
+    key = _stack_series_key(a)
+    mine = sorted((t for t in totals if t["key"] == key), key=lambda t: t["order"])
+    # one total per edition: the group of the endpoint's own period when it has one, else the newest period
+    by_ed: dict[str, dict] = {}
+    for t in mine:
+        by_ed[t["report_slug"]] = t
+    ta, tb = by_ed.get(a.get("report_slug") or ""), by_ed.get(b.get("report_slug") or "")
+    if ta is None or tb is None:
+        return {"state": "unknown"}
+    chain = [t for t in sorted(by_ed.values(), key=lambda t: t["order"]) if ta["order"] <= t["order"] <= tb["order"]]
+    breaks = [(x, y) for x, y in zip(chain, chain[1:]) if abs(y["total"] - x["total"]) > STACK_BREAK_POINTS]
+    if not breaks:
+        return {"state": "ok"}
+    last = breaks[-1][1]["order"]
+    return {"state": "break", "breaks": breaks, "after": [t["report_slug"] for t in chain if t["order"] >= last]}
+
+
+def _break_shift(brk: tuple, series_label: str, band: str, denom: str) -> dict:
+    x, y = brk
+    ra, rb = x["row"], y["row"]
+    pages = [p for p in dict.fromkeys(str(r.get("page") or "").strip() for r in (ra, rb)) if p]
+    pg = f" ({' and '.join(pages)})" if pages else ""
+    unit = " percent of revenue" if "revenue" in _lc(denom) else " percent"
+    line = (f"{series_label}: summed spend lines (the six function lines the report prints, added together) for the {band or 'no band'} band moved from "
+            f"{_num(x['total'])} to {_num(y['total'])}{unit} between the {_edition_label(ra)} and {_edition_label(rb)} "
+            f"editions{pg}. Line changes are not computed across these editions; derived from stored reports")
+    ends = lambda r: {"report_slug": r.get("report_slug", ""), "source": r.get("source", ""), "report": r.get("report", ""),
+                      "year": r.get("report_year", ""), "period": r.get("data_period", ""), "value": _num(x["total"] if r is ra else y["total"])}
+    return {"metric": "spend totals", "band": band, "segment": ra.get("segment", ""), "statistic": "", "unit": "percent",
+            "kind": "break", "break": True, "threshold": STACK_BREAK_POINTS, "delta": round(y["total"] - x["total"], 4),
+            "size": round(abs(y["total"] - x["total"]), 4), "directional": False, "from": ends(ra), "to": ends(rb), "line": line}
+
+
+def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list[dict] | None = None) -> dict:
     """{shifts, suppressed, skipped, unpaired}. `unpaired` counts, by short reason, every candidate that
     produced no line ("single edition", "same data period", "not an exact or adjacent-band figure", ...).
     A figure the report prints against no size band (a public index, "top 10") is its own series: it
@@ -1075,8 +1206,14 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
     directional, line}. A change inside one publisher's series is preferred (earliest to newest edition
     in the window); a pair across publishers is used only when no publisher has two editions, and is
     labelled directional. A cell that holds different values inside one report is skipped and named in
-    `skipped`. A republisher's row is one series with the source it cites (row["series"])."""
+    `skipped`. A republisher's row is one series with the source it cites (row["series"]).
+    `stack_rows` (load_stack_rows) lets a cross-edition pair of one spend chart's lines be judged against the chart's
+    summed total (stack_break): a total that moved more than STACK_BREAK_POINTS between consecutive editions blocks
+    every line of that chart across the break, and `breaks` carries one code-rendered note per publisher and band."""
     skipped: list[str] = []
+    break_shifts: dict[tuple, dict] = {}
+    break_warnings: list[str] = []
+    totals = stack_totals(stack_rows) if stack_rows else []
     unpaired: dict[str, int] = {}
     unpaired_groups: dict[str, list[str]] = {}
 
@@ -1181,8 +1318,9 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
                 if y <= 0:
                     continue
                 cur = by_ed.get(y)
-                if cur is None or _year_num(r["data_period"]) > _year_num(cur["data_period"]):
-                    by_ed[y] = r
+                if (cur is None or _year_num(r["data_period"]) > _year_num(cur["data_period"])
+                        or (_year_num(r["data_period"]) == _year_num(cur["data_period"]) and _edition_order(r) > _edition_order(cur))):
+                    by_ed[y] = r        # two editions in one year with the same data year: the later edition
             if len(by_ed) < 2:
                 continue
             ys = sorted(by_ed)
@@ -1192,6 +1330,34 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
                 _why("same data period in both editions")
                 tried = True
                 continue          # the same data period printed twice is not a change
+            sb = stack_break(a, b, totals) if (stack_rows is not None) else {"state": "none"}
+            if sb["state"] == "unknown":
+                w = (f"break check not possible: {a['source']} {a['metric']} at {a['band'] or 'no band'}, {_ends(a)} to {_ends(b)}: "
+                     f"a summed stack total could not be built for one of the two editions (a function line is missing), so the pair was allowed")
+                if w not in break_warnings:
+                    break_warnings.append(w)
+            if sb["state"] == "break":
+                for brk in sb["breaks"]:
+                    bk = (_stack_series_key(a)[:2], brk[0]["report_slug"], brk[1]["report_slug"])
+                    if bk not in break_shifts:
+                        break_shifts[bk] = _break_shift(brk, a.get("series") or a["source"], a["band"], a.get("denominator", ""))
+                        skipped.append("chart total moved between editions, no line paired across them: " + break_shifts[bk]["line"].rsplit("; derived", 1)[0])
+                _why("chart total moved between editions", f"{a.get('series') or a['source']} {a['metric']} at {a['band'] or 'no band'}")
+                tried = True
+                # a newer side with two or more editions still pairs inside itself; a lone newest edition prints no shift
+                after = [r2 for r2 in series_rows if (r2.get("report_slug") or "") in set(sb["after"])]
+                per_rep: dict[str, dict] = {}
+                for r2 in after:
+                    cur2 = per_rep.get(r2.get("report_slug") or "")
+                    if cur2 is None or _year_num(r2["data_period"]) > _year_num(cur2["data_period"]):
+                        per_rep[r2.get("report_slug") or ""] = r2
+                if len(per_rep) >= 2:
+                    pair = sorted(per_rep.values(), key=_edition_order)
+                    a2, b2 = pair[0], pair[-1]
+                    if _year_num(b2["data_period"]) > _year_num(a2["data_period"]) or _year_num(b2["data_period"]) <= 0:
+                        made = True
+                        _emit(a2, b2, False)
+                continue
             made = True
             _emit(a, b, False)
         if not made and len(by_series) >= 2:
@@ -1209,8 +1375,9 @@ def compute_shifts(rows: list[dict], rules: dict | None = None) -> dict:
     for s in shifts:
         s.pop("_norm", None)
     outliers = _endpoint_outliers(shifts, ok, rules) + big_moves
+    outliers = outliers + break_warnings
     return {"shifts": shifts, "suppressed": suppressed, "skipped": skipped, "unpaired": unpaired, "outliers": outliers,
-            "unpaired_groups": unpaired_groups}
+            "unpaired_groups": unpaired_groups, "breaks": list(break_shifts.values())}
 
 
 QUARTILE_ASK = re.compile(r"quartile|percentile|\bp\s?(?:10|25|75|90)\b|top\s+(?:25|10|decile)|bottom\s+(?:25|10)|upper\s+(?:half|quartile)|lower\s+quartile", re.I)
