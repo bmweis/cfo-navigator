@@ -262,7 +262,7 @@ def test_shift_notes_merges_carried_lines_into_the_pre_step(monkeypatch):
     monkeypatch.setattr(bp, "metric_segment", lambda *a, **k: "")
     monkeypatch.setattr(bp.fg, "find_figures", lambda *a, **k: {"rows": [{"report_slug": "x", "figure_key": 1}]})
     out = {"shifts": [dict(x, unit="percent") for x in FOLLOW_OWN], "suppressed": 0, "skipped": [], "unpaired": {}}
-    monkeypatch.setattr(bp.fg, "compute_shifts", lambda rows, rules=None: out)
+    monkeypatch.setattr(bp.fg, "compute_shifts", lambda rows, rules=None, **k: out)
     monkeypatch.setattr(bp.fg, "rank_shifts", lambda shifts, cap, **k: (list(shifts), {"quartile_left_out": 0, "over_cap": 0}))
     lib = SimpleNamespace(shift_rules=lambda: {})
     ps = bp.Prestep(outcome="ran")

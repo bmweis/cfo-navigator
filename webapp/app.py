@@ -34244,7 +34244,7 @@ def _report_why_html(f: dict) -> str:
     return ('<details class="rp-det"><summary><span class="disclosure-caret"></span> Shift and table details</summary>'
             f'<div class="rp-lab">Below the threshold</div><div>{below if below is not None else "&mdash;"}</div>'
             '<div class="rp-lab">Did not pair, by reason</div>' + _list(up_items)
-            + '<div class="rp-lab">Skipped (a report prints two values)</div>' + _list(p.get("shifts_skipped") or [])
+            + '<div class="rp-lab">Skipped (not computed)</div>' + _list(p.get("shifts_skipped") or [])
             + '<div class="rp-lab">Endpoint warnings</div>' + _list(p.get("shifts_outliers") or [])
             + _rows("Cut by the table row cap", tb.get("cap_dropped") or [])
             + _rows("Not placed in any table", tb.get("not_in_table") or [])
