@@ -1,4 +1,4 @@
-"""A chart whose printed total moves between editions is not paired across them (Mostly Metrics sales spend,
+"""A chart whose summed total moves between editions is not paired across them (Mostly Metrics sales spend,
 ask_questions ids 78 and 79 shape). Invented publishers and figures only: "Sample Survey Co" prints a
 "Spend by ARR band" chart of six function lines, percent of revenue, in three editions."""
 import pathlib
@@ -14,11 +14,13 @@ from linklib import figures as fg
 from linklib.db import Library
 
 BANDS = ["$1M-$5M", "$5M-$25M", "$25M-$50M", "$50M+"]
-# printed totals per band, by edition
-TOT = {"jul": [136, 130, 134, 114], "feb": [138, 128, 130, 112], "may": [100, 100, 92, 87]}
-SALES = {"jul": [48, 42, 40, 40], "feb": [48, 40, 38, 38], "may": [30, 22, 17, 14]}
-MKT = {"jul": 20, "feb": 19, "may": 11}
-ENG = {"jul": 32, "feb": 31, "may": 22}
+# summed totals per band, by edition
+TOT = {"jul": [136, 130, 134, 114], "feb": [138, 128, 130, 112], "may": [100, 100, 92, 87],
+       "apr": [136, 130, 134, 114], "nov": [137, 129, 132, 113]}
+SALES = {"jul": [48, 42, 40, 40], "feb": [48, 40, 38, 38], "may": [30, 22, 17, 14],
+         "apr": [48, 42, 40, 40], "nov": [48, 41, 39, 39]}
+MKT = {"jul": 20, "feb": 19, "may": 11, "apr": 20, "nov": 19}
+ENG = {"jul": 32, "feb": 31, "may": 22, "apr": 32, "nov": 31}
 EDITIONS = {
     "jul": ("sss-jul25", "Sample Survey Club July 2025 edition", "2025", "CY2024"),
     "feb": ("sss-feb26", "Sample Survey Club February 2026 edition", "2026", "CY2025"),
@@ -26,8 +28,8 @@ EDITIONS = {
 }
 
 
-def _chart(ed, source="Sample Survey Co", drop=()):
-    slug, title, year, dp = EDITIONS[ed]
+def _chart(ed, source="Sample Survey Co", drop=(), eds=None):
+    slug, title, year, dp = (eds or EDITIONS)[ed]
     rows = []
     for i, band in enumerate(BANDS):
         total, sales = TOT[ed][i], SALES[ed][i]
@@ -163,3 +165,54 @@ def test_prestep_puts_the_break_note_first_and_in_the_skipped_list(lib):
     log = ps.to_dict() if hasattr(ps, "to_dict") else {}
     if log:
         assert log["shifts"][0]["kind"] == "break"
+
+
+# ---- the real Mostly Metrics edition titles, slugs and years (figures invented) -------------------------------
+# The May 2026 title carries a "Mostly Metrics" prefix the others lack, and its slug (1q26) sorts BEFORE 2q25, so a slug
+# fallback would put May before February. Order must come from the month the title prints.
+MM = {
+    "apr": ("mm-benchmarking-1q25", "Benchmarking Club April 2025 edition", "2025", "CY2024"),
+    "jul": ("mm-benchmarking-2q25", "Benchmarking Club July 2025 edition", "2025", "CY2024"),
+    "nov": ("mm-benchmarking-3q25", "Benchmarking Club November 2025 edition", "2025", "CY2025"),
+    "feb": ("mm-benchmarking-4q25", "Benchmarking Club February 2026 edition", "2026", "CY2025"),
+    "may": ("mm-benchmarking-1q26", "Mostly Metrics Benchmarking Club May 2026 edition", "2026", "LTM Q1 2026"),
+}
+MM_SLUG_ORDER = ["mm-benchmarking-1q25", "mm-benchmarking-1q26", "mm-benchmarking-2q25",
+                 "mm-benchmarking-3q25", "mm-benchmarking-4q25"]          # what a slug fallback would produce
+
+
+def _load_mm(lib, eds):
+    for ed in eds:
+        slug, title, year, rows = _chart(ed, source="Mostly Metrics", eds=MM)
+        load_report(lib, slug, rows, report=title, year=year)
+
+
+def test_real_titles_order_editions_by_the_month_in_the_title():
+    reps = [{"report": t, "report_year": y, "data_period": dp, "report_slug": slug} for slug, t, y, dp in MM.values()]
+    by_slug = sorted(reps, key=lambda r: r["report_slug"])
+    assert [r["report_slug"] for r in by_slug] == MM_SLUG_ORDER        # May (1q26) sorts before July by slug alone
+    got = [r["report_slug"] for r in sorted(reps, key=fg._edition_order)]
+    print("edition order:", got)
+    assert got == ["mm-benchmarking-1q25", "mm-benchmarking-2q25", "mm-benchmarking-3q25",
+                   "mm-benchmarking-4q25", "mm-benchmarking-1q26"]
+
+
+def test_real_titles_guard_output_and_newest_side_is_may_alone(lib):
+    _load_mm(lib, ["jul", "feb", "may"])
+    out = _shifts(lib, "spend: Sales", "$25M-$50M")
+    print("note:", [b["line"] for b in out["breaks"]])
+    print("skipped:", out["skipped"])
+    assert out["shifts"] == []                                          # no Sales shift prints; July to Feb is not the latest
+    assert len(out["breaks"]) == 1
+    b = out["breaks"][0]
+    assert b["from"]["report_slug"] == "mm-benchmarking-4q25" and b["to"]["report_slug"] == "mm-benchmarking-1q26"
+    assert "Feb 2026" in b["line"] and "May 2026" in b["line"]
+    assert "summed spend lines" in b["line"] and "printed spend totals" not in b["line"]
+    assert any("chart total moved between editions" in s for s in out["skipped"])
+
+
+def test_real_titles_all_five_editions_pair_up_to_feb_and_block_at_may(lib):
+    _load_mm(lib, ["apr", "jul", "nov", "feb", "may"])
+    out = _shifts(lib, "spend: Sales", "$25M-$50M")
+    assert [b["from"]["report_slug"] for b in out["breaks"]] == ["mm-benchmarking-4q25"]
+    assert out["shifts"] == []

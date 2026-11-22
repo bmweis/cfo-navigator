@@ -1064,9 +1064,9 @@ def is_estimate(r: dict) -> bool:
 
 
 # --- cross-edition chart-total guard -------------------------------------------------------------------------
-# A publisher can change what a chart shows between editions (Mostly Metrics' spend chart: printed totals near
+# A publisher can change what a chart shows between editions (Mostly Metrics' spend chart: summed totals near
 # 130 percent of revenue in two editions, near 100 in the next, with the same six lines). Pairing any one line
-# across that break reads one change of method as a one-year collapse. The printed stack total (the six function
+# across that break reads one change of method as a one-year collapse. The summed stack total (the six function
 # lines summed) of one band is compared edition to edition; when it moves more than this many points between
 # consecutive editions, no line of that chart is paired across them. A total in points between editions, not per year.
 STACK_BREAK_POINTS = 15
@@ -1107,7 +1107,7 @@ def _stack_series_key(r: dict) -> tuple:
 
 
 def stack_totals(rows: list[dict]) -> list[dict]:
-    """The printed stack total of every (report, band, segment, basis, denominator, period, statistic) group in which
+    """The summed stack total of every (report, band, segment, basis, denominator, period, statistic) group in which
     ALL six STACK_FUNCTIONS are stored with one value each: [{key, report_slug, order, total, row}]. A group with a
     function missing, or a function stored with two different values, gets no total (never estimated). `row` is one
     of the group's rows, for naming the edition and page."""
@@ -1184,7 +1184,7 @@ def _break_shift(brk: tuple, series_label: str, band: str, denom: str) -> dict:
     pages = [p for p in dict.fromkeys(str(r.get("page") or "").strip() for r in (ra, rb)) if p]
     pg = f" ({' and '.join(pages)})" if pages else ""
     unit = " percent of revenue" if "revenue" in _lc(denom) else " percent"
-    line = (f"{series_label}: printed spend totals (the six function lines summed) for the {band or 'no band'} band moved from "
+    line = (f"{series_label}: summed spend lines (the six function lines the report prints, added together) for the {band or 'no band'} band moved from "
             f"{_num(x['total'])} to {_num(y['total'])}{unit} between the {_edition_label(ra)} and {_edition_label(rb)} "
             f"editions{pg}. Line changes are not computed across these editions; derived from stored reports")
     ends = lambda r: {"report_slug": r.get("report_slug", ""), "source": r.get("source", ""), "report": r.get("report", ""),
@@ -1205,7 +1205,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list
     labelled directional. A cell that holds different values inside one report is skipped and named in
     `skipped`. A republisher's row is one series with the source it cites (row["series"]).
     `stack_rows` (load_stack_rows) lets a cross-edition pair of one spend chart's lines be judged against the chart's
-    printed total (stack_break): a total that moved more than STACK_BREAK_POINTS between consecutive editions blocks
+    summed total (stack_break): a total that moved more than STACK_BREAK_POINTS between consecutive editions blocks
     every line of that chart across the break, and `breaks` carries one code-rendered note per publisher and band."""
     skipped: list[str] = []
     break_shifts: dict[tuple, dict] = {}
@@ -1330,7 +1330,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list
             sb = stack_break(a, b, totals) if (stack_rows is not None) else {"state": "none"}
             if sb["state"] == "unknown":
                 w = (f"break check not possible: {a['source']} {a['metric']} at {a['band'] or 'no band'}, {_ends(a)} to {_ends(b)}: "
-                     f"a printed stack total could not be built for one of the two editions (a function line is missing), so the pair was allowed")
+                     f"a summed stack total could not be built for one of the two editions (a function line is missing), so the pair was allowed")
                 if w not in break_warnings:
                     break_warnings.append(w)
             if sb["state"] == "break":

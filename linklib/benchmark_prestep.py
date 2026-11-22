@@ -1662,7 +1662,7 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub], carried: list[dict] | None
     chosen, note = fg.rank_shifts(out["shifts"], MAX_SHIFT_LINES, asked_band=next((x.band for x in bench if x.band), ""),
                                   asked_segment=next((x.segment for x in bench if x.segment), ""), text=ask_text,
                                   quartile_asked=bool(fg.QUARTILE_ASK.search(ask_text)))
-    # A chart whose printed total moved between editions prints one code-rendered note instead of the line changes
+    # A chart whose summed total moved between editions prints one code-rendered note instead of the line changes
     # across the break (figures.stack_break); the notes come first and share the print cap.
     ps.shifts = merge_shifts((list(out.get("breaks") or []) + chosen)[:MAX_SHIFT_LINES], carried)
     ps.shifts_suppressed = out["suppressed"] + note["over_cap"]
