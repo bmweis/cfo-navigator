@@ -172,14 +172,15 @@ def test_browser_heights_widths_and_touch_target(site):
                 assert abs((search["y"] + 14) - (field["y"] + field["height"] / 2)) < 1.5
             else:           # at 390 the pair wraps to its own row beneath the input
                 assert search["y"] > field["y"] + field["height"]
-            # at desktop width the meta sits in the row's top-right corner
+            # at desktop width the meta sits in the row's top-right, left of the toggle gutter
             geo = pg.evaluate("""()=>{const r=document.querySelector('.ask-pq-row'),
                 s=r.querySelector('.ask-pq-sum').getBoundingClientRect(),
                 m=r.querySelector('.ask-pq-meta').getBoundingClientRect(),
                 q=r.querySelector('.ask-pq-q').getBoundingClientRect();
                 return {sr:s.right,st:s.top,mr:m.right,mt:m.top,qr:q.right,ml:m.left}}""")
             if w >= 700:
-                assert geo["sr"] - geo["mr"] < 16 and geo["mt"] - geo["st"] < 16
+                # top-right, inset by the 52px gutter that keeps the lower-right toggle clear of it
+                assert 40 <= geo["sr"] - geo["mr"] < 60 and geo["mt"] - geo["st"] < 16
                 assert geo["qr"] <= geo["ml"] + 0.5      # question never runs under the meta
             else:
                 assert geo["mt"] > geo["st"] + 10        # stacked under the title
