@@ -176,7 +176,7 @@ class Prestep:
     table_rows_shaped: int = 0                               # rows the org/spend table shaping left out (shape_for_tables); named in the closing line
     shifts: list = field(default_factory=list)               # computed shift lines sent to the model (figures.compute_shifts)
     shifts_suppressed: int = 0                               # shifts below the threshold, left out silently
-    shifts_skipped: list = field(default_factory=list)       # cells skipped because a report prints two values
+    shifts_skipped: list = field(default_factory=list)       # cells skipped: a report prints two values, or a chart total moved between editions
     shifts_unpaired: dict = field(default_factory=dict)      # candidates that gave no line, by short reason
     shifts_unpaired_groups: dict = field(default_factory=dict)   # reason -> up to 10 group names (publisher, metric, the two editions)
     shifts_outliers: list = field(default_factory=list)      # flag-only: a shift endpoint far from other publishers' values
@@ -1652,7 +1652,8 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub], carried: list[dict] | None
                     rows.append(r)
     if not looked:
         return ""
-    out = fg.compute_shifts(rows, lib.shift_rules()) if rows else {"shifts": [], "suppressed": 0, "skipped": [], "unpaired": {}}
+    out = (fg.compute_shifts(rows, lib.shift_rules(), stack_rows=fg.load_stack_rows(lib, rows)) if rows
+           else {"shifts": [], "suppressed": 0, "skipped": [], "unpaired": {}})
     ps.shifts_unpaired = out.get("unpaired", {})
     ps.shifts_unpaired_groups = out.get("unpaired_groups", {})
     ps.shifts_outliers = out.get("outliers", [])
@@ -1661,7 +1662,9 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub], carried: list[dict] | None
     chosen, note = fg.rank_shifts(out["shifts"], MAX_SHIFT_LINES, asked_band=next((x.band for x in bench if x.band), ""),
                                   asked_segment=next((x.segment for x in bench if x.segment), ""), text=ask_text,
                                   quartile_asked=bool(fg.QUARTILE_ASK.search(ask_text)))
-    ps.shifts = merge_shifts(chosen, carried)
+    # A chart whose summed total moved between editions prints one code-rendered note instead of the line changes
+    # across the break (figures.stack_break); the notes come first and share the print cap.
+    ps.shifts = merge_shifts((list(out.get("breaks") or []) + chosen)[:MAX_SHIFT_LINES], carried)
     ps.shifts_suppressed = out["suppressed"] + note["over_cap"]
     ps.shifts_skipped = list(out["skipped"])
     if len(ps.shifts_skipped) > 10:
