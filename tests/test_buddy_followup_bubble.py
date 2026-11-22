@@ -359,7 +359,7 @@ def test_other_members_past_answers_never_bring_the_bubble(past_question_page):
         pg = browser.new_page(viewport={"width": 1280, "height": 900})
         pg.add_init_script(STUB)
         pg.goto(f.as_uri())
-        pg.click("#past-questions .ask-pq-sum")
+        pg.click("#past-questions .ask-pq-toggle")
         pg.click("#past-questions .ask-hist-answer")
         assert pg.locator("#fu, .fu").count() == 0
         assert pg.evaluate("window.__calls.length") == 0
