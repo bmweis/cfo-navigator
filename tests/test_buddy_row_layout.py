@@ -58,7 +58,7 @@ def site(monkeypatch):
 def _meta(html, start):
     i = html.index(start)
     j = html.index('<span class="ask-pq-meta">', i)
-    return html[j:html.index("</summary>", j)]
+    return html[j:html.index('<div class="ask-pq-body"', j)]
 
 
 def test_admin_sees_you_on_own_row_and_full_name_on_others(site):

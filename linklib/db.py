@@ -1667,6 +1667,10 @@ CREATE TABLE IF NOT EXISTS benchmark_reports (
     source_override TEXT NOT NULL DEFAULT '',
     report_override TEXT NOT NULL DEFAULT '',
     year_override TEXT NOT NULL DEFAULT '',
+    -- "Same series as": the edition family this report belongs to, when its title changed between
+    -- editions. Only decides which reports count as editions of one another (figures._family);
+    -- it never changes a name Buddy prints. A reload never touches it.
+    series_override TEXT NOT NULL DEFAULT '',
     row_count   INTEGER NOT NULL DEFAULT 0,
     sha256      TEXT NOT NULL DEFAULT '',
     loaded_at   TEXT NOT NULL,
@@ -2009,6 +2013,7 @@ class Library:
             "ALTER TABLE benchmark_reports ADD COLUMN source_override TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE benchmark_reports ADD COLUMN report_override TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE benchmark_reports ADD COLUMN year_override TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE benchmark_reports ADD COLUMN series_override TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE metric_registry ADD COLUMN shift_threshold REAL",
             "ALTER TABLE metric_registry ADD COLUMN shift_kind TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
@@ -8302,7 +8307,8 @@ class Library:
         return None
 
     def save_benchmark_report_edit(self, report_slug: str, *, source: str, report: str, report_year: str,
-                                   landing_url: str, cited_source: str, cited_source_metric: str) -> list[str] | None:
+                                   landing_url: str, cited_source: str, cited_source_metric: str,
+                                   series_override: str | None = None) -> list[str] | None:
         """Save the per-report edit page in one transaction. source/report/report_year are the values
         the admin sees; each is stored as an override only when it differs from what the CSV said, so
         clearing a box or typing the original back returns to the CSV value. Returns the labels of the
@@ -8327,15 +8333,20 @@ class Library:
             raise ValueError("The cited source or metric text is too long.")
         if cited_source_metric and not cited_source:
             raise ValueError("\u201cOnly for metrics containing\u201d needs a \u201cRepublished from\u201d value.")
+        if series_override is None:
+            series_override = cur.get("series_override") or ""  # a caller that does not send it keeps it
+        series_override = clean(series_override)
+        if len(series_override) > 120:
+            raise ValueError("The \u201cSame series as\u201d text is too long.")
         ov = lambda new, loaded: "" if new == clean(loaded) else new
         new_vals = {"source_override": ov(source, cur["source_loaded"]),
                     "report_override": ov(report, cur["report_loaded"]),
                     "year_override": ov(report_year, cur["report_year_loaded"]),
                     "landing_url_manual": url, "cited_source": cited_source,
-                    "cited_source_metric": cited_source_metric}
+                    "cited_source_metric": cited_source_metric, "series_override": series_override}
         labels = {"source_override": "Source", "report_override": "Report title", "year_override": "Year",
                   "landing_url_manual": "Landing URL", "cited_source": "Republished from",
-                  "cited_source_metric": "Only for metrics containing"}
+                  "cited_source_metric": "Only for metrics containing", "series_override": "Same series as"}
         changed = [labels[k] for k, v in new_vals.items() if (cur.get(k) or "") != v]
         if changed:
             sets = ", ".join(f"{k} = ?" for k in new_vals)

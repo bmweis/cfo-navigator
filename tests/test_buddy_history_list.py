@@ -151,7 +151,7 @@ def test_browser_heights_widths_and_touch_target(site):
             pg.route(re.compile(r"^http://buddy\.test/.*"), Site(html).handle)
             pg.route(re.compile(r"^https?://(?!buddy\.test).*"), lambda r: r.abort())
             pg.goto("http://buddy.test/tools/fpa-buddy")
-            pg.evaluate("document.getElementById('pq-all').open=true; document.querySelectorAll('details.ask-pq-row').forEach(d=>d.open=true)")
+            pg.evaluate("document.getElementById('pq-all').open=true; document.querySelectorAll('.ask-pq-toggle').forEach(b=>b.click())")
             def box(sel):
                 return pg.locator(sel).first.bounding_box()
             search = box('#past-questions button:has-text("Search")')
@@ -172,14 +172,15 @@ def test_browser_heights_widths_and_touch_target(site):
                 assert abs((search["y"] + 14) - (field["y"] + field["height"] / 2)) < 1.5
             else:           # at 390 the pair wraps to its own row beneath the input
                 assert search["y"] > field["y"] + field["height"]
-            # at desktop width the meta sits in the row's top-right corner
+            # at desktop width the meta sits in the row's top-right, left of the toggle gutter
             geo = pg.evaluate("""()=>{const r=document.querySelector('.ask-pq-row'),
                 s=r.querySelector('.ask-pq-sum').getBoundingClientRect(),
                 m=r.querySelector('.ask-pq-meta').getBoundingClientRect(),
                 q=r.querySelector('.ask-pq-q').getBoundingClientRect();
                 return {sr:s.right,st:s.top,mr:m.right,mt:m.top,qr:q.right,ml:m.left}}""")
             if w >= 700:
-                assert geo["sr"] - geo["mr"] < 16 and geo["mt"] - geo["st"] < 16
+                # top-right, inset by the 52px gutter that keeps the lower-right toggle clear of it
+                assert 40 <= geo["sr"] - geo["mr"] < 60 and geo["mt"] - geo["st"] < 16
                 assert geo["qr"] <= geo["ml"] + 0.5      # question never runs under the meta
             else:
                 assert geo["mt"] > geo["st"] + 10        # stacked under the title
@@ -201,7 +202,7 @@ def test_each_row_shows_a_labelled_rating(site):
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     def meta(q):
         i = sec.index(q)
-        return sec[i:sec.index("</summary>", i)]
+        return sec[i:sec.index('<div class="ask-pq-body"', i)]
     h = meta("Helpful first question")
     assert 'aria-label="Rated helpful"' in h and "&#10003; Helpful" in h.replace('<span aria-hidden="true">', "").replace("</span>", "")
     assert "ask-chip" not in meta("Unrated first question")
@@ -219,7 +220,7 @@ def test_own_row_meta_order_is_rating_then_you_then_date(site):
     sec = _section(client("reader").get("/tools/fpa-buddy").text)
     def meta(q):
         i = sec.index(q)
-        return sec[i:sec.index("</summary>", i)]
+        return sec[i:sec.index('<div class="ask-pq-body"', i)]
     rated = meta("My own rated question")
     assert rated.index("ask-chip") < rated.index(">You<") < rated.index("ask-pq-date")
     plain = meta("My own question")

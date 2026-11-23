@@ -24483,20 +24483,24 @@ _ASK_LIST_PAGE_CSS = (
 )
 
 _ASK_PQ_CSS = (
-    '.ask-pq-row{border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}\n'
-    '.ask-pq-row[open]{border-color:var(--navy);}\n'
-    '.ask-pq-sum{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 10px;padding:11px 14px;cursor:pointer;list-style:none;min-height:44px;box-sizing:border-box;}\n'
-    '.ask-pq-sum::-webkit-details-marker{display:none;}\n'
-    '@media(hover:hover){.ask-pq-sum:hover{background:var(--accent-light);border-radius:8px;}}\n'
-    '.ask-pq-row[open]>.ask-pq-sum .ask-pq-rc{transform:rotate(90deg);}\n'
-    '.ask-pq-q{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);\n'
+    # A past-question card is a container, not a <details>: the question is plain selectable text and
+    # only the toggle button (lower right of the card) opens the answer, like .ask-turn-row.
+    '.ask-pq-row{position:relative;border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px;}\n'
+    '.ask-pq-row.open{border-color:var(--navy);}\n'
+    '.ask-pq-sum{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 10px;padding:11px 52px 11px 14px;min-height:44px;box-sizing:border-box;}\n'
+    '.ask-pq-toggle{position:absolute;right:0;bottom:0;width:44px;height:44px;padding:0;border:0;border-radius:8px;background:transparent;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}\n'
+    '@media(hover:hover){.ask-pq-toggle:hover{background:var(--accent-light);}}\n'
+    '.ask-pq-toggle[aria-expanded="true"] .ask-pq-rc{transform:rotate(90deg);}\n'
+    '.ask-pq-toggle:focus-visible{outline:2px solid var(--navy);outline-offset:-2px;}\n'
+    '.ask-pq-q{flex:1 1 0;min-width:0;font-weight:600;font-size:13.5px;color:var(--navy);overflow-wrap:anywhere;\n'
+    '  user-select:text;-webkit-user-select:text;cursor:text;\n'
     '  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}\n'
-    '.ask-pq-row[open] .ask-pq-q{display:block;overflow:visible;}\n'
-    '.ask-pq-meta{flex:0 0 calc(100% - 22px);order:3;margin-left:22px;display:flex;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}\n'
+    '.ask-pq-row.open .ask-pq-q{display:block;overflow:visible;}\n'
+    '.ask-pq-meta{flex:0 0 100%;order:3;display:flex;align-items:baseline;gap:2px 10px;font-size:12px;color:var(--muted);}\n'
     '.ask-pq-ml{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center;justify-content:flex-end;flex:1 1 auto;min-width:0;}\n'
     '.ask-pq-seg{white-space:nowrap;}\n'
     '@media(min-width:700px){.ask-pq-meta{flex:0 1 auto;order:0;margin-left:auto;max-width:50%;}.ask-pq-ml{flex:0 1 auto;justify-content:flex-end;}}\n'
-    '.ask-pq-body{padding:2px 16px 14px 32px;}\n'
+    '.ask-pq-body{padding:2px 52px 14px 14px;}\n'
     '.ask-pq-heading{margin:0 0 8px;font:600 12px var(--font-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}\n'
     + _ASK_CHIP_CSS
     + ".ask-pq-foot{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;}"
@@ -24582,7 +24586,7 @@ _PQ_PAGE_SIZE = 10      # rows per page on the full list
 
 
 def _pq_row_html(r: dict, usage_user_id, authed: bool) -> str:
-    """One past-question row (a closed <details>), shared by /tools/fpa-buddy and its full list."""
+    """One past-question row (a closed container with a toggle button), shared by /tools/fpa-buddy and its full list."""
     # Byline: one shared function (_ask_byline), three cases in order.
     date = _esc((r.get("created_at") or "")[:10])
     who = _ask_byline(r, usage_user_id, authed)
@@ -24627,17 +24631,23 @@ def _pq_row_html(r: dict, usage_user_id, authed: bool) -> str:
     # then Make private and Resume. Hide shows for any row to an admin; the other two only on the
     # reader's own rows.
     foot_html = f'<div class="ask-pq-foot">{admin_controls}{resume_html}</div>' if (admin_controls or resume_html) else ""
-    # A native <details>, closed on every load: the row is the question,
-    # byline and a chevron; the answer, sources and admin buttons are the
-    # disclosure body. Same fold element the Search past questions section uses.
-    return f"""<details class="ask-pq-row">
-  <summary class="ask-pq-sum"><span class="ask-pq-rc" aria-hidden="true"></span><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{meta_html}</span></summary>
-  <div class="ask-pq-body">
+    # A plain container, closed on every load: the header is the question (selectable text) and the
+    # byline; the answer, sources and buttons are the body (hidden). Only the button at the lower
+    # right toggles it, kept in step with aria-expanded and its label. The handler is inline so the
+    # row works on every page that renders it with no shared script.
+    toggle_js = ("var r=this.closest('.ask-pq-row'),o=r.classList.toggle('open');"
+                 "r.querySelector('.ask-pq-body').hidden=!o;"
+                 "this.setAttribute('aria-expanded',o?'true':'false');"
+                 "this.setAttribute('aria-label',o?'Hide answer':'Show answer');")
+    return f"""<div class="ask-pq-row">
+  <div class="ask-pq-sum"><span class="ask-pq-q">{q_txt}</span><span class="ask-pq-meta">{meta_html}</span></div>
+  <div class="ask-pq-body" hidden>
     <div class="ask-hist-answer" style="margin:0;">{a_html}</div>
     {src_html}
     {foot_html}
   </div>
-</details>"""
+  <button type="button" class="ask-pq-toggle" aria-expanded="false" aria-label="Show answer" onclick="{toggle_js}"><span class="ask-pq-rc" aria-hidden="true"></span></button>
+</div>"""
 
 
 @app.get("/tools/fpa-buddy", response_class=HTMLResponse)
@@ -39224,6 +39234,7 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
     try:
         rep = lib.get_benchmark_report(slug)
         landings = _fg.resolve_landings(lib) if rep else {}
+        all_reports = lib.list_benchmark_reports() if rep else []
     finally:
         lib.close()
     if rep is None:
@@ -39232,7 +39243,7 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
                                   '<h1>Report not found</h1><p>That report is not loaded.</p></div>', authed=True), status_code=404)
     v = values or {"source": rep["source"], "report": rep["report"], "report_year": rep["report_year"],
                    "landing_url": rep["landing_url_manual"], "cited_source": rep["cited_source"],
-                   "cited_source_metric": rep["cited_source_metric"]}
+                   "cited_source_metric": rep["cited_source_metric"], "series_override": rep["series_override"]}
     msg = (_digest_notice(_esc(error)) if error else "") + (_digest_notice(_esc(notice), "info") if notice else "")
     land = landings.get(slug, {"url": "", "how": "none"})
     how = {"manual": "set here", "landing_url": "the stored landing URL", "article": "the linked digest",
@@ -39251,6 +39262,19 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
         if rep[key] != rep[key + "_loaded"]:
             return f' The file said &ldquo;{_esc(rep[key + "_loaded"])}&rdquo;; clearing the box goes back to that.'
         return ""
+    # "Same series as": show what the family is right now, and who else is in it.
+    fam_now = _fg._family_name(dict(rep, series_override=v.get("series_override", "")))
+    _, fam_others = _fg.family_members(all_reports, dict(rep, series_override=v.get("series_override", "")))
+    if (v.get("series_override") or "").strip():
+        fam_line = f"Grouped under &ldquo;{_esc(fam_now)}&rdquo; (set here)."
+    else:
+        fam_line = f"Not set. Grouped by its title without the year: &ldquo;{_esc(fam_now)}&rdquo; (derived from the report title)."
+    if fam_others:
+        fam_line += " Same series now: " + "; ".join(
+            f"{_esc(o['report'])} ({_esc(o['report_year'] or 'no year')})" for o in fam_others) + "."
+    else:
+        fam_line += " No other report is in this series."
+    fam_opts = "".join(f'<option value="{_esc(n)}">' for n in _fg.family_name_options(all_reports))
     body = f"""<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin/reader/figures" style="font-size:13px;color:var(--muted);">&larr; Benchmark figures</a></p>
 <h1>{_esc(rep["report"])}</h1>
@@ -39275,6 +39299,10 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
   <label for="rf-citedm" style="{lab}">Only for metrics containing</label>
   <input type="text" id="rf-citedm" name="cited_source_metric" value="{_esc(v["cited_source_metric"])}" maxlength="120" style="{inp}">
   <p style="{hp}">Optional. If only some of this report&rsquo;s metrics are reprinted, type a word from their names, for example headcount. Blank means every metric.</p>
+  <label for="rf-series" style="{lab}">Same series as</label>
+  <input type="text" id="rf-series" name="series_override" value="{_esc(v.get("series_override", ""))}" maxlength="120" list="rf-series-list" autocomplete="off" style="{inp}">
+  <datalist id="rf-series-list">{fam_opts}</datalist>
+  <p style="{hp}">Use when the publisher renamed this report between editions, so Buddy treats the editions as one series (it uses only the newest by default and can compare across years). Pick a name already in use, or type one; give every edition of the series the same text. Leave blank to group by title. This never changes the title Buddy prints. {fam_line}</p>
   <p style="{lab}">Slug</p>
   <p style="margin:0;font-size:15px;"><code>{_esc(slug)}</code></p>
   <p style="{hp}">Can&rsquo;t be edited. The stored figures, the digest link and the next zip load all find this report by its slug.</p>
@@ -39304,7 +39332,8 @@ async def admin_figures_edit_save(request: Request, report_slug: str):
     _digest_gate(request, post=True)
     form = await request.form()
     vals = {k: str(form.get(k) or "") for k in
-            ("source", "report", "report_year", "landing_url", "cited_source", "cited_source_metric")}
+            ("source", "report", "report_year", "landing_url", "cited_source", "cited_source_metric",
+             "series_override")}
 
     def _work():
         lib = _lib()

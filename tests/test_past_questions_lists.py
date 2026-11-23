@@ -52,7 +52,7 @@ def env(monkeypatch):
 
 
 def _rows(html):
-    return len(re.findall(r'<details class="ask-pq-row"', html))
+    return len(re.findall(r'<div class="ask-pq-row"', html))
 
 
 def test_all_questions_list_loads_collapsed_with_a_count(env):

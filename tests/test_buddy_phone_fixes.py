@@ -266,7 +266,7 @@ def _rows_are_aligned(pg, ul_sel):
 def test_past_question_sources_are_a_collapsed_aligned_list(phone):
     pg, _ = phone
     _open(pg)
-    pg.locator("#past-questions .ask-pq-sum").first.click()
+    pg.locator("#past-questions .ask-pq-toggle").first.click()
     disc = pg.locator("#past-questions details.ask-src-disc").first
     assert disc.evaluate("d => d.open") is False
     disc.locator("summary").click()
