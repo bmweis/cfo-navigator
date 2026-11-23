@@ -1,5 +1,5 @@
 """The benchmark alignment audit script: read-only, refuses unsafe arguments, and writes
-the eight output files. All data is invented (tests/figures_fixtures.py)."""
+the output files. All data is invented (tests/figures_fixtures.py)."""
 import csv
 import hashlib
 import os
@@ -126,6 +126,8 @@ def test_all_files_written_with_headers(tmp_path):
         "units.csv": ["value", "rows"], "band_basis.csv": ["value", "rows"],
         "bands.csv": ["band", "rows", "reports", "sources", "parsed", "placed", "band_basis_values"],
         "duplicates.csv": ["report_slug", "rows", "exact_duplicate_cells", "conflicting_cells"],
+        "conflicts.csv": ["report_slug", "data_period", "band_basis", "band", "segment", "metric", "denominator",
+                          "statistic", "unit", "differing_rows", "figure_ids", "values", "pages", "read_from"],
         "editions.csv": ["report_slug", "source", "report", "report_year", "family", "rows", "loaded_at"],
     }
     for name, cols in heads.items():
@@ -192,3 +194,28 @@ def test_summary_is_short_and_names_the_key_counts(tmp_path, capsys):
     assert len(text.splitlines()) < 60
     assert "illustrative" in text.lower() and "Mystery ratio" in text and "ambiguous" in text.lower()
     assert capsys.readouterr().out.strip() == text.strip()
+
+
+def test_conflicts_csv_lists_each_conflicting_cell_only(tmp_path):
+    """One exact duplicate (Burn multiple, band All) and one conflict (Cash Conversion Score 201 vs 200):
+    only the conflict is in conflicts.csv, with the cell key and each differing row's id, value, page and read_from."""
+    _, out = _run(tmp_path)
+    rows = _csv(out, "conflicts.csv")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["report_slug"] == "eb-2099" and r["metric"] == "Cash Conversion Score"
+    assert r["band"] == "$10M-$20M" and r["statistic"] == "median" and r["unit"] == "percent"
+    assert r["differing_rows"] == "2" and r["values"] == "201;200" and r["pages"] == "14;14" and r["read_from"] == "table;table"
+    ids = [int(x) for x in r["figure_ids"].split(";")]
+    assert ids == sorted(ids) and len(ids) == 2
+    assert "conflicts" in (out / "summary.txt").read_text()
+
+
+def test_conflicts_use_the_same_cell_key_as_dedupe_cells(tmp_path):
+    """The count in duplicates.csv and the rows in conflicts.csv come from the one cell definition."""
+    _, out = _run(tmp_path)
+    d = {r["report_slug"]: int(r["conflicting_cells"]) for r in _csv(out, "duplicates.csv")}
+    per_slug = {}
+    for r in _csv(out, "conflicts.csv"):
+        per_slug[r["report_slug"]] = per_slug.get(r["report_slug"], 0) + 1
+    assert {k: v for k, v in d.items() if v} == per_slug
