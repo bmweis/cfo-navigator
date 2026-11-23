@@ -39268,7 +39268,7 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
     if (v.get("series_override") or "").strip():
         fam_line = f"Grouped under &ldquo;{_esc(fam_now)}&rdquo; (set here)."
     else:
-        fam_line = f"Not set. Grouped by its title without the year: &ldquo;{_esc(fam_now)}&rdquo; (derived from the report title)."
+        fam_line = f"Not set. Grouped by its source and its title without the year: &ldquo;{_esc(fam_now)}&rdquo; (derived from the report title)."
     if fam_others:
         fam_line += " Same series now: " + "; ".join(
             f"{_esc(o['report'])} ({_esc(o['report_year'] or 'no year')})" for o in fam_others) + "."
@@ -39302,7 +39302,7 @@ def _figures_edit_page(slug: str, *, values: dict | None = None, error: str = ""
   <label for="rf-series" style="{lab}">Same series as</label>
   <input type="text" id="rf-series" name="series_override" value="{_esc(v.get("series_override", ""))}" maxlength="120" list="rf-series-list" autocomplete="off" style="{inp}">
   <datalist id="rf-series-list">{fam_opts}</datalist>
-  <p style="{hp}">Use when the publisher renamed this report between editions, so Buddy treats the editions as one series (it uses only the newest by default and can compare across years). Pick a name already in use, or type one; give every edition of the series the same text. Leave blank to group by title. This never changes the title Buddy prints. {fam_line}</p>
+  <p style="{hp}">Use when the publisher renamed this report, or changed how its name appears as the source, between editions, so Buddy treats the editions as one series (it uses only the newest by default and can compare across years). The name groups across sources, so pick a name no other publisher uses; give every edition of the series the same text. Leave blank to group by source and title. This never changes the title or source Buddy prints. {fam_line}</p>
   <p style="{lab}">Slug</p>
   <p style="margin:0;font-size:15px;"><code>{_esc(slug)}</code></p>
   <p style="{hp}">Can&rsquo;t be edited. The stored figures, the digest link and the next zip load all find this report by its slug.</p>

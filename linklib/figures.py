@@ -623,15 +623,30 @@ _YEAR_IN_NAME = re.compile(r"\b(?:19|20)\d{2}\b")
 
 
 def _family_name(row: dict) -> str:
-    """The series part of a report's family key: its "Same series as" override when one is set,
+    """The series name of a report's family key: its "Same series as" override when one is set,
     else its title with years removed. Lower case, spacing collapsed. The override only groups
     editions; the title a report is shown under is never changed."""
     name = (row.get("series_override") or "").strip() or (row.get("report") or "")
     return _lc(_YEAR_IN_NAME.sub("", name))
 
 
+# First element of an overridden family key. A derived key starts with a normalized source string,
+# which can never contain a NUL, so the two kinds of key cannot collide.
+SERIES_KEY = "\x00series"
+
+
 def _family(row: dict) -> tuple[str, str]:
+    """The family key. With a "Same series as" override it is (SERIES_KEY, override name): the override
+    ALONE, so editions whose source string changed still join. Without one it is (source, title
+    without years), unchanged."""
+    if (row.get("series_override") or "").strip():
+        return (SERIES_KEY, _family_name(row))
     return (_lc(row.get("source")), _family_name(row))
+
+
+def family_label(fam: tuple[str, str]) -> str:
+    """A family key as plain text for CSVs and logs."""
+    return f"series: {fam[1]}" if fam[0] == SERIES_KEY else f"{fam[0]} | {fam[1]}"
 
 
 def family_members(reports: list[dict], rep: dict) -> tuple[str, list[dict]]:
@@ -729,37 +744,49 @@ EDITION_WINDOW_COUNT = 4
 EDITION_WINDOW_YEARS = 5
 
 
+def report_editions(rows: list[dict]) -> dict:
+    """{report_slug: edition key}: the report's place in time, (year, month in title, data-period year), the
+    largest `_edition_order` of its rows (the month and data period come per row, so one value per report is
+    taken). Same-year editions of one family (February and May 2026) therefore rank by month."""
+    out: dict = {}
+    for r in rows:
+        k = _edition_order(r)[:3]
+        slug = r.get("report_slug") or r.get("report")
+        if slug not in out or k > out[slug]:
+            out[slug] = k
+    return out
+
+
 def apply_edition_window(rows: list[dict], from_year: int | None = None) -> tuple[list[dict], str]:
     """(rows inside the window, plain note naming the editions left out). A row whose
-    year cannot be read is kept (it sorts last)."""
+    year cannot be read is kept (it sorts last). Editions are ranked newest first by
+    `report_editions`, so two editions in one year are two editions, not one."""
     years = [_year_num(r["report_year"]) for r in rows if _year_num(r["report_year"]) > 0]
     if not years:
         return rows, ""
     cutoff = from_year if from_year else max(years) - EDITION_WINDOW_YEARS
-    by_family: dict[tuple, list[int]] = {}
+    ed = report_editions(rows)
+    by_family: dict[tuple, set] = {}
     for r in rows:
-        y = _year_num(r["report_year"])
-        if y > 0:
-            by_family.setdefault(_family(r), [])
-            if y not in by_family[_family(r)]:
-                by_family[_family(r)].append(y)
+        if _year_num(r["report_year"]) > 0:
+            by_family.setdefault(_family(r), set()).add(ed[r.get("report_slug") or r.get("report")])
     keep_years: dict[tuple, set] = {}
-    for fam, ys in by_family.items():
-        keep = {y for y in ys if y >= cutoff}
+    for fam, eds in by_family.items():
+        keep = {e for e in eds if e[0] >= cutoff}
         if not from_year:
             keep = set(sorted(keep, reverse=True)[:EDITION_WINDOW_COUNT])
         keep_years[fam] = keep
     fallback = ""
     if not any(keep_years.values()):
         # Nothing is inside the window: use the newest edition on file for each family, and say so.
-        keep_years = {fam: {max(ys)} for fam, ys in by_family.items()}
+        keep_years = {fam: {max(eds)} for fam, eds in by_family.items()}
         fallback = ("No edition on file falls inside the recent window"
                     + (f" (since {from_year})" if from_year else "")
                     + "; the newest edition on file is used instead. Say so plainly.")
     kept, dropped = [], set()
     for r in rows:
         y = _year_num(r["report_year"])
-        if y <= 0 or y in keep_years.get(_family(r), ()):
+        if y <= 0 or ed[r.get("report_slug") or r.get("report")] in keep_years.get(_family(r), ()):
             kept.append(r)
         else:
             dropped.add((r["report"], r["report_year"]))
@@ -2007,19 +2034,22 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
 
     # Editions.
     if not all_editions and not (year is not None and str(year).strip()):
-        newest: dict[tuple, int] = {}
+        ed = report_editions(rows)
+        newest: dict[tuple, tuple] = {}
         for r in rows:
             f = _family(r)
-            newest[f] = max(newest.get(f, -1), _year_num(r["report_year"]))
+            e = ed[r.get("report_slug") or r.get("report")]
+            if f not in newest or e > newest[f]:
+                newest[f] = e
         older = sorted({(r["report"], r["report_year"]) for r in rows
-                        if _year_num(r["report_year"]) < newest[_family(r)]})
-        rows = [r for r in rows if _year_num(r["report_year"]) == newest[_family(r)]]
+                        if ed[r.get("report_slug") or r.get("report")] < newest[_family(r)]})
+        rows = [r for r in rows if ed[r.get("report_slug") or r.get("report")] == newest[_family(r)]]
         if default_window and newest:
             # The recent window also applies to the newest edition of each report: one whose newest
             # edition is more than EDITION_WINDOW_YEARS before the newest on file (any publisher) is
             # left out, and named. The newest family always stays, so the window is never empty.
-            cutoff = max(newest.values()) - EDITION_WINDOW_YEARS
-            old_fams = {f for f, y in newest.items() if 0 < y < cutoff}
+            cutoff = max(e[0] for e in newest.values()) - EDITION_WINDOW_YEARS
+            old_fams = {f for f, e in newest.items() if 0 < e[0] < cutoff}
             if old_fams:
                 gone = sorted({(r["report"], r["report_year"]) for r in rows if _family(r) in old_fams},
                               key=lambda t: (-_year_num(t[1]), t[0]))
@@ -2033,11 +2063,12 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
                          + "; ".join(f"{n} ({y})" for n, y in older)
                          + ". Ask for all editions to see change over time.")
         rep = {r["report_slug"]: r for r in lib.list_benchmark_reports()}
-        for fam, y in newest.items():
-            later = [x for x in rep.values() if _family(x) == fam and _year_num(x["report_year"]) > y]
+        for fam, e in newest.items():
+            later = [x for x in rep.values() if _family(x) == fam and _edition_order(x)[:2] > e[:2]]
             if later:
+                later.sort(key=_edition_order, reverse=True)
                 notes.append(f"The newest {later[0]['report'] or fam[1]} on file ({later[0]['report_year']}) "
-                             f"has no figure for this; the {y} edition is the newest that does.")
+                             f"has no figure for this; the {e[0]} edition is the newest that does.")
 
     elif all_editions and (recent_window or from_year):
         rows, window_note = apply_edition_window(rows, from_year)

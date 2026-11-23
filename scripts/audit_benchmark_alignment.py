@@ -184,7 +184,7 @@ def build(conn: sqlite3.Connection, out_dir: str) -> str:
         name = rep.get("report_override") or rep["report"]
         year = rep.get("year_override") or rep["report_year"]
         fam = fg._family({"source": src, "report": name})
-        ed_out.append((rep["report_slug"], src, name, year, " | ".join(fam),
+        ed_out.append((rep["report_slug"], src, name, year, fg.family_label(fam),
                        len(by_report.get(rep["report_slug"], [])), rep["loaded_at"]))
     ed_out.sort(key=lambda t: (t[4], t[3], t[0]))
     _write_csv(out_dir, "editions.csv",
