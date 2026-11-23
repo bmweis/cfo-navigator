@@ -325,11 +325,11 @@ def test_vendors_short_description_has_a_named_width(env):
         lib.add_tool("Acme", "d", "https://acme.example.test", categories=[], approved=1)
     finally:
         lib.close()
-    assert appmod._COL_WIDTH_DESCRIPTION == 480
+    assert appmod._COL_WIDTH_DESCRIPTION == 440
     html = c.get("/admin/tools/software").text
     th = re.search(r'<th data-col="software:summary"[^>]*>Short description</th>', html).group(0)
     td = re.search(r'<td data-col="software:summary"[^>]*>', html).group(0)
-    assert "min-width:480px" in th and "min-width:480px" in td
+    assert "min-width:440px" in th and "min-width:440px" in td
     assert 'class="admin-table-cell admin-sticky-col"' in html          # the sticky Name column is unchanged
 
 
@@ -564,3 +564,24 @@ def test_browser_390px_inline_edit_stacks_its_inputs_and_does_not_scroll_sideway
     for f in ("report", "source", "report_year", "series_override", "landing_url", "cited_source", "cited_source_metric"):
         b = row.locator(f'[data-fg-field="{f}"]').bounding_box()
         assert b["x"] >= 0 and b["x"] + b["width"] <= 390, f
+
+
+def test_browser_vendors_actions_fit_at_1280_without_scroll(browser_page):
+    """Chromium only. The three action buttons never wrap, so at 1280px the vendors table must show View profile,
+    Edit and Delete with no sideways scroll (480px clipped Delete; 440px fits)."""
+    appmod, page, posts, ctx, browser = browser_page
+    lib = appmod._lib()
+    try:
+        lib.add_tool_category("FP&A", "")
+        for i in range(3):
+            lib.add_tool(f"Vendor {i}", "d", f"https://v{i}.example.test", summary="A planning tool for finance teams. " * 12,
+                         categories=["FP&A"], primary_category="FP&A", approved=1)
+    finally:
+        lib.close()
+    page.goto(ORIGIN + "/admin/tools/software")
+    page.evaluate("localStorage.setItem('cfo_admin_cols_software', JSON.stringify(['summary','primary_category','review_status']))")
+    page.reload()
+    r = page.evaluate("""()=>{const f=document.querySelector('#cmp-scroll-wrap');
+      const del=[...document.querySelectorAll('tbody button')].filter(x=>/Delete/.test(x.textContent))[0];
+      return {client:f.clientWidth, scroll:f.scrollWidth, delRight:del.getBoundingClientRect().right, frameRight:f.getBoundingClientRect().right}}""")
+    assert r["scroll"] <= r["client"] and r["delRight"] <= r["frameRight"], r

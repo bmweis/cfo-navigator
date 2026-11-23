@@ -601,7 +601,7 @@ graffiti marks on admin tables, forms, or the chat UI.
     through `_admin_sticky_col_css`) and lets a long title wrap inside it; its
     Metric column in the shift thresholds table uses `_COL_WIDTH_NAME_STICKY`.
     The Software vendors Short description column is `_COL_WIDTH_DESCRIPTION`
-    (480px), a floor for a one-to-three sentence description.
+    (440px), a floor for a one-to-three sentence description.
   Covered by `tests/test_table_format.py`, and
     guarded live by the "One table format" row on `/admin/checks`
     (`brand_check.table_standard_problems`/`table_override_problems`): it

@@ -2294,10 +2294,11 @@ _COL_WIDTH_VENDOR = 160       # A short vendor/company label (Railway,
 _REPORT_CARD_BREAKPOINT = 1100  # FP&A Buddy report: below this the table becomes stacked cards, so a landscape
                                 # phone (about 844px) and a portrait iPad keep cards. The five columns need about
                                 # 1,040px (Question 420 + Date 140 + Asker 160 + Settings and Cost ~320).
-_COL_WIDTH_DESCRIPTION = 480   # A one-to-three sentence description that is the point of its row (the Software vendors
-                               # table's Short description): measured on 400-character summaries at 1280px, 480 takes a
-                               # row from 235px (15 lines at 260) to 150px and still leaves the other columns in view;
-                               # 560 saves a little more but pushes Primary use off the screen.
+_COL_WIDTH_DESCRIPTION = 440   # A one-to-three sentence description that is the point of its row (the Software vendors
+                               # table's Short description). The action buttons never wrap, so this is the widest value
+                               # at which View profile, Edit and Delete still fit at 1280px with Primary use and Review
+                               # status showing and no sideways scroll (480 scrolls 40px and clips Delete; 420 and 440
+                               # both fit). On 420-character summaries the tallest row is 171px at 440 (150px at 480).
 _COL_WIDTH_REPORT_TITLE = 420  # A report or digest title, which can run to 90+
                               # characters (the figures page's Report column,
                               # the digests preview's Title column). The cells
