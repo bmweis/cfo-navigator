@@ -46,8 +46,8 @@ def site(monkeypatch):
 
 def _row(html, title):
     i = html.index(title)
-    start = html.rindex('<details class="ask-pq-row">', 0, i)
-    return html[start:html.index("</details>", i)]
+    start = html.rindex('<div class="ask-pq-row">', 0, i)
+    return html[start:html.index("</button>\n</div>", i)]
 
 
 @pytest.mark.parametrize("path", ["/tools/fpa-buddy/questions", "/ask/history"])

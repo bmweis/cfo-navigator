@@ -355,8 +355,8 @@ BRAND.md's Status chips and `tests/test_status_chips.py`.
 **Admin-only controls (2026-10).** One `.admin-only` class in `_CSS` (`webapp/app.py`) draws every control only an admin sees on a public page: outlined, 1px `--seafoam-deep` border and text, 28px/6px (`.admin-only-page`: 42px/10px). It replaced `.tool-admin-btn`, `.tp-admin-btn` and `.ask-ctl-admin`; Hide/Unhide, Mark reviewed (`_review_status_action_html`), "+ Add tool", the Manage links and the profile Edit buttons all use it. The Reader card is a surface and keeps a seafoam fill with a 1px border (`_ADMIN_ONLY_BORDER`). See BRAND.md and `tests/test_admin_only_controls.py`.
 
 **FP&A Buddy collapsed rows (2026-10).** Every past or recent question is a
-collapsed, click-expandable row. Past questions are `<details class="ask-pq-row">`
-(closed on load); a `?c=` load no longer fetches the transcript, it highlights the
+collapsed, click-expandable row. Past questions are `<div class="ask-pq-row">` containers
+(closed on load; the question is selectable text and only the 44px `.ask-pq-toggle` button at the card's lower right opens the body, with `aria-expanded` and a "Show answer"/"Hide answer" label, the handler inline in `_pq_row_html`; updated 2026-11, it was a `<details>`/`<summary>` whose whole header toggled); a `?c=` load no longer fetches the transcript, it highlights the
 matching Recent conversations row; a follow-up folds earlier turns to
 `.ask-turn-row` containers (selectable question text plus a separate 44px `.ask-turn-toggle` button, `aria-expanded` and an "Show answer"/"Hide answer" label; the text itself never toggles) and keeps the newest open. The follow-up bubble's send
 control is an icon button (`.fu-send`, 44px hit area) and the three question inputs
@@ -6926,7 +6926,12 @@ tables; `tests/test_mcp_figures.py` refuses a non-admin token on every tool.
   no agreeing row keeps its rows, flagged. A requested band keeps the
   containing printed band, else the bands either side (per report and basis),
   flagged `adjacent_band`. Bands are parsed (`parse_band`) only for ordering;
-  the printed text is untouched. A band that cannot be placed ("All") is
+  the printed text is untouched. `parse_band` reads `MM` and `million` as
+  millions ("$5MM-$10MM", "$1 - $3 Million") and "Greater than" as open-ended
+  like `$50M+`; a unit is read only when it ends at a non-letter, so
+  "5 months" stays unitless. Forms still read as a single point: "N or less" and
+  "N or more". `tests/fixtures/band_labels.json` holds every stored band label
+  with its expected parse. A band that cannot be placed ("All") is
   counted in `unplaced_bands` and a note, never silently dropped.
 - **Editions.** Default is the newest `report_year` per publisher and report
   family (the report name with its year removed). Older editions left out, and

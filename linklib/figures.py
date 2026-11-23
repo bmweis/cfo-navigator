@@ -568,8 +568,11 @@ def detect_metrics(lib, text: str) -> list[dict]:
 
 # --- bands ---------------------------------------------------------------------
 
-_BAND_NUM = re.compile(r"(\d+(?:\.\d+)?)\s*([kmb])?(?![a-z])", re.I)
-_UNIT = {"k": 1e3, "m": 1e6, "b": 1e9}
+# "MM" and "million" are millions: a unit followed by another letter used to drop the unit
+# ($5MM read as 5, $10MM as 1). The unit must still end at a non-letter, so "5 months" and
+# "10 employees" stay unitless.
+_BAND_NUM = re.compile(r"(\d+(?:\.\d+)?)\s*(mm|million|[kmb])?(?![a-z])", re.I)
+_UNIT = {"k": 1e3, "m": 1e6, "mm": 1e6, "million": 1e6, "b": 1e9}
 
 
 def parse_band(text) -> dict | None:
@@ -599,7 +602,7 @@ def parse_band(text) -> dict | None:
     v = n * _UNIT.get(u, 1)
     if re.search(r"(<|under|below|less than|up to)", s):
         return {"lo": 0.0, "hi": v, "kind": kind}
-    if re.search(r"(>|over|above|more than|at least)|\+", s):
+    if re.search(r"(>|over|above|more than|greater than|at least)|\+", s):
         return {"lo": v, "hi": float("inf"), "kind": kind}
     return {"lo": v, "hi": v, "kind": kind}
 
