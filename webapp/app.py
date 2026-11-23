@@ -27344,6 +27344,18 @@ _SCRIPT_REGISTRY = [
      ["OPENAI_API_KEY (optional; without it only the full-text half prints)"],
      ["python -m scripts.probe_digest_rank --db /data/library.db --question \"...\" --watch 4801,4802",
       "python -m scripts.probe_digest_rank --db /data/library.db --question \"...\" --watch-text \"High Alpha\""]),
+    ("audit_benchmark_alignment.py", "scripts.audit_benchmark_alignment", "Reusable diagnostic",
+     "Read-only audit of the benchmark figures, for the counts the MCP cannot return: every raw "
+     "metric string with its row count and whether it resolves to a canonical metric, canonical "
+     "metrics with zero rows, denominators, statistics, units, read_from values, bands the parser "
+     "cannot place, duplicate and conflicting cells per report, and editions per report family. "
+     "Writes ten CSV files and summary.txt to a new or empty output folder. Uses the app's own "
+     "functions; leaves worked-example rows out of the counts and reports how many there are. "
+     "Opens the database with mode=ro (never the Library class); reads only benchmark_ and metric_ "
+     "tables.",
+     "After each figures ingest, and before changing any alias, band or family rule.",
+     ["None beyond the database path"],
+     ["python -m scripts.audit_benchmark_alignment --db /data/library.db --out-dir /tmp/alignment-audit"]),
     ("report_figure_landings.py", "scripts.report_figure_landings", "Reusable diagnostic",
      "Read-only report of how many loaded benchmark reports resolve to a landing URL, by which "
      "rule (set on /admin/reader/figures, stored, linked digest, or digest slug), and which do "
