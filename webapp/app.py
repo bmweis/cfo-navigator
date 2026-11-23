@@ -27349,7 +27349,7 @@ _SCRIPT_REGISTRY = [
      "metric string with its row count and whether it resolves to a canonical metric, canonical "
      "metrics with zero rows, denominators, statistics, units, read_from values, bands the parser "
      "cannot place, duplicate and conflicting cells per report, and editions per report family. "
-     "Writes ten CSV files and summary.txt to a new or empty output folder. Uses the app's own "
+     "Writes eleven CSV files (conflicts.csv lists each conflicting cell with its figure ids, values and pages) and summary.txt to a new or empty output folder. Uses the app's own "
      "functions; leaves worked-example rows out of the counts and reports how many there are. "
      "Opens the database with mode=ro (never the Library class); reads only benchmark_ and metric_ "
      "tables.",

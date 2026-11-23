@@ -6961,8 +6961,12 @@ tables; `tests/test_mcp_figures.py` refuses a non-admin token on every tool.
   family). It calls the app's own `resolve_metric`, `parse_band`, `_family`,
   `denominator_basis`, `is_illustrative` and `dedupe_cells`, opens the database
   with `mode=ro` plus `PRAGMA query_only`, reads only `benchmark_*` and
-  `metric_*` tables, and writes ten CSVs and `summary.txt` to a new or empty
-  `--out-dir`. Worked-example rows are left out of every count and tallied in the
+  `metric_*` tables, and writes eleven CSVs and `summary.txt` to a new or empty
+  `--out-dir`. `conflicts.csv` lists each conflicting cell (one row per cell:
+  the cell key, then the figure ids, values, pages and `read_from` of the rows that
+  disagree, `;`-joined in figure-id order); `figures._unique_cells` is the one
+  definition of a cell, used by `dedupe_cells`, `cell_conflicts` and the script, so
+  `duplicates.csv`'s count and `conflicts.csv`'s rows cannot drift. Worked-example rows are left out of every count and tallied in the
   summary. Run it after each figures ingest. It changes no figure, report, alias,
   band or family.
 - **Metric cards.** `metric_card` finds the workbook definition at the

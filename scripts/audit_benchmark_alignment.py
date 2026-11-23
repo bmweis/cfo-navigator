@@ -4,7 +4,7 @@
 Answers, in files you can paste or upload: how many rows, which raw metric strings
 exist and whether each resolves to a canonical metric, which denominators, statistics,
 units, `read_from` values and bands are stored, which bands the parser cannot place,
-which reports hold duplicate or conflicting cells, and which editions exist per report
+which reports hold duplicate or conflicting cells (and which cells, in conflicts.csv), and which editions exist per report
 family. Run it after each ingest.
 
 It uses the app's own functions (`linklib.figures`: resolve_metric, parse_band,
@@ -22,8 +22,9 @@ Usage (production, over `railway ssh`):
     python -m scripts.audit_benchmark_alignment --db /data/library.db --out-dir /tmp/alignment-audit
 
 Files written: metrics.csv, canonical.csv, denominators.csv, statistics.csv,
-read_from.csv, units.csv, band_basis.csv, bands.csv, duplicates.csv, editions.csv,
-summary.txt (the same text is printed to stdout).
+read_from.csv, units.csv, band_basis.csv, bands.csv, duplicates.csv, conflicts.csv (one row
+per conflicting cell: the cell key, then the figure ids, values, pages and read_from of the rows
+that disagree), editions.csv, summary.txt (the same text is printed to stdout).
 """
 from __future__ import annotations
 
@@ -176,6 +177,22 @@ def build(conn: sqlite3.Connection, out_dir: str) -> str:
     _write_csv(out_dir, "duplicates.csv",
                ["report_slug", "rows", "exact_duplicate_cells", "conflicting_cells"], dup_out)
 
+    # --- conflicts.csv: every conflicting cell (same cell key, different values), so each can be
+    # checked against the report. One row per cell; figure_ids, values, pages and read_from are
+    # ";"-joined in the same order (lowest figure id first). Same cell key as dedupe_cells.
+    conf_out = []
+    for slug in sorted(by_report):
+        for grp in fg.cell_conflicts([dict(r, gaps=[]) for r in by_report[slug]]):
+            grp = sorted(grp, key=lambda x: x["id"])
+            f = grp[0]
+            conf_out.append((slug, f["data_period"], f["band_basis"], f["band"], f["segment"], f["metric"],
+                             f["denominator"], f["statistic"], f["unit"], len(grp),
+                             ";".join(str(g["id"]) for g in grp), ";".join(str(g["value"]) for g in grp),
+                             ";".join(str(g["page"]) for g in grp), ";".join(str(g["read_from"]) for g in grp)))
+    _write_csv(out_dir, "conflicts.csv",
+               ["report_slug", "data_period", "band_basis", "band", "segment", "metric", "denominator",
+                "statistic", "unit", "differing_rows", "figure_ids", "values", "pages", "read_from"], conf_out)
+
     # --- editions.csv: effective names (an admin override wins, as in the app) --------------
     ed_out = []
     for rep in conn.execute("SELECT * FROM benchmark_reports"):
@@ -213,7 +230,7 @@ def build(conn: sqlite3.Connection, out_dir: str) -> str:
     if not unresolved:
         L.append("  none")
     L.append("Files: metrics, canonical, denominators, statistics, read_from, units, band_basis, bands, "
-             "duplicates, editions (.csv)")
+             "duplicates, conflicts, editions (.csv)")
     text = "\n".join(L) + "\n"
     with open(os.path.join(out_dir, "summary.txt"), "w", encoding="utf-8") as f:
         f.write(text)

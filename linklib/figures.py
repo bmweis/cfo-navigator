@@ -1765,12 +1765,11 @@ def band_sort_key(band) -> tuple:
 _PER_HEAD_NAME = re.compile(r"\bper\b|/|%|percent|growth|attrition|turnover")
 
 
-def dedupe_cells(rows: list[dict]) -> tuple[list[dict], int, int]:
-    """Collapse identical rows inside one report (same period, band, segment, metric, denominator,
-    statistic, unit and value: the same cell extracted twice). Where one cell holds different values
-    (201 and 200), both stay and each says "values differ within the report". Returns
-    (rows, duplicates_removed, conflicting_cells). First stored row (lowest figure_key) is kept."""
-    seen: dict[tuple, dict] = {}
+def _unique_cells(rows: list[dict]) -> tuple[list[dict], int, dict]:
+    """The one place a "cell" is defined: (report, data_period, band_basis, band, segment, metric,
+    denominator, statistic, unit). Returns (rows kept in figure_key order with exact duplicates dropped,
+    duplicates_removed, {cell: [kept rows]}). A cell holding more than one kept row is a conflict."""
+    seen: set = set()
     cells: dict[tuple, list[dict]] = {}
     out: list[dict] = []
     removed = 0
@@ -1781,9 +1780,25 @@ def dedupe_cells(rows: list[dict]) -> tuple[list[dict], int, int]:
         if full in seen:
             removed += 1
             continue
-        seen[full] = r
+        seen.add(full)
         cells.setdefault(cell, []).append(r)
         out.append(r)
+    return out, removed, cells
+
+
+def cell_conflicts(rows: list[dict]) -> list[list[dict]]:
+    """Every conflicting cell: the group of kept rows that share one cell but print different values.
+    Uses the same cell definition as dedupe_cells, so the two cannot drift."""
+    _out, _removed, cells = _unique_cells(rows)
+    return [grp for grp in cells.values() if len(grp) > 1]
+
+
+def dedupe_cells(rows: list[dict]) -> tuple[list[dict], int, int]:
+    """Collapse identical rows inside one report (same period, band, segment, metric, denominator,
+    statistic, unit and value: the same cell extracted twice). Where one cell holds different values
+    (201 and 200), both stay and each says "values differ within the report". Returns
+    (rows, duplicates_removed, conflicting_cells). First stored row (lowest figure_key) is kept."""
+    out, removed, cells = _unique_cells(rows)
     conflicts = 0
     for grp in cells.values():
         if len(grp) > 1:
