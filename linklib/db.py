@@ -8306,17 +8306,26 @@ class Library:
                 return r
         return None
 
-    def save_benchmark_report_edit(self, report_slug: str, *, source: str, report: str, report_year: str,
-                                   landing_url: str, cited_source: str, cited_source_metric: str,
-                                   series_override: str | None = None) -> list[str] | None:
-        """Save the per-report edit page in one transaction. source/report/report_year are the values
-        the admin sees; each is stored as an override only when it differs from what the CSV said, so
-        clearing a box or typing the original back returns to the CSV value. Returns the labels of the
-        fields that changed, or None for an unknown report. Raises ValueError (nothing written) for a
-        bad value."""
+    # The seven fields the per-report edit page, the inline editor and bulk edit may change. Everything else on a
+    # report (its slug, row counts, load date, sha256, and the figures themselves) is stored or computed and is
+    # never written from the admin UI.
+    REPORT_EDIT_FIELDS = ("source", "report", "report_year", "landing_url", "cited_source", "cited_source_metric",
+                          "series_override")
+
+    def report_edit_values(self, report_slug: str) -> dict | None:
+        """The seven editable fields of one report as the edit page shows them (effective source, title and year;
+        the admin-typed landing URL), or None for an unknown report."""
         cur = self.get_benchmark_report(report_slug)
         if cur is None:
             return None
+        return {"source": cur["source"], "report": cur["report"], "report_year": cur["report_year"],
+                "landing_url": cur["landing_url_manual"], "cited_source": cur["cited_source"],
+                "cited_source_metric": cur["cited_source_metric"], "series_override": cur["series_override"]}
+
+    def _prepare_report_edit(self, cur: dict, *, source: str, report: str, report_year: str, landing_url: str,
+                             cited_source: str, cited_source_metric: str, series_override: str | None) -> tuple[dict, list[str]]:
+        """Validates one report's edit and returns (columns to write, labels of what changed). Writes nothing.
+        Raises ValueError for a bad value."""
         clean = lambda v: " ".join((v or "").split())
         source, report, report_year = clean(source), clean(report), clean(report_year)
         if not report:
@@ -8348,12 +8357,69 @@ class Library:
                   "landing_url_manual": "Landing URL", "cited_source": "Republished from",
                   "cited_source_metric": "Only for metrics containing", "series_override": "Same series as"}
         changed = [labels[k] for k, v in new_vals.items() if (cur.get(k) or "") != v]
+        return new_vals, changed
+
+    def _write_report_edit(self, report_slug: str, new_vals: dict) -> None:
+        sets = ", ".join(f"{k} = ?" for k in new_vals)
+        self.conn.execute(f"UPDATE benchmark_reports SET {sets} WHERE report_slug = ?",
+                          (*new_vals.values(), report_slug))
+
+    def save_benchmark_report_edit(self, report_slug: str, *, source: str, report: str, report_year: str,
+                                   landing_url: str, cited_source: str, cited_source_metric: str,
+                                   series_override: str | None = None) -> list[str] | None:
+        """Save one report's edit in one transaction. THE write path: the per-report edit page, the inline editor
+        and bulk edit all end here. source/report/report_year are the values the admin sees; each is stored as an
+        override only when it differs from what the CSV said, so clearing a box or typing the original back returns
+        to the CSV value. series_override=None keeps the stored value (clearing it takes an explicit ""). Returns the
+        labels of the fields that changed, or None for an unknown report. Raises ValueError (nothing written) for a
+        bad value."""
+        cur = self.get_benchmark_report(report_slug)
+        if cur is None:
+            return None
+        new_vals, changed = self._prepare_report_edit(
+            cur, source=source, report=report, report_year=report_year, landing_url=landing_url,
+            cited_source=cited_source, cited_source_metric=cited_source_metric, series_override=series_override)
         if changed:
-            sets = ", ".join(f"{k} = ?" for k in new_vals)
-            self.conn.execute(f"UPDATE benchmark_reports SET {sets} WHERE report_slug = ?",
-                              (*new_vals.values(), report_slug))
+            self._write_report_edit(report_slug, new_vals)
             self.conn.commit()
         return changed
+
+    def bulk_set_report_field(self, report_slugs: list[str], field: str, value: str) -> list[dict]:
+        """Sets ONE editable field to one value on every listed report, through the same validation as
+        save_benchmark_report_edit, all in one transaction: if any report refuses the value, nothing is written
+        and ValueError names it. Other fields and other reports are never touched. Returns, per report in the order
+        given, {"slug", "report", "field", "old", "new", "changed"} with old and new as the admin sees them."""
+        if field not in self.REPORT_EDIT_FIELDS:
+            raise ValueError("That field can't be edited here.")
+        slugs = list(dict.fromkeys(report_slugs))
+        if not slugs:
+            raise ValueError("No reports were selected.")
+        plan = []
+        for slug in slugs:
+            cur = self.get_benchmark_report(slug)
+            if cur is None:
+                raise ValueError(f"Unknown report: {slug}. Nothing was changed.")
+            vals = self.report_edit_values(slug)
+            old = vals[field]
+            vals[field] = value
+            try:
+                new_vals, changed = self._prepare_report_edit(cur, **vals)
+            except ValueError as e:
+                raise ValueError(f"{cur['report']} ({slug}): {e} Nothing was changed.") from None
+            plan.append((slug, cur["report"], old, vals[field], new_vals, changed))
+        results = []
+        try:
+            for slug, title, old, new, new_vals, changed in plan:
+                if changed:
+                    self._write_report_edit(slug, new_vals)
+                results.append({"slug": slug, "report": title, "field": field, "old": old,
+                                "new": " ".join((new or "").split()) if field != "landing_url" else (new or "").strip(),
+                                "changed": bool(changed)})
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return results
 
     def figures_summary(self) -> dict:
         one = lambda sql: self.conn.execute(sql).fetchone()[0]

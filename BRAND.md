@@ -596,7 +596,12 @@ graffiti marks on admin tables, forms, or the chat UI.
   - **Sticky Name column** on the Software and Communities lists: one pinned
     column holding the checkbox and the name, `_COL_WIDTH_NAME_STICKY` (230px,
     26% of an 874px landscape phone). It is a cap for a pinned column, not
-    `_COL_WIDTH_NAME`, which is a floor for an unpinned one.
+    `_COL_WIDTH_NAME`, which is a floor for an unpinned one. The Benchmark figures
+    reports table pins its Report column too (`_COL_WIDTH_REPORT_STICKY`, 320px,
+    through `_admin_sticky_col_css`) and lets a long title wrap inside it; its
+    Metric column in the shift thresholds table uses `_COL_WIDTH_NAME_STICKY`.
+    The Software vendors Short description column is `_COL_WIDTH_DESCRIPTION`
+    (480px), a floor for a one-to-three sentence description.
   Covered by `tests/test_table_format.py`, and
     guarded live by the "One table format" row on `/admin/checks`
     (`brand_check.table_standard_problems`/`table_override_problems`): it
