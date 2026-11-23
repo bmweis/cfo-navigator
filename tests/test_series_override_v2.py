@@ -29,32 +29,47 @@ def _titles(r):
     return sorted({x["report"] for x in r["rows"]})
 
 
-KEYBANC = [  # (slug, source string as stored, invented title, year)
-    ("kb-2020", "KeyBanc Capital Markets (summary by David Skok, forEntrepreneurs)", "SaaS Survey 2020", "2020"),
-    ("kb-2021", "KeyBanc Capital Markets", "Private SaaS Company Survey 2021", "2021"),
-    ("kb-2022", "KeyBanc Capital Markets", "Private SaaS Company Survey 2022", "2022"),
-    ("kb-2023", "KeyBanc Capital Markets and Sapphire Ventures", "Annual SaaS Survey 2023", "2023"),
-    ("kb-2025", "KeyBanc Capital Markets and Sapphire Ventures", "Annual SaaS Survey 2025", "2025"),
-    ("kb-2018", "KeyBanc Capital Markets (KBCM Technology Group) (summary by David Skok, forEntrepreneurs)", "SaaS Survey 2018", "2018"),
-    ("kb-2011", "Pacific Crest Securities (summary by David Skok, forEntrepreneurs)", "SaaS Survey 2011", "2011"),
+SKOK = "(summary by David Skok, forEntrepreneurs)"
+KEYBANC = [  # (slug, source as stored, title as stored, year): the 11 real reports, figures invented
+    ("skok-kbcm-2011", f"Pacific Crest Securities {SKOK}",
+     "Private SaaS Company Survey 2011 (Pacific Crest Securities; summary by David Skok)", "2011"),
+    ("skok-kbcm-2016", f"Pacific Crest Securities {SKOK}",
+     "Private SaaS Company Survey 2016 (Pacific Crest, now KeyBanc Capital Markets; summary by David Skok)", "2016"),
+    ("skok-kbcm-2017", f"KeyBanc Capital Markets {SKOK}", "Private SaaS Company Survey 2017 (summary by David Skok)", "2017"),
+    ("skok-kbcm-2018", f"KeyBanc Capital Markets (KBCM Technology Group) {SKOK}",
+     "Private SaaS Company Survey 2018 (summary by David Skok)", "2018"),
+    ("skok-kbcm-2019", f"KeyBanc Capital Markets {SKOK}", "Private SaaS Company Survey 2019 (summary by David Skok)", "2019"),
+    ("skok-kbcm-2020", f"KeyBanc Capital Markets {SKOK}",
+     "Private SaaS Company Survey 2020, COVID edition (summary by David Skok)", "2020"),
+    ("kbcm-saas-survey-2021", "KeyBanc Capital Markets", "Private SaaS Company Survey", "2021"),
+    ("kbcm-2022", "KeyBanc Capital Markets", "Private SaaS Company Survey", "2022"),
+    ("kbcm-2023", "KeyBanc Capital Markets and Sapphire Ventures",
+     "KeyBanc Capital Markets and Sapphire Ventures SaaS Survey", "2023"),
+    ("kbcm-2024", "KeyBanc Capital Markets and Sapphire Ventures",
+     "KeyBanc Capital Markets and Sapphire Ventures SaaS Survey 2024", "2024"),
+    ("kbcm-2025", "KeyBanc Capital Markets and Sapphire Ventures",
+     "KeyBanc Capital Markets and Sapphire Ventures SaaS Survey 2025", "2025"),
 ]
 
 
 def _load_keybanc(lib):
     for slug, src, title, yr in KEYBANC:
-        load_report(lib, slug, [frow(report=title, year=yr, source=src, value="100")])
+        load_report(lib, slug, [frow(report=title, year=yr, source=src, value=yr[-2:])])
 
 
-def test_override_alone_joins_changed_source_strings(lib):
+def test_keybanc_is_one_series_across_five_source_spellings(lib):
     _load_keybanc(lib)
-    assert len(_titles(fg.find_figures(lib, "Net revenue retention"))) > 3  # source spellings keep them apart
+    assert len({r[1] for r in KEYBANC}) == 5 and len(KEYBANC) == 11
+    # Before: the spellings keep them in several families, so several reports are "newest".
+    assert len({x["report_year"] for x in fg.find_figures(lib, "Net revenue retention")["rows"]}) > 1
     for slug, *_ in KEYBANC:
         _set(lib, slug, "KeyBanc SaaS survey")
     r = fg.find_figures(lib, "Net revenue retention")
-    assert _titles(r) == ["Annual SaaS Survey 2025"]
-    assert any("Older editions exist and were left out" in n and "SaaS Survey 2011" in n for n in r["notes"])
+    assert {x["report_year"] for x in r["rows"]} == {"2025"}
+    assert any("Older editions exist and were left out" in n and "(2011)" in n for n in r["notes"])
     allr = fg.find_figures(lib, "Net revenue retention", all_editions=True)
-    assert len(_titles(allr)) == len(KEYBANC)
+    assert {x["report_slug"] for x in allr["rows"]} == {k[0] for k in KEYBANC}
+    assert len({x["report_slug"] for x in allr["rows"]}) == 11
 
 
 def test_benchmarkit_and_drivetrain_join(lib):
