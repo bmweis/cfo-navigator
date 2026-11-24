@@ -1425,7 +1425,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list
     big_moves: list[str] = []
     suppressed = 0
 
-    def _emit(a: dict, b: dict, directional: bool, within_report: bool = False) -> None:
+    def _emit(a: dict, b: dict, directional: bool, within_report: bool = False, newest: bool = False) -> None:
         nonlocal suppressed
         thr, kind = shift_rule(b["unit"], b.get("canonical_metric", ""), rules)
         delta = b["value_num"] - a["value_num"]
@@ -1464,7 +1464,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list
                                 "value": a["value"]},
                        "to": {"report_slug": b.get("report_slug", ""), "source": b["source"], "report": b["report"], "year": b["report_year"], "period": b["data_period"],
                               "value": b["value"]},
-                       "line": line, "_norm": size / thr})
+                       "newest_edition": newest, "line": line, "_norm": size / thr})
 
     for key, by_series in groups.items():
         made = False
@@ -1477,7 +1477,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list
                 _emit(a, b, False, within_report=True)
                 nb = _newest_edition_pair(series_rows, a, b)
                 if nb is not None:
-                    _emit(nb[0], nb[1], False)
+                    _emit(nb[0], nb[1], False, newest=True)
                 continue
             by_ed: dict[int, dict] = {}
             for r in series_rows:
@@ -1583,14 +1583,21 @@ def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segmen
     prints the first four of the list (the system inserts them; six when lines carried from the earlier answer are merged). Order: tier (headline series, then a named cohort, then other cohorts), median
     before mean before other, then size. A bottom or top quartile shift is left out unless the question asked for a
     quartile. The best shift of each different metric comes before a second one of the same metric, so a spend line
-    cannot push the headcount line off the list. Returns note {"quartile_left_out": n}."""
+    cannot push the headcount line off the list. EXCEPTION, the newest edition: a line flagged newest_edition (the
+    series' newest edition paired with its most recent prior point) sorts ahead of older-only lines of the same tier and
+    statistic and counts as its own family, so the newest figure is never the second line of a family that the cap
+    cuts (ask_questions id 95: Employees 131 to 99 sat behind 225 to 131 and three other families). The cap itself
+    is unchanged; the lowest-ranked older-only line gives way. Returns note {"quartile_left_out": n}."""
     pool, quart = [], 0
     for sh in shifts:
         if is_quartile_stat(sh.get("statistic")) and not quartile_asked:
             quart += 1
             continue
         pool.append(sh)
+    # A line that reaches the newest edition of its series (_newest_edition_pair) sorts ahead of an older-only line of the
+    # same tier and statistic, and is its own family, so the history line of the same metric cannot push it into `rest`.
     ordered = sorted(pool, key=lambda sh: (shift_tier(sh, asked_band, asked_segment, text), _stat_rank(sh.get("statistic")),
+                                           0 if sh.get("newest_edition") else 1,
                                            -(sh.get("size") or 0) / (sh.get("threshold") or 1), sh["line"]))
     seen: set = set()
     first, rest = [], []
@@ -1599,6 +1606,8 @@ def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segmen
         # two spend lines cannot push the headcount or margin line off the printed list.
         line_item = expense_line_of(sh["metric"], "", "percent") if sh.get("unit") == "percent" else ""
         fam = ("expense", line_item) if line_item else (name_key(sh["metric"]) or frozenset({_lc(sh["metric"])}))
+        if sh.get("newest_edition"):
+            fam = ("newest", fam)
         (rest if fam in seen else first).append(sh)
         seen.add(fam)
     return (first + rest)[:cap], {"quartile_left_out": quart, "over_cap": max(len(first) + len(rest) - cap, 0)}
