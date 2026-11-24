@@ -219,3 +219,15 @@ def test_conflicts_use_the_same_cell_key_as_dedupe_cells(tmp_path):
     for r in _csv(out, "conflicts.csv"):
         per_slug[r["report_slug"]] = per_slug.get(r["report_slug"], 0) + 1
     assert {k: v for k, v in d.items() if v} == per_slug
+
+
+def test_editions_csv_uses_the_series_override_family(tmp_path):
+    path = _build(tmp_path)
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE benchmark_reports SET series_override='Example Benchmarks Series' WHERE report_slug IN ('eb-2099','eb-2098')")
+    conn.commit()
+    conn.close()
+    out = tmp_path / "out"
+    assert aud.main(["--db", path, "--out-dir", str(out)]) == 0
+    fams = {r["report_slug"]: r["family"] for r in _csv(out, "editions.csv")}
+    assert fams["eb-2099"] == fams["eb-2098"] == "series: example benchmarks series", fams

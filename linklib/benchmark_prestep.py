@@ -1384,6 +1384,23 @@ def _reserve_other_slot(subs: list[Sub], rest: str) -> list[Sub]:
     return keep + [other]
 
 
+_TOTAL_OPEX = re.compile(r"^\s*(?:total\s+)?(?:operating\s+expenses?|opex)\s*$", re.I)
+
+
+def _apply_part_families(subs: list) -> None:
+    """Expense-family detection on each part's OWN text. A part that names Sales and marketing, R&D or G&A as a
+    spend line looks those lines up; the splitter's total "Operating Expenses" is dropped from that part only
+    when a named line replaces it. Prior-turn metrics are never inherited here (a part's text only)."""
+    for s in subs:
+        if s.intent == "other":
+            continue
+        fams = [t for t in fg.detect_expense_families(s.text or "") if t != fg.GENERIC_EXPENSE_LABEL]
+        if not fams:
+            continue
+        keep = [m for m in s.metrics if not _TOTAL_OPEX.match(m) and m not in fams]
+        s.metrics = (fams + keep)[:MAX_SUBQUERIES]
+
+
 def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
               remaining_usd: float | None, split_model: str | None = None,
               client_factory=None, prior_band: str = "", prior_shifts: list[dict] | None = None) -> Prestep:
@@ -1471,6 +1488,7 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
                         s.metrics = [d["term"] for d in fg.detect_metrics(lib, s.text)][:2]
                     if sig["over_time"] and not s.year:
                         s.year = "all" if s.intent == "benchmark" else s.year
+                _apply_part_families(ps.subs)
     todo = [s for s in ps.subs if s.intent != "other" or s.metrics]
     for s in todo:
         s.history = sig.get("history", "")
