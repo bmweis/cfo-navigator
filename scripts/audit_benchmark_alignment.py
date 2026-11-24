@@ -200,7 +200,7 @@ def build(conn: sqlite3.Connection, out_dir: str) -> str:
         src = rep.get("source_override") or rep["source"]
         name = rep.get("report_override") or rep["report"]
         year = rep.get("year_override") or rep["report_year"]
-        fam = fg._family({"source": src, "report": name})
+        fam = fg._family({"source": src, "report": name, "series_override": rep.get("series_override") or ""})
         ed_out.append((rep["report_slug"], src, name, year, fg.family_label(fam),
                        len(by_report.get(rep["report_slug"], [])), rep["loaded_at"]))
     ed_out.sort(key=lambda t: (t[4], t[3], t[0]))

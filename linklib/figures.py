@@ -1074,6 +1074,26 @@ def _bands_overlap(a, b) -> bool:
     return narrow == 0 or (hi - lo) >= 0.5 * narrow
 
 
+def bands_comparable(a, b) -> bool:
+    """Two printed bands that are the same size class, for pooling points into one range. Stricter than
+    _bands_overlap: both must be bounded (a lower and an upper edge) and readable, and overlap by at least half of the
+    narrower band. "<$100M" and "$50M+" never pool with a bounded band. Unreadable bands pool only when the text
+    is identical."""
+    pa, pb = parse_band(a), parse_band(b)
+    if pa is None or pb is None:
+        return _lc(a) == _lc(b)
+    if pa["kind"] != pb["kind"]:
+        return False
+    if pa["hi"] == float("inf") or pb["hi"] == float("inf"):
+        return _band_key(a) == _band_key(b)
+    if pa["lo"] <= 0 or pb["lo"] <= 0:      # "<$100M" style: an upper bound only, not a size class
+        return _band_key(a) == _band_key(b)
+    lo, hi = max(pa["lo"], pb["lo"]), min(pa["hi"], pb["hi"])
+    if hi <= lo:
+        return False
+    return (hi - lo) >= 0.5 * min(pa["hi"] - pa["lo"], pb["hi"] - pb["lo"])
+
+
 def _endpoint_outliers(shifts: list[dict], ok: list[dict], rules: dict | None) -> list[str]:
     """Flag-only. For each computed shift inside one publisher's series, an endpoint that differs from
     every OTHER publisher's value for the same metric, period year, band basis, band and statistic by
@@ -1155,7 +1175,8 @@ def same_report_note(a: dict, b: dict) -> str:
 def _within_report_pair(series_rows: list[dict]):
     """The best pair is one report's own history: when the newest edition of a publisher's series prints
     the same figure for two or more data periods (Q2 2022, 2023, 2024, 2025 in one table), its earliest to
-    its latest period is the same respondents and the same definition. Returns (earlier, later) or None.
+    its latest period is the same respondents and the same definition. Returns (earlier, later) or None. The caller
+    also pairs a newer, different edition with the most recent prior point (_newest_edition_pair).
     A period printed twice with different values never reaches here (compute_shifts skips those rows)."""
     by_rep: dict[str, list[dict]] = {}
     for r in series_rows:
@@ -1317,14 +1338,37 @@ def _break_shift(brk: tuple, series_label: str, band: str, denom: str) -> dict:
             "size": round(abs(y["total"] - x["total"]), 4), "directional": False, "from": ends(ra), "to": ends(rb), "line": line}
 
 
+def _newest_edition_pair(series_rows: list[dict], a: dict, b: dict):
+    """The within-report pair covers one edition's own history; when the series' NEWEST edition (by _edition_order)
+    is a different report and prints a later data period for the same line, it must not be dropped. Returns
+    (most recent earlier point, newest edition's latest point), or None. Both shifts are emitted, each labelled."""
+    newest = max(series_rows, key=_edition_order)
+    slug = newest.get("report_slug") or newest["report"]
+    if slug in {a.get("report_slug") or a["report"], b.get("report_slug") or b["report"]}:
+        return None
+    same = [r for r in series_rows if (r.get("report_slug") or r["report"]) == slug and _year_num(r["data_period"]) > 0]
+    if not same:
+        return None
+    n = max(same, key=lambda r: _year_num(r["data_period"]))
+    prior = [r for r in series_rows if (r.get("report_slug") or r["report"]) != slug
+             and 0 < _year_num(r["data_period"]) < _year_num(n["data_period"])]
+    if not prior:
+        return None
+    p = max(prior, key=lambda r: (_year_num(r["data_period"]), _edition_order(r)))
+    return p, n
+
+
 def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list[dict] | None = None) -> dict:
     """{shifts, suppressed, skipped, unpaired}. `unpaired` counts, by short reason, every candidate that
     produced no line ("single edition", "same data period", "not an exact or adjacent-band figure", ...).
     A figure the report prints against no size band (a public index, "top 10") is its own series: it
     pairs only with the same index in another edition. `rows` come from an all-editions, recent-window lookup.
     shifts: largest first, each {metric, band, statistic, unit, kind, threshold, delta, size, from, to,
-    directional, line}. A change inside one publisher's series is preferred (earliest to newest edition
-    in the window); a pair across publishers is used only when no publisher has two editions, and is
+    directional, line}. A change inside one publisher's series is preferred: one report's own history (earliest to
+    latest period of the newest edition that prints two or more), AND, when the series' newest edition (by
+    _edition_order) is a different report with a later data period, a second line from the most recent prior point
+    to that newest point (_newest_edition_pair; the newest edition is never silently dropped); otherwise earliest to
+    newest edition in the window. A pair across publishers is used only when no publisher has two editions, and is
     labelled directional. A cell that holds different values inside one report is skipped and named in
     `skipped`. A republisher's row is one series with the source it cites (row["series"]).
     `stack_rows` (load_stack_rows) lets a cross-edition pair of one spend chart's lines be judged against the chart's
@@ -1431,6 +1475,9 @@ def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list
                 a, b = within
                 made = True
                 _emit(a, b, False, within_report=True)
+                nb = _newest_edition_pair(series_rows, a, b)
+                if nb is not None:
+                    _emit(nb[0], nb[1], False)
                 continue
             by_ed: dict[int, dict] = {}
             for r in series_rows:
@@ -1673,6 +1720,7 @@ def span_text(a: dict, b: dict) -> str:
 
 
 _TOTAL_FTE_KEY = None
+_SHORT_TOTAL_OK = {"no"}      # "No. of employees" is still a total
 
 
 def is_total_fte_row(row: dict) -> bool:
@@ -1681,8 +1729,13 @@ def is_total_fte_row(row: dict) -> bool:
     global _TOTAL_FTE_KEY
     if _TOTAL_FTE_KEY is None:
         _TOTAL_FTE_KEY = name_key("Total employees")
+    name = _lc(row.get("metric"))
+    # name_key() drops tokens of two or fewer characters, so "AE headcount" and "CS headcount" fold to the same key as
+    # "Total employees". A short role token left in the name makes the row a role's headcount, not the company total.
+    if any(len(w) <= 2 and w not in _NAME_STOP and w not in _SHORT_TOTAL_OK for w in re.findall(r"[a-z0-9]+", _PAREN.sub(" ", name))):
+        return False
     return bool(_TOTAL_FTE_KEY) and name_key(row.get("metric") or "") == _TOTAL_FTE_KEY \
-        and not _PER_HEAD_NAME.search(_lc(row.get("metric")))
+        and not _PER_HEAD_NAME.search(name)
 
 
 _HEAD_DENOM = re.compile(r"\b(?:headcount|head count|employees?|ftes?|staff)\b")
@@ -2199,6 +2252,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         else:
             rows = rows[:limit]
     for r in rows:
+        r["family_key"] = family_label(_family(r))      # the publisher family (the "Same series as" override where set)
         r.pop("series_override", None)
     return {"rows": rows, "resolution": resolution, "notes": notes, "groups": groups_out, "total_matching": total,
             "returned": len(rows), "truncated": truncated, "unplaced_bands": unplaced,

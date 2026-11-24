@@ -174,9 +174,18 @@ def _fmt_num(x: float) -> str:
     return str(int(x)) if float(x).is_integer() else f"{x:.1f}".rstrip("0").rstrip(".")
 
 
+def _publisher(r: dict) -> str:
+    """The publisher family a point belongs to: the "Same series as" family where one is set, a republisher's
+    cited original when it names one, else the source. A publisher's two editions are ONE source."""
+    return str(r.get("series") or r.get("family_key") or r.get("source") or "").strip().lower()
+
+
 def _ranges(rows: list[dict], cite) -> list[str]:
-    """One short line per line item and (basis, statistic): the low and high of the sent points, each endpoint
-    named with its source. Only points whose bands overlap the first, no target rows, at least two sources."""
+    """One short line per line item, basis, statistic and band class: the low and high of the sent points, each
+    endpoint named with its source. Points pool only when their bands are the same size class
+    (figures.bands_comparable: an unbounded or upper-bound-only band never pools with a bounded one) and the
+    statistic and basis match. A source is a publisher family, counted once (its newest edition); at least two
+    sources; no target rows."""
     groups: dict[tuple, list[dict]] = {}
     for r in rows:
         if _is_target(r) or r.get("value_num") is None or r.get("match") not in ("exact", "adjacent_band"):
@@ -186,26 +195,32 @@ def _ranges(rows: list[dict], cite) -> list[str]:
         groups.setdefault((_item_of(r)[1], _basis_text(r), statistic_text(r).lower()), []).append(r)
     lines: list[str] = []
     for key in sorted(groups, key=lambda k: (_item_of(groups[k][0])[0], k[1], k[2])):
-        pts = sorted(groups[key], key=row_order_key)
-        anchor = pts[0]
-        pts = [p for p in pts if fg._bands_overlap(anchor.get("band"), p.get("band"))]
-        # one point per source edition
-        seen: set = set()
-        uniq = []
-        for p in pts:
-            k2 = (p.get("series") or p.get("source"), p.get("report_year"))
-            if k2 not in seen:
-                seen.add(k2)
-                uniq.append(p)
-        if len(uniq) < 2:
-            continue
-        lo = min(uniq, key=lambda p: p["value_num"])
-        hi = max(uniq, key=lambda p: p["value_num"])
-        if lo["value_num"] == hi["value_num"]:
-            continue
-        item, basis, stat = key
-        lines.append(f"- {item}, {stat}, {basis}: {value_text(lo)} to {value_text(hi)} ({len(uniq)} sources). "
-                     f"Low: {_report_text(lo, cite(lo))}. High: {_report_text(hi, cite(hi))}.")
+        clusters: list[list[dict]] = []
+        for p in sorted(groups[key], key=row_order_key):
+            for c in clusters:
+                if fg.bands_comparable(c[0].get("band"), p.get("band")):
+                    c.append(p)
+                    break
+            else:
+                clusters.append([p])
+        for pts in clusters:
+            seen: set = set()
+            uniq = []
+            for p in sorted(pts, key=lambda x: (_edition_rank(x), row_order_key(x))):      # a publisher's newest edition first
+                k2 = _publisher(p)
+                if k2 not in seen:
+                    seen.add(k2)
+                    uniq.append(p)
+            if len(uniq) < 2:
+                continue
+            lo = min(uniq, key=lambda p: p["value_num"])
+            hi = max(uniq, key=lambda p: p["value_num"])
+            if lo["value_num"] == hi["value_num"]:
+                continue
+            item, basis, stat = key
+            band = _band_text(pts[0]) if len(clusters) > 1 else ""
+            lines.append(f"- {item}{', ' + band if band else ''}, {stat}, {basis}: {value_text(lo)} to {value_text(hi)} "
+                         f"({len(uniq)} sources). Low: {_report_text(lo, cite(lo))}. High: {_report_text(hi, cite(hi))}.")
     return lines
 
 
