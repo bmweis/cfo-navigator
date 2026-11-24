@@ -2294,6 +2294,11 @@ _COL_WIDTH_VENDOR = 160       # A short vendor/company label (Railway,
 _REPORT_CARD_BREAKPOINT = 1100  # FP&A Buddy report: below this the table becomes stacked cards, so a landscape
                                 # phone (about 844px) and a portrait iPad keep cards. The five columns need about
                                 # 1,040px (Question 420 + Date 140 + Asker 160 + Settings and Cost ~320).
+_COL_WIDTH_DESCRIPTION = 440   # A one-to-three sentence description that is the point of its row (the Software vendors
+                               # table's Short description). The action buttons never wrap, so this is the widest value
+                               # at which View profile, Edit and Delete still fit at 1280px with Primary use and Review
+                               # status showing and no sideways scroll (480 scrolls 40px and clips Delete; 420 and 440
+                               # both fit). On 420-character summaries the tallest row is 171px at 440 (150px at 480).
 _COL_WIDTH_REPORT_TITLE = 420  # A report or digest title, which can run to 90+
                               # characters (the figures page's Report column,
                               # the digests preview's Title column). The cells
@@ -13903,6 +13908,8 @@ function bulkValueLabel(tableKey, field) {
       .map(function(c) { return c.getAttribute('data-label') || c.value; });
     return chosen.length ? chosen.join(', ') : '(none)';
   }
+  var tx = container.querySelector('input[type="text"], input[type="url"]');
+  if (tx) return tx.value.trim() ? tx.value.trim() : '(blank, which clears it)';
   var cb = container.querySelector('input[type="checkbox"]');
   if (cb) return cb.checked ? 'Yes' : 'No';
   return '';
@@ -14055,10 +14062,15 @@ def _admin_column_picker_html(table_key: str, columns: list[tuple[str, str]],
 
 
 def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], category_options: list[dict] | None = None,
-                            show_delete_button: bool = False) -> str:
-    """fields: [{key, label, kind: 'select'|'checkbox'|'multi', options?}, ...].
+                            show_delete_button: bool = False, submit_fn: str = "submitBulkEdit") -> str:
+    """fields: [{key, label, kind: 'select'|'checkbox'|'multi'|'text', options?}, ...].
     'multi' fields render a category_options checkbox grid and always replace
     (not add/remove) the target rows' category set with the checked ones.
+    'text' fields render one text (or url) input, with optional maxlength and a datalist id; the
+    value is sent as typed, so a blank value clears the field (the review step says so).
+    submit_fn names the JS function the Apply button calls with (table_key, post_url); the default posts the
+    integer row ids as JSON and reloads the page (Software, Communities), another may post other ids
+    (the benchmark reports table posts slugs and shows a result summary instead).
 
     show_delete_button adds a "Delete selected" button next to "Edit selected"
     plus its own confirm panel (openDeleteSelectedPanel/renderDeleteSelectedPanel/
@@ -14077,6 +14089,13 @@ def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], ca
             return (f'<div data-field="{f["key"]}" style="display:none;">'
                     f'<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">'
                     f'<input type="checkbox" id="{table_key}-bulk-val-{f["key"]}"> {_esc(f["label"])}</label></div>')
+        if f["kind"] == "text":
+            extra = ((f' maxlength="{f["maxlength"]}"' if f.get("maxlength") else "")
+                     + (f' list="{f["datalist"]}" autocomplete="off"' if f.get("datalist") else ""))
+            return (f'<div data-field="{f["key"]}" style="display:none;">'
+                    f'<input type="{f.get("input_type", "text")}" id="{table_key}-bulk-val-{f["key"]}"{extra} '
+                    f'aria-label="{_esc(f["label"])}" style="width:100%;box-sizing:border-box;padding:8px 10px;'
+                    f'border:1px solid var(--line);border-radius:8px;"></div>')
         if f["kind"] == "multi":
             opts = "".join(
                 f'<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">'
@@ -14087,7 +14106,9 @@ def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], ca
         return ""
 
     values_html = "".join(_value_control(f) for f in fields)
-    labels_json = json.dumps({f["key"]: f["label"] for f in fields})
+    # Escaped: the JSON sits inside a double-quoted onclick attribute, and its own quotes would end the attribute
+    # at the first key, so "Review changes" threw "Unexpected end of input" and never showed the summary.
+    labels_json = _esc(json.dumps({f["key"]: f["label"] for f in fields}))
 
     delete_button_html = (
         f'<button type="button" id="{table_key}-bulk-delete-btn" class="btn btn-ghost" disabled '
@@ -14130,7 +14151,7 @@ def _admin_bulk_panel_html(table_key: str, post_url: str, fields: list[dict], ca
   <div id="{table_key}-bulk-step2" style="display:none;">
     <p id="{table_key}-bulk-summary" style="font-size:14px;margin:0 0 14px;"></p>
     <button type="button" id="{table_key}-bulk-confirm-btn" class="btn" style="font-size:13px;padding:6px 16px;"
-      onclick="submitBulkEdit('{table_key}', '{post_url}')">Apply</button>
+      onclick="{submit_fn}('{table_key}', '{post_url}')">Apply</button>
     <button type="button" class="btn btn-ghost" style="font-size:13px;padding:6px 16px;margin-left:6px;"
       onclick="backToBulkEdit('{table_key}')">Back</button>
   </div>
@@ -14327,6 +14348,17 @@ def _review_status_block_html(reviewed: bool, mark_reviewed_url: str, flag_url: 
     action = _review_status_action_html(reviewed, mark_reviewed_url, flag_url, redirect_to,
                                          standalone_form_id=standalone_form_id)
     return f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">{pill}{action}</div>'
+
+
+def _admin_sticky_col_css(width: int, scope: str = "") -> str:
+    """The sticky first column of an admin table: pinned left, a vertical divider (the shadow) on its right edge,
+    and static again at the card breakpoint. The same rules the Software and Communities lists carry inline;
+    `scope` ("" or a table class such as ".fg-reports") lets one page pin two tables at different widths."""
+    s = (scope + " ") if scope else ""
+    return (f"{s}.admin-sticky-col{{position:sticky;left:0;background:#fff;z-index:2;"
+            f"box-shadow:2px 0 4px -2px rgba(0,0,0,.15);width:{width}px;min-width:{width}px;max-width:{width}px;}}\n"
+            f"{s}thead .admin-sticky-col{{background:var(--accent-light);z-index:3;}}\n"
+            f"@media(max-width:700px){{{s}.admin-sticky-col{{position:static;box-shadow:none;width:auto;min-width:0;max-width:none;}}}}")
 
 
 def _admin_row_data_attrs(fields: dict[str, str]) -> str:
@@ -14590,7 +14622,7 @@ def admin_software(request: Request, filter: str = ""):
               </div>
             </div>
           </td>
-          <td data-col="software:summary" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:260px;">{_esc(t.get('summary') or '—')}</td>
+          <td data-col="software:summary" data-label="Short description" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);min-width:{_COL_WIDTH_DESCRIPTION}px;">{_esc(t.get('summary') or '—')}</td>
           <td data-col="software:primary_category" data-label="{_esc(tool_labels.PRIMARY_USE)}" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;">{_primary_cell}</td>
           <td data-col="software:categories" data-label="Categories" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted);">{_esc(cats)}</td>
           <td data-col="software:intros" data-label="Intros" class="admin-table-cell" style="padding:10px 12px;border-bottom:1px solid var(--line);">{lead_badge}</td>
@@ -14714,7 +14746,7 @@ def admin_software(request: Request, filter: str = ""):
 <table class="admin-table-responsive" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;border-collapse:collapse;">
 <thead><tr style="background:var(--accent-light);">
   <th class="admin-sticky-col" style="padding:10px 12px;text-align:left;font-size:13px;"><div style="display:flex;align-items:center;gap:10px;"><input type="checkbox" aria-label="Select all" onchange="selectAllRows('software',this.checked)"><span>Name</span></div></th>
-  <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;">Short description</th>
+  <th data-col="software:summary" style="padding:10px 12px;text-align:left;font-size:13px;min-width:{_COL_WIDTH_DESCRIPTION}px;">Short description</th>
   <th aria-label="{_esc(tool_labels.PRIMARY_USE)}" data-col="software:primary_category" style="padding:10px 12px;text-align:left;font-size:13px;width:{_COL_WIDTH_CATEGORY}px;">{_esc(tool_labels.PRIMARY_USE)}</th>
   <th data-col="software:categories" style="padding:10px 12px;text-align:left;font-size:13px;">Categories</th>
   <th data-col="software:intros" style="padding:10px 12px;text-align:left;font-size:13px;">Intros</th>
@@ -38733,9 +38765,38 @@ _FIGURES_FORM_MAX_BYTES = 80 * 1024 * 1024   # the base64 copy the preview carri
 _FIGURES_TH = _DIGEST_TH
 # Phones: the report list becomes labelled cards (the /admin/library-backup pattern), so no column
 # sits off-screen. The sitewide block already removes the td top border for table.bk-stack.
+# Sticky Report column on the reports table: wide enough for a two-line title, narrow enough that the other columns
+# stay in view. A deliberate exception to "report titles never wrap" (PR 738): with the title pinned, a long one
+# wraps inside this column instead of pushing the page sideways.
+_COL_WIDTH_REPORT_STICKY = 320
+_COL_WIDTH_SERIES = 220        # a series name ("KeyBanc private SaaS survey") plus "N editions" beneath it
+
+# Phones: the report list becomes labelled cards (the /admin/library-backup pattern), so no column
+# sits off-screen. The sitewide block already removes the td top border for table.bk-stack.
 _FIGURES_STACK_CSS = """<style>
 .fg-reports th:last-child, .fg-reports td[data-label="Actions"]{position:sticky;right:0;background:var(--surface,#fff);box-shadow:-1px 0 0 var(--line);}
 .fg-reports th:last-child{background:var(--accent-light);}
+#figures-filter-scalars select{max-width:240px;}
+.fg-reports .fg-edit{display:none;}
+.fg-reports tr.fg-editing .fg-view{display:none;}
+.fg-reports tr.fg-editing .fg-edit{display:block;}
+.fg-reports .fg-edit input{width:100%;box-sizing:border-box;min-width:0;font-size:13px;padding:5px 8px;margin:0 0 4px;}
+.fg-reports .fg-edit input:last-child{margin-bottom:0;}
+.fg-reports .fg-sub{display:block;font-size:12px;color:var(--muted);}
+.fg-reports .fg-err{display:none;color:var(--alert);font-size:12.5px;font-weight:600;margin-top:4px;max-width:46ch;}
+.fg-reports tr.fg-editing td[data-label="Source"]{min-width:200px;}
+.fg-reports tr.fg-editing td[data-label="Year"]{min-width:90px;}
+.fg-reports tr.fg-editing td[data-label="Series"]{min-width:240px;}
+.fg-reports tr.fg-editing td[data-label="Link"]{min-width:230px;}
+.fg-reports tr.fg-editing td[data-label="Republished from"]{min-width:220px;}
+.fg-reports tr.fg-editing{background:var(--seafoam-wash);}
+.fg-reports tr.fg-editing td.admin-sticky-col{background:var(--seafoam-wash);}
+.fg-reports .fg-row-actions{display:flex;gap:6px;align-items:center;flex-wrap:nowrap;}
+.fg-reports .fg-row-actions a{font-size:12px;color:var(--muted);}
+.fg-reports .fg-edit-btns{display:none;gap:6px;}
+.fg-reports tr.fg-editing .fg-edit-btns{display:flex;}
+.fg-reports tr.fg-editing .fg-view-btns{display:none;}
+__STICKY__
 @media(max-width:700px){
   .fg-reports{min-width:0 !important;}
   .fg-reports th:last-child, .fg-reports td[data-label="Actions"]{position:static;box-shadow:none;}
@@ -38750,8 +38811,138 @@ _FIGURES_STACK_CSS = """<style>
   .fg-reports td[data-label="Report"]::before{display:none;}
   .fg-reports td[data-label="Actions"]{padding-left:0 !important;text-indent:0;padding-top:8px !important;}
   .fg-reports td[data-label="Actions"]::before{display:none;}
+  .fg-reports .fg-edit{margin-left:0;}
 }
-</style>"""
+</style>""".replace("__STICKY__", _admin_sticky_col_css(_COL_WIDTH_REPORT_STICKY, ".fg-reports"))
+
+# Inline edit and bulk edit on the reports table. Plain JS, no forms (so no form is ever nested), posts JSON to
+# /admin/reader/figures/<slug>/inline and /admin/reader/figures/bulk-edit. The server sends back each changed
+# row already rendered, so the table updates in place and the search, filter and sort stay as they were.
+_FIGURES_ADMIN_JS = """
+function fgEsc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fgRow(slug) {
+  var rows = document.querySelectorAll('#figures-approved-tbody tr');
+  for (var i = 0; i < rows.length; i++) { if (rows[i].getAttribute('data-slug') === slug) return rows[i]; }
+  return null;
+}
+function fgErr(row, msg) {
+  var e = row.querySelector('.fg-err');
+  if (!e) return;
+  e.textContent = msg || '';
+  e.style.display = msg ? 'block' : 'none';
+}
+function fgEdit(btn) {
+  var row = btn.closest('tr');
+  row.classList.add('fg-editing');
+  var first = row.querySelector('[data-fg-field]');
+  if (first) first.focus();
+}
+function fgCancel(btn) {
+  var row = btn.closest('tr');
+  row.classList.remove('fg-editing');
+  row.querySelectorAll('[data-fg-field]').forEach(function(i) { i.value = i.getAttribute('data-orig') || ''; });
+  fgErr(row, '');
+}
+function fgApply(d) {
+  var rows = d.rows || {};
+  Object.keys(rows).forEach(function(slug) {
+    var row = fgRow(slug);
+    if (!row) return;
+    var wasChecked = row.querySelector('.figures-row-cb') && row.querySelector('.figures-row-cb').checked;
+    row.outerHTML = rows[slug];
+    var fresh = fgRow(slug);
+    if (fresh && wasChecked) { var cb = fresh.querySelector('.figures-row-cb'); if (cb) cb.checked = true; }
+  });
+  var series = d.series || {};
+  Object.keys(series).forEach(function(slug) {
+    var row = fgRow(slug);
+    var cell = row && row.querySelector('.fg-series-view');
+    if (cell) cell.innerHTML = series[slug];
+  });
+  var list = document.getElementById('fg-series-list');
+  if (list && d.series_options) list.innerHTML = d.series_options;
+  applySortFilter('figures');
+  updateBulkButton('figures');
+}
+async function fgSave(btn) {
+  var row = btn.closest('tr');
+  var slug = row.getAttribute('data-slug');
+  var body = {};
+  row.querySelectorAll('[data-fg-field]').forEach(function(i) { body[i.getAttribute('data-fg-field')] = i.value; });
+  var label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving\\u2026';
+  fgErr(row, '');
+  try {
+    var r = await fetch('/admin/reader/figures/' + encodeURIComponent(slug) + '/inline', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    var d = null;
+    try { d = await r.json(); } catch (e2) {}
+    if (!r.ok || !d || !d.ok) {
+      fgErr(row, (d && d.message) || 'Save failed. Try again.');
+      btn.disabled = false; btn.textContent = label;
+      return;
+    }
+    fgApply(d);
+  } catch (e) {
+    fgErr(row, 'Save failed. Try again.');
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+function fgDismissResult() {
+  var box = document.getElementById('figures-bulk-result');
+  if (box) box.remove();
+}
+async function submitFiguresBulk(tableKey, url) {
+  var slugs = Array.prototype.map.call(document.querySelectorAll('.figures-row-cb:checked'), function(cb) { return cb.value; });
+  var field = document.getElementById('figures-bulk-field').value;
+  var container = document.querySelector('#figures-bulk-values [data-field="' + field + '"]');
+  var inp = container.querySelector('input');
+  var btn = document.getElementById('figures-bulk-confirm-btn');
+  btn.disabled = true; btn.textContent = 'Applying\\u2026';
+  try {
+    var r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({slugs: slugs, field: field, value: inp.value})});
+    var d = null;
+    try { d = await r.json(); } catch (e2) {}
+    if (!r.ok || !d || !d.ok) {
+      document.getElementById('figures-bulk-summary').textContent = (d && d.message) || 'Save failed. Nothing was changed.';
+      btn.disabled = false; btn.textContent = 'Apply';
+      return;
+    }
+    fgApply(d);
+    var changed = d.results.filter(function(x) { return x.changed; }).length;
+    var rowsHtml = d.results.map(function(x) {
+      var oldv = x.old === '' ? '(blank)' : x.old, newv = x.new === '' ? '(blank)' : x.new;
+      return '<tr><td style="padding:6px 10px;font-size:13px;">' + fgEsc(x.report) + '<span style="display:block;font-size:12px;color:var(--muted);">' + fgEsc(x.slug) + '</span></td>' +
+        '<td style="padding:6px 10px;font-size:13px;">' + fgEsc(oldv) + '</td>' +
+        '<td style="padding:6px 10px;font-size:13px;">' + (x.changed ? fgEsc(newv) : '<span style="color:var(--muted);">unchanged</span>') + '</td></tr>';
+    }).join('');
+    fgDismissResult();
+    var box = document.createElement('div');
+    box.id = 'figures-bulk-result';
+    box.style.cssText = 'border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:0 0 20px;background:var(--surface);max-width:900px;';
+    box.innerHTML = '<p style="font-size:14px;margin:0 0 10px;"><strong>' + changed + ' of ' + d.results.length + ' report' + (d.results.length === 1 ? '' : 's') +
+      ' changed.</strong> Field: ' + fgEsc(d.label) + '.</p>' +
+      '<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;"><table style="width:100%;min-width:480px;"><thead><tr style="background:var(--accent-light);">' +
+      '<th style="padding:8px 10px;text-align:left;font-size:13px;">Report</th><th style="padding:8px 10px;text-align:left;font-size:13px;">Was</th>' +
+      '<th style="padding:8px 10px;text-align:left;font-size:13px;">Now</th></tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
+      '<p style="margin:12px 0 0;"><button type="button" class="btn btn-ghost" onclick="fgDismissResult()" style="font-size:13px;padding:6px 16px;">Dismiss</button></p>';
+    var panel = document.getElementById('figures-bulk-panel');
+    panel.parentNode.insertBefore(box, panel.nextSibling);
+    closeBulkPanel('figures');
+    document.querySelectorAll('.figures-row-cb:checked').forEach(function(cb) { cb.checked = false; });
+    updateBulkButton('figures');
+    btn.disabled = false; btn.textContent = 'Apply';
+  } catch (e) {
+    document.getElementById('figures-bulk-summary').textContent = 'Save failed. Nothing was changed.';
+    btn.disabled = false; btn.textContent = 'Apply';
+  }
+}
+"""
+
+_FIGURES_FIELD_LABELS = {"source": "Source", "report": "Report title", "report_year": "Year",
+                         "landing_url": "Landing URL", "cited_source": "Republished from",
+                         "cited_source_metric": "Only for metrics containing", "series_override": "Same series as"}
 
 
 def _figures_upload_bytes(form, name: str) -> bytes:
@@ -38759,102 +38950,217 @@ def _figures_upload_bytes(form, name: str) -> bytes:
     return b"" if up is None or isinstance(up, str) else up.file.read()
 
 
+def _figures_report_context(lib) -> dict:
+    """What the reports table needs to render any one row: every report, how each resolves its landing URL, which
+    series each belongs to, and the default order (source, then newest year first)."""
+    from linklib import figures as _fg
+    reports = lib.list_benchmark_reports()
+    landings = _fg.resolve_landings(lib)
+    info = _fg.series_info(reports)
+    order = sorted(reports, key=lambda r: ((r["source"] or "").lower(), -_fg._year_num(r["report_year"]), r["report_slug"]))
+    return {"reports": reports, "landings": landings, "series": info,
+            "rank": {r["report_slug"]: i for i, r in enumerate(order)},
+            "options": "".join(f'<option value="{_esc(n)}">' for n in _fg.family_name_options(reports))}
+
+
+def _figures_series_html(si: dict) -> str:
+    n = si["editions"]
+    return (f'<span class="fg-series-name">{_esc(si["name"])}</span>'
+            f'<span class="fg-sub">{n} edition{"" if n == 1 else "s"}</span>')
+
+
+def _figures_row_html(r: dict, ctx: dict) -> str:
+    """One report's table row. Editable cells hold a view and a hidden editor; Edit swaps them in place."""
+    slug, title = r["report_slug"], r["report"]
+    how = {"manual": "set here", "landing_url": "the stored landing URL", "article": "the linked digest",
+           "digest_slug": "the digest with this slug", "none": ""}
+    land = ctx["landings"].get(slug, {"url": "", "how": "none"})
+    si = ctx["series"][slug]
+    td = "padding:10px 12px;font-size:13px;vertical-align:top;"
+
+    def ed(field: str, value: str, view: str, *, maxlength: int = 0, kind: str = "text", ph: str = "", extra: str = "") -> str:
+        inp = (f'<input type="{kind}" data-fg-field="{field}" data-orig="{_esc(value)}" value="{_esc(value)}" '
+               f'aria-label="{_esc(_FIGURES_FIELD_LABELS[field])} for {_esc(title)}"'
+               + (f' maxlength="{maxlength}"' if maxlength else "") + (f' placeholder="{_esc(ph)}"' if ph else "") + extra + '>')
+        return f'<span class="fg-view">{view}</span><span class="fg-edit">{inp}</span>'
+
+    rep_cell = (
+        f'<td class="admin-sticky-col" data-label="Report" style="{td}">'
+        f'<div style="display:flex;align-items:flex-start;gap:10px;">'
+        f'<input type="checkbox" class="figures-row-cb" value="{_esc(slug)}" aria-label="Select {_esc(title)}" '
+        f'onchange="updateBulkButton(\'figures\')" style="margin-top:4px;flex:0 0 auto;">'
+        f'<div style="min-width:0;overflow-wrap:anywhere;">'
+        + ed("report", title, f'<strong>{_esc(title)}</strong>', maxlength=300)
+        + f'<span class="fg-sub">{_esc(slug)}</span><div class="fg-err" role="alert"></div></div></div></td>')
+    src = r["source"]
+    year = r["report_year"]
+    series_in = ed("series_override", r.get("series_override") or "", "",
+                   maxlength=120, ph=f"Derived: {si['name']}", extra=' list="fg-series-list" autocomplete="off"')
+    series_in = series_in.replace('<span class="fg-view"></span>', f'<span class="fg-view fg-series-view">{_figures_series_html(si)}</span>')
+    if land["url"]:
+        link_view = (f'<a href="{_esc(land["url"])}" target="_blank" rel="noopener" '
+                     f'title="{_esc(land["url"])} ({how[land["how"]]})">Yes</a>')
+    else:
+        link_view = '<span style="color:var(--alert);font-weight:600;">No</span>'
+    cs = (r.get("cited_source") or "").strip()
+    csm = (r.get("cited_source_metric") or "").strip()
+    rep_view = (_esc(cs) + (f'<span class="fg-sub">metrics containing {_esc(csm)}</span>' if csm else "")) if cs else "&mdash;"
+    cited_cell = (
+        f'<span class="fg-view">{rep_view}</span><span class="fg-edit">'
+        f'<input type="text" data-fg-field="cited_source" data-orig="{_esc(cs)}" value="{_esc(cs)}" maxlength="200" '
+        f'placeholder="Republished from" aria-label="Republished from for {_esc(title)}">'
+        f'<input type="text" data-fg-field="cited_source_metric" data-orig="{_esc(csm)}" value="{_esc(csm)}" maxlength="120" '
+        f'placeholder="Only for metrics containing" aria-label="Only for metrics containing for {_esc(title)}"></span>')
+    stored = (f'<span style="color:var(--alert);font-weight:600;">{r["stored_rows"]:,} of {r["row_count"]:,}</span>'
+              if r["stored_rows"] != r["row_count"] else f'{r["stored_rows"]:,}')
+    loaded = (r["loaded_at"] or "")[:10]
+    year_n = _fg_year_sort(year)
+    attrs = _admin_row_data_attrs({
+        "name": title, "search": f"{title} {slug} {src}", "source": src, "order": f"{ctx['rank'][slug]:05d}",
+        "title": title, "yearnew": f"{9999 - year_n:04d}", "figures": f"{99999999 - r['stored_rows']:08d}",
+        "loadednew": f"{99999999 - int(re.sub(r'[^0-9]', '', loaded) or 0):08d}"})
+    return (
+        f'<tr class="admin-table-row" data-slug="{_esc(slug)}" {attrs}>{rep_cell}'
+        f'<td data-label="Source" style="{td}">{ed("source", src, _esc(src) or "&mdash;", maxlength=200)}</td>'
+        f'<td data-label="Year" style="{td}white-space:nowrap;">{ed("report_year", year, _esc(year) or "&mdash;", maxlength=4)}</td>'
+        f'<td data-label="Series" style="{td}">{series_in}</td>'
+        f'<td data-label="Figures" style="{td}white-space:nowrap;">{stored}</td>'
+        f'<td data-label="Link" style="{td}white-space:nowrap;">'
+        + ed("landing_url", r["landing_url_manual"] or "", link_view, kind="url", ph="https://" if not land["url"] else land["url"])
+        + f'</td><td data-label="Republished from" style="{td}">{cited_cell}</td>'
+        f'<td data-label="Loaded" style="{td}white-space:nowrap;">{_esc(loaded) or "&mdash;"}</td>'
+        f'<td data-label="Actions" style="{td}white-space:nowrap;">'
+        f'<div class="fg-row-actions"><span class="fg-view-btns fg-row-actions">'
+        f'<button type="button" class="btn btn-ghost" onclick="fgEdit(this)" style="font-size:12px;padding:5px 10px;">Edit</button>'
+        f'<a href="/admin/reader/figures/{_esc(slug)}/edit">Full page</a></span>'
+        f'<span class="fg-edit-btns"><button type="button" class="btn" onclick="fgSave(this)" style="font-size:12px;padding:5px 10px;">Save</button>'
+        f'<button type="button" class="btn btn-ghost" onclick="fgCancel(this)" style="font-size:12px;padding:5px 10px;">Cancel</button></span></div></td></tr>')
+
+
+def _fg_year_sort(year: str) -> int:
+    m = re.match(r"^\d{4}$", (year or "").strip())
+    return int(year) if m else 0
+
+
+def _figures_save_report(request: Request, slug: str, vals: dict) -> tuple[str, list[str] | None]:
+    """The one save-and-audit step behind the edit page, the inline editor and bulk edit's single-report siblings.
+    Returns (error text, changed labels or None for an unknown report)."""
+    lib = _lib()
+    try:
+        try:
+            changed = lib.save_benchmark_report_edit(slug, **vals)
+        except ValueError as e:
+            return str(e), None
+        if changed:
+            _log_archive_audit(lib, request, "edit", None,
+                               detail=f"benchmark report edited ({', '.join(changed)}): {slug}")
+        return "", changed
+    finally:
+        lib.close()
+
+
 def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HTMLResponse:
     from linklib import figures as _fg
     lib = _lib()
     try:
         summary = lib.figures_summary()
-        reports = lib.list_benchmark_reports()
-        landings = _fg.resolve_landings(lib)
+        ctx = _figures_report_context(lib)
+        reports, landings = ctx["reports"], ctx["landings"]
+        overview = _fg.metric_shift_overview(lib)
+        _reg = [dict(r) for r in lib.conn.execute(
+            "SELECT canonical_metric, shift_threshold, shift_kind FROM metric_registry ORDER BY canonical_metric")]
     finally:
         lib.close()
     msg = (_digest_notice(_esc(error)) if error else "") + (_digest_notice(notice, "info") if notice else "")
-    _how = {"manual": "set here", "landing_url": "stored landing URL", "article": "from the linked digest",
-            "digest_slug": "from the digest with this slug", "none": ""}
 
-    def _short_url(u: str) -> str:
-        from urllib.parse import urlsplit
-        sp = urlsplit(u)
-        text = (sp.netloc + sp.path).rstrip("/")
-        return text if len(text) <= 36 else text[:33] + "..."
-
-    def _landing_cell(r) -> str:
-        land = landings.get(r["report_slug"], {"url": "", "how": "none"})
-        if not land["url"]:
-            return '<span style="color:var(--alert);font-weight:600;">Not set</span>'
-        return (f'<a href="{_esc(land["url"])}" target="_blank" rel="noopener">{_esc(_short_url(land["url"]))}</a>'
-                f'<span style="display:block;font-size:12px;color:var(--muted);">{_how[land["how"]]}</span>')
-
-    def _republished_cell(r) -> str:
-        cs = (r.get("cited_source") or "").strip()
-        if not cs:
-            return "&mdash;"
-        fam = (r.get("cited_source_metric") or "").strip()
-        return _esc(cs) + (f', metrics containing {_esc(fam)}' if fam else "")
-
-    _td = "padding:10px 12px;font-size:13px;vertical-align:top;"
-    report_rows = "".join(
-        f'<tr><td data-label="Report" style="{_td}white-space:nowrap;"><strong>{_esc(r["report"])}</strong>'
-        f'<span style="display:block;font-size:12px;color:var(--muted);">{_esc(r["report_slug"])}</span></td>'
-        f'<td data-label="Source" style="{_td}white-space:nowrap;">{_esc(r["source"]) or "&mdash;"}</td>'
-        f'<td data-label="Year" style="{_td}white-space:nowrap;">{_esc(r["report_year"]) or "&mdash;"}</td>'
-        f'<td data-label="Rows stored" style="{_td}white-space:nowrap;'
-        + ("color:var(--alert);font-weight:600;" if r["stored_rows"] != r["row_count"] else "")
-        + f'">{r["stored_rows"]:,} of {r["row_count"]:,}</td>'
-        f'<td data-label="Loaded" style="{_td}white-space:nowrap;">{_esc((r["loaded_at"] or "")[:10])}</td>'
-        f'<td data-label="Landing URL" style="{_td}overflow-wrap:anywhere;">{_landing_cell(r)}</td>'
-        f'<td data-label="Republished from" style="{_td}overflow-wrap:anywhere;">{_republished_cell(r)}</td>'
-        f'<td data-label="Actions" style="{_td}white-space:nowrap;"><a href="/admin/reader/figures/{_esc(r["report_slug"])}/edit" '
-        f'class="btn btn-ghost" style="font-size:12px;padding:5px 10px;text-decoration:none;">Edit</a></td></tr>'
-        for r in reports)
+    report_rows = "".join(_figures_row_html(r, ctx) for r in sorted(reports, key=lambda r: ctx["rank"][r["report_slug"]]))
     linked = sum(1 for v in landings.values() if v["url"])
     link_summary = (f'<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;">{linked:,} of {len(landings):,} reports '
                     f'have a landing URL. FP&amp;A Buddy links each figure to it; a report without one is cited by name with &ldquo;no link on file&rdquo;.</p>'
                     if landings else "")
-    reports_table = (f"""{_FIGURES_STACK_CSS}{link_summary}<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;">
-<table class="bk-stack fg-reports" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE}px;">
+    sources = sorted({r["source"] for r in reports if (r["source"] or "").strip()}, key=str.lower)
+    bulk_fields = [{"key": k, "label": _FIGURES_FIELD_LABELS[k], "kind": "text",
+                    "maxlength": {"source": 200, "report": 300, "report_year": 4, "landing_url": 0, "cited_source": 200,
+                                  "cited_source_metric": 120, "series_override": 120}[k],
+                    "input_type": "url" if k == "landing_url" else "text",
+                    "datalist": "fg-series-list" if k == "series_override" else ""}
+                   for k in ("series_override", "landing_url", "source", "report", "report_year", "cited_source", "cited_source_metric")]
+    reports_table = (f"""{_FIGURES_STACK_CSS}{link_summary}
+<p style="font-size:13px;color:var(--muted);margin:0 0 12px;max-width:80ch;">Edit changes a row in place. Source, title and year changes alter what Buddy prints in citations and which reports count as editions of one series; they are kept when the figures zip is loaded again, and the stored figures are never rewritten. The slug, Figures and Loaded can&rsquo;t be edited.</p>
+{_admin_sort_filter_toolbar_html("figures",
+    [("order", "Source, then newest year"), ("title", "Title"), ("source", "Source"), ("yearnew", "Year, newest first"),
+     ("figures", "Figures, most first"), ("loadednew", "Loaded, newest first")],
+    [{"key": "source", "label": "Source", "options": sources}], search_placeholder="Search title, slug or source…")}
+{_admin_bulk_panel_html("figures", "/admin/reader/figures/bulk-edit", bulk_fields, submit_fn="submitFiguresBulk")}
+<p style="font-size:12.5px;color:var(--muted);margin:-6px 0 10px;">The checkbox in the Report header selects only the reports showing now, after search and filter.</p>
+{_ADMIN_SCROLL_HINT_HTML}
+<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;" id="cmp-scroll-wrap">
+<table class="bk-stack fg-reports" style="width:100%;min-width:{_TABLE_FLOOR_XWIDE + 400}px;">
 <thead><tr style="background:var(--accent-light);">
-  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_REPORT_TITLE}px;">Report</th>
-  <th style="{_FIGURES_TH}">Source</th>
+  <th class="admin-sticky-col" style="{_FIGURES_TH}"><div style="display:flex;align-items:center;gap:10px;"><input type="checkbox" aria-label="Select all reports showing" onchange="selectAllRows('figures',this.checked)"><span>Report</span></div></th>
+  <th style="{_FIGURES_TH}min-width:170px;">Source</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_COUNT}px;">Year</th>
-  <th style="{_FIGURES_TH}width:120px;">Rows stored</th>
+  <th style="{_FIGURES_TH}min-width:{_COL_WIDTH_SERIES}px;">Series</th>
+  <th style="{_FIGURES_TH}width:100px;">Figures</th>
+  <th style="{_FIGURES_TH}width:90px;">Link</th>
+  <th style="{_FIGURES_TH}min-width:170px;">Republished from</th>
   <th style="{_FIGURES_TH}width:{_COL_WIDTH_DATE}px;">Loaded</th>
-  <th style="{_FIGURES_TH}min-width:150px;">Landing URL</th>
-  <th style="{_FIGURES_TH}min-width:140px;">Republished from</th>
   {_actions_th(_FIGURES_TH)}
 </tr></thead>
-<tbody>{report_rows}</tbody>
+<tbody id="figures-approved-tbody">{report_rows}</tbody>
 </table>
-</div>""" if reports else '<p style="color:var(--muted);font-size:13.5px;margin:0;">No reports loaded yet.</p>')
+</div>
+<datalist id="fg-series-list">{ctx["options"]}</datalist>
+<script>{_ADMIN_SCROLL_HINT_JS}
+initAdminScrollHint();
+applySortFilter('figures');
+</script>""" if reports else '<p style="color:var(--muted);font-size:13.5px;margin:0;">No reports loaded yet.</p>')
     cols = ", ".join(f"<code>{c}</code>" for c in _fg.COLUMNS)
-    _lib2 = _lib()
-    try:
-        _reg = [dict(r) for r in _lib2.conn.execute(
-            "SELECT canonical_metric, shift_threshold, shift_kind FROM metric_registry ORDER BY canonical_metric")]
-    finally:
-        _lib2.close()
-    _srows = "".join(
-        f'<tr><td style="padding:8px 12px;font-size:13px;">{_esc(m["canonical_metric"])}</td>'
-        f'<td colspan="3" style="padding:8px 12px;"><form method="post" action="/admin/reader/figures/shift-threshold" '
-        f'style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
-        f'<input type="hidden" name="canonical_metric" value="{_esc(m["canonical_metric"])}">'
-        f'<input type="number" step="any" min="0" name="threshold" value="{"" if m["shift_threshold"] is None else _esc(m["shift_threshold"])}" '
-        f'placeholder="default" aria-label="Shift threshold for {_esc(m["canonical_metric"])}" '
-        f'style="width:110px;min-width:0;font-size:13px;padding:6px 8px;">'
-        f'<select name="kind" aria-label="Kind" style="font-size:13px;padding:6px 8px;">'
-        f'<option value="points"{" selected" if m["shift_kind"] == "points" else ""}>points</option>'
-        f'<option value="relative"{" selected" if m["shift_kind"] == "relative" else ""}>percent relative</option></select>'
-        f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save</button></form></td></tr>'
-        for m in _reg)
+
+    _srows = []
+    order_rank = {m["canonical_metric"]: i for i, m in enumerate(sorted(
+        _reg, key=lambda m: (-overview.get(m["canonical_metric"], {}).get("figures", 0), m["canonical_metric"].lower())))}
+    for m in _reg:
+        c = m["canonical_metric"]
+        ov = overview.get(c, {"figures": 0, "in_effect": ""})
+        custom = m["shift_threshold"] is not None and m["shift_kind"] in ("points", "relative")
+        attrs = _admin_row_data_attrs({
+            "name": c, "search": c, "order": f"{order_rank[c]:05d}", "figures": f"{99999999 - ov['figures']:08d}",
+            "figs": "with figures" if ov["figures"] else "without figures"})
+        _srows.append(
+            f'<tr class="admin-table-row" {attrs}>'
+            f'<td class="admin-sticky-col" style="padding:8px 12px;font-size:13px;">{_esc(c)}</td>'
+            f'<td style="padding:8px 12px;font-size:13px;white-space:nowrap;">{ov["figures"]:,}</td>'
+            f'<td style="padding:8px 12px;font-size:13px;min-width:260px;">{_esc(ov["in_effect"])}</td>'
+            f'<td style="padding:8px 12px;"><form method="post" action="/admin/reader/figures/shift-threshold" '
+            f'style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+            f'<input type="hidden" name="canonical_metric" value="{_esc(c)}">'
+            f'<input type="number" step="any" min="0" name="threshold" value="{"" if m["shift_threshold"] is None else _esc(m["shift_threshold"])}" '
+            f'placeholder="default" aria-label="Shift threshold for {_esc(c)}" '
+            f'style="width:110px;min-width:0;font-size:13px;padding:6px 8px;">'
+            f'<select name="kind" aria-label="Kind for {_esc(c)}" style="font-size:13px;padding:6px 8px;">'
+            f'<option value=""{"" if custom else " selected"}>Default</option>'
+            f'<option value="points"{" selected" if custom and m["shift_kind"] == "points" else ""}>points</option>'
+            f'<option value="relative"{" selected" if custom and m["shift_kind"] == "relative" else ""}>percent relative</option></select>'
+            f'<button type="submit" class="btn btn-ghost" style="font-size:12px;padding:5px 10px;">Save</button></form></td></tr>')
     shift_section = (
         '<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;max-width:900px;">A change between two editions is '
         'reported on an answer only above this size. Blank uses the default: more than 3 points for a percent metric, more '
-        'than 10 percent relative change for everything else. Smaller moves are left out silently.</p>'
-        + (f'<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;"><table style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">'
-           f'<thead><tr style="background:var(--accent-light);"><th style="{_FIGURES_TH}">Metric</th>'
-           f'<th style="{_FIGURES_TH}" colspan="3">Threshold and kind</th></tr></thead><tbody>{_srows}</tbody></table></div>'
+        'than 10 percent relative change for everything else. Smaller moves are left out silently. &ldquo;In effect&rdquo; '
+        'is what applies to each metric now.</p>'
+        + (f'<style>{_admin_sticky_col_css(_COL_WIDTH_NAME_STICKY, ".fg-shifts")}</style>'
+           + _admin_sort_filter_toolbar_html(
+               "shifts", [("order", "Metrics with figures first"), ("name", "Metric"), ("figures", "Figures, most first")],
+               [{"key": "figs", "label": "Figures", "options": ["With figures", "Without figures"]}],
+               search_placeholder="Search metrics…")
+           + f'<div class="table-frame" style="overflow-x:auto;overflow-y:hidden;"><table class="fg-shifts" style="width:100%;min-width:{_TABLE_FLOOR_MEDIUM}px;">'
+           f'<thead><tr style="background:var(--accent-light);"><th class="admin-sticky-col" style="{_FIGURES_TH}">Metric</th>'
+           f'<th style="{_FIGURES_TH}width:100px;">Figures</th><th style="{_FIGURES_TH}min-width:260px;">In effect</th>'
+           f'<th style="{_FIGURES_TH}">Change it</th></tr></thead><tbody id="shifts-approved-tbody">{"".join(_srows)}</tbody></table></div>'
+           "<script>applySortFilter('shifts');</script>"
            if _reg else '<p style="color:var(--muted);font-size:13.5px;margin:0;">No metrics in the registry yet.</p>'))
-    body = f"""<div class="page page-standard">
+    body = f"""<script>{_ADMIN_BULK_EDIT_JS}{_ADMIN_SORT_FILTER_JS}{_FIGURES_ADMIN_JS}</script>
+<div class="page page-standard">
 <p style="margin:0 0 4px;"><a href="/admin" style="font-size:13px;color:var(--muted);">&larr; Admin</a></p>
 <h1>Benchmark figures</h1>
 <p style="color:var(--muted);margin:0 0 18px;max-width:70ch;">Stores every figure extracted from a benchmark report, exactly as written, so FP&amp;A Buddy can later look a number up instead of reading it out of digest text. FP&amp;A Buddy looks benchmark numbers up here and cites the report.</p>
@@ -38870,7 +39176,7 @@ def _figures_page(*, error: str = "", notice: str = "", status: int = 200) -> HT
 </form>
 
 <h2 style="font-size:16px;margin:28px 0 10px;">What is loaded</h2>
-<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;max-width:900px;">{summary["reports"]:,} reports, {summary["figures"]:,} figures, {summary["metrics"]:,} distinct metric names. {summary["null_value_num"]:,} {"figure has" if summary["null_value_num"] == 1 else "figures have"} a value that is not a plain number. Metric registry: {summary["registry"]:,} metrics, {summary["aliases"]:,} aliases. Metric name map: {summary["name_map"]:,} rows (filled by a later job).</p>
+<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;max-width:900px;">{summary["reports"]:,} reports, {summary["figures"]:,} figures, {summary["metrics"]:,} distinct metric names. {summary["null_value_num"]:,} {"figure has" if summary["null_value_num"] == 1 else "figures have"} a value that is not a plain number. Metric registry: {summary["registry"]:,} metrics, {summary["aliases"]:,} aliases. Metric name map: {"not used yet" if not summary["name_map"] else format(summary["name_map"], ",") + " rows"}.</p>
 {reports_table}
 
 <h2 style="font-size:16px;margin:28px 0 10px;">Shift thresholds</h2>
@@ -39334,27 +39640,99 @@ async def admin_figures_edit_save(request: Request, report_slug: str):
     vals = {k: str(form.get(k) or "") for k in
             ("source", "report", "report_year", "landing_url", "cited_source", "cited_source_metric",
              "series_override")}
-
-    def _work():
-        lib = _lib()
-        try:
-            try:
-                changed = lib.save_benchmark_report_edit(report_slug, **vals)
-            except ValueError as e:
-                return str(e), None
-            if changed:
-                _log_archive_audit(lib, request, "edit", None,
-                                   detail=f"benchmark report edited ({', '.join(changed)}): {report_slug}")
-            return "", changed
-        finally:
-            lib.close()
-    err, changed = await run_in_threadpool(_work)
+    err, changed = await run_in_threadpool(lambda: _figures_save_report(request, report_slug, vals))
     if err:
         return await run_in_threadpool(lambda: _figures_edit_page(report_slug, values=vals, error=err, status=400))
     if changed is None:
         return await run_in_threadpool(lambda: _figures_edit_page(report_slug))
     note = ("Saved. Changed: " + ", ".join(changed) + ".") if changed else "Nothing changed."
     return await run_in_threadpool(lambda: _figures_edit_page(report_slug, notice=note))
+
+
+def _figures_json_result(lib, slugs: list[str]) -> dict:
+    """What the reports table needs after a save: each listed row re-rendered, every row's series text and
+    edition count (a save can change another row's count), and the series pick list."""
+    ctx = _figures_report_context(lib)
+    by = {r["report_slug"]: r for r in ctx["reports"]}
+    return {"rows": {s: _figures_row_html(by[s], ctx) for s in slugs if s in by},
+            "series": {s: _figures_series_html(i) for s, i in ctx["series"].items()},
+            "series_options": ctx["options"]}
+
+
+@app.post("/admin/reader/figures/{report_slug}/inline")
+async def admin_figures_inline_save(request: Request, report_slug: str):
+    """The reports table's inline editor. Same write path as the edit page (Library.save_benchmark_report_edit).
+    Only the seven fields the edit page edits are accepted; anything else (the slug, row counts, load date, sha256,
+    an id) is refused with nothing written. A field left out keeps its stored value; clearing one takes an
+    explicit empty string."""
+    _digest_gate(request, post=True)
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "message": "Send the fields as a JSON object."}, status_code=400)
+    from linklib.db import Library as _L
+    extra = sorted(set(body) - set(_L.REPORT_EDIT_FIELDS))
+    if extra:
+        return JSONResponse({"ok": False, "message": "These fields can't be edited here: " + ", ".join(extra) + ". Nothing was changed."},
+                            status_code=400)
+    if any(not isinstance(v, str) for v in body.values()):
+        return JSONResponse({"ok": False, "message": "Every value must be text. Nothing was changed."}, status_code=400)
+
+    def _work():
+        lib = _lib()
+        try:
+            vals = lib.report_edit_values(report_slug)
+        finally:
+            lib.close()
+        if vals is None:
+            return JSONResponse({"ok": False, "message": "That report is not loaded."}, status_code=404)
+        vals.update(body)
+        err, changed = _figures_save_report(request, report_slug, vals)
+        if err:
+            return JSONResponse({"ok": False, "message": err}, status_code=400)
+        lib = _lib()
+        try:
+            out = _figures_json_result(lib, [report_slug])
+        finally:
+            lib.close()
+        return JSONResponse({"ok": True, "changed": changed or [], **out})
+    return await run_in_threadpool(_work)
+
+
+@app.post("/admin/reader/figures/bulk-edit")
+async def admin_figures_bulk_edit(request: Request):
+    """Bulk edit on the reports table: ONE field set to one value on the selected reports, in one transaction
+    through the same validation as the edit page. Nothing else is touched; a refusal on any report writes nothing.
+    No delete: removing a report removes its figures, and loading the zip again by slug is the supported path."""
+    _digest_gate(request, post=True)
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    if (not isinstance(body, dict) or not isinstance(body.get("slugs"), list)
+            or not all(isinstance(x, str) for x in body["slugs"]) or not isinstance(body.get("field"), str)
+            or not isinstance(body.get("value"), str)):
+        return JSONResponse({"ok": False, "message": "Send slugs (a list), field and value as text."}, status_code=400)
+    field, value, slugs = body["field"], body["value"], body["slugs"]
+
+    def _work():
+        lib = _lib()
+        try:
+            try:
+                results = lib.bulk_set_report_field(slugs, field, value)
+            except ValueError as e:
+                return JSONResponse({"ok": False, "message": str(e)}, status_code=400)
+            for r in results:
+                if r["changed"]:
+                    _log_archive_audit(lib, request, "edit", None,
+                                       detail=f"benchmark report edited ({_FIGURES_FIELD_LABELS[field]}, bulk): {r['slug']}")
+            out = _figures_json_result(lib, [r["slug"] for r in results if r["changed"]])
+        finally:
+            lib.close()
+        return JSONResponse({"ok": True, "label": _FIGURES_FIELD_LABELS[field], "results": results, **out})
+    return await run_in_threadpool(_work)
 
 
 @app.post("/admin/reader/figures/shift-threshold", response_class=HTMLResponse)

@@ -142,21 +142,24 @@ def test_republished_from_saved_on_the_edit_page_behaves_like_the_inline_save(en
     assert any("Example Capital" in x for x in ha["also_printed_in"])
 
 
-def test_list_has_edit_links_effective_values_and_no_inline_inputs(env):
+def test_list_has_edit_buttons_effective_values_and_a_link_to_the_full_page(env):
+    """The list shows effective values and an Edit button per row (edits happen in place now, see
+    tests/test_figures_admin_usability.py); the full edit page stays one click away."""
     appmod, c = env
     c.post("/admin/reader/figures/eb-2099/edit", data=_form(
         report="Renamed Report", cited_source="Example Alpha 2025 SaaS Benchmarks", cited_source_metric="headcount"))
     html = c.get("/admin/reader/figures").text
-    table = html[html.index('<table class="bk-stack fg-reports"'):html.index("</table>")]
+    start = html.index('<table class="bk-stack fg-reports"')
+    table = html[start:html.index("</table>", start)]
     assert 'href="/admin/reader/figures/eb-2099/edit"' in table and "<th" in table
     assert re.search(r"<th[^>]*>Actions</th>", table)
     assert "Renamed Report" in table
-    assert "Example Alpha 2025 SaaS Benchmarks, metrics containing headcount" in table
-    assert "<input" not in table and "<form" not in table
+    assert "Example Alpha 2025 SaaS Benchmarks" in table and "metrics containing headcount" in table
+    assert "<form" not in table
     # a report with nothing republished says so with a dash, never blank
     cap_row = table[table.index("cap-2099"):]
     assert 'data-label="Republished from"' in cap_row and "&mdash;" in cap_row
-    for label in ("Report", "Source", "Year", "Rows stored", "Loaded", "Landing URL", "Republished from", "Actions"):
+    for label in ("Report", "Source", "Year", "Series", "Figures", "Link", "Republished from", "Loaded", "Actions"):
         assert f'data-label="{label}"' in table
     assert "max-width:700px" in html and ".fg-reports td[data-label]::before" in html
 

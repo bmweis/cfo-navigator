@@ -658,15 +658,37 @@ def family_members(reports: list[dict], rep: dict) -> tuple[str, list[dict]]:
     return fam[1], others
 
 
-def family_name_options(reports: list[dict]) -> list[str]:
-    """Series names already in use, for the edit page's pick list: each report's override, else its
-    title without the year, spelled as printed. One entry per distinct lower-case name."""
-    seen: dict[str, str] = {}
+def _series_label(r: dict) -> str:
+    """The name a report's series is shown under: its override as typed, else its title with the year removed, spelled
+    as printed. Spacing collapsed. Display only; the key is `_family`."""
+    return " ".join(((r.get("series_override") or "").strip() or _YEAR_IN_NAME.sub("", r.get("report") or "")).split())
+
+
+def series_info(reports: list[dict]) -> dict[str, dict]:
+    """report_slug -> {"name", "editions", "set_here"}: the series each report belongs to and how many reports (itself
+    included) share its family key. A series of one has "editions" 1. `reports` are Library.list_benchmark_reports()
+    rows. This is how an admin sees a split series: two names for what should be one."""
+    count: dict[tuple, int] = {}
     for r in reports:
-        label = " ".join(((r.get("series_override") or "").strip()
-                          or _YEAR_IN_NAME.sub("", r.get("report") or "")).split())
-        if label:
-            seen.setdefault(label.lower(), label)
+        count[_family(r)] = count.get(_family(r), 0) + 1
+    return {r["report_slug"]: {"name": _series_label(r) or "\u2014", "editions": count[_family(r)],
+                               "set_here": bool((r.get("series_override") or "").strip())}
+            for r in reports}
+
+
+def family_name_options(reports: list[dict]) -> list[str]:
+    """Series names worth suggesting on the edit page and the inline editor: every name set as an override, plus each
+    derived series that already has two or more editions (a title shared by one report is not a series yet, and
+    listing all of them is noise). One entry per distinct lower-case name."""
+    seen: dict[str, str] = {}
+    count: dict[tuple, int] = {}
+    for r in reports:
+        count[_family(r)] = count.get(_family(r), 0) + 1
+    for r in reports:
+        if (r.get("series_override") or "").strip() or count[_family(r)] >= 2:
+            label = _series_label(r)
+            if label:
+                seen.setdefault(label.lower(), label)
     return sorted(seen.values(), key=str.lower)
 
 
@@ -886,6 +908,49 @@ def shift_rule(unit, canonical: str = "", rules: dict | None = None) -> tuple[fl
         if t is not None and k in ("points", "relative"):
             return float(t), k
     return (DEFAULT_SHIFT_POINTS, "points") if _is_percent(unit) else (DEFAULT_SHIFT_RELATIVE, "relative")
+
+
+def _num_word(x: float) -> str:
+    return f"{x:g}"
+
+
+def shift_rule_text(threshold: float, kind: str) -> str:
+    """"more than 3 points" or "more than 10 percent relative change": how one rule reads to an admin."""
+    return (f"more than {_num_word(threshold)} points" if kind == "points"
+            else f"more than {_num_word(threshold)} percent relative change")
+
+
+def metric_shift_overview(lib) -> dict[str, dict]:
+    """canonical metric -> {"figures": stored figure rows, "in_effect": text}. The text is what compute_shifts really
+    applies: the metric's own rule when it has one ("Custom: ..."), else shift_rule's default for the unit of the
+    figures stored under that metric ("Default: ..."). A default can differ by unit, so a metric whose stored figures
+    mix percent and non-percent units says so; one with no stored figures says the default depends on its unit.
+    One grouped query over benchmark_figures, no per-metric lookups."""
+    idx = _load_metric_index(lib)
+    rules = lib.shift_rules()
+    by_name: dict[str, dict[str, int]] = {}
+    for r in lib.conn.execute("SELECT lower(metric) AS m, unit, COUNT(*) AS n FROM benchmark_figures GROUP BY lower(metric), unit"):
+        by_name.setdefault(r["m"], {})[r["unit"] or ""] = r["n"]
+    pct = shift_rule_text(DEFAULT_SHIFT_POINTS, "points")
+    rel = shift_rule_text(DEFAULT_SHIFT_RELATIVE, "relative")
+    out: dict[str, dict] = {}
+    for canon in idx["canon"].values():
+        units: dict[str, int] = {}
+        for nm in _names_for(idx, canon):
+            for u, n in by_name.get(nm, {}).items():
+                units[u] = units.get(u, 0) + n
+        if _lc(canon) in rules and rules[_lc(canon)][0] is not None and rules[_lc(canon)][1] in ("points", "relative"):
+            text = "Custom: " + shift_rule_text(*shift_rule(None, canon, rules))
+        else:
+            defaults = {shift_rule(u, canon, None) for u in units}
+            if not defaults:
+                text = f"Default: {pct} for a percent unit, {rel} otherwise (no figures stored yet)"
+            elif len(defaults) == 1:
+                text = "Default: " + shift_rule_text(*next(iter(defaults)))
+            else:
+                text = f"Default: {pct} for a percent unit, {rel} otherwise (this metric has both)"
+        out[canon] = {"figures": sum(units.values()), "in_effect": text}
+    return out
 
 
 def _num(x: float) -> str:

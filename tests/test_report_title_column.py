@@ -1,6 +1,6 @@
-"""Brian prefers sideways scrolling to wrapped titles: the Report column on
-/admin/reader/figures and the Title column on the digests preview use one
-named width and never wrap. Invented titles only."""
+"""Brian prefers sideways scrolling to wrapped titles: the Title column on the digests preview uses one named
+width and never wraps. The reports table on /admin/reader/figures pins its Report column instead (sticky, like the
+vendors table), so a title wraps inside it. Invented titles only."""
 import importlib
 import re
 
@@ -35,27 +35,33 @@ def _td(html: str, title: str) -> str:
 
 
 def test_report_title_width_is_one_named_constant(client):
+    """_COL_WIDTH_REPORT_TITLE sizes the digests preview's Title column; the reports table now pins its own Report
+    column (_COL_WIDTH_REPORT_STICKY, below)."""
     c, appmod = client
     assert appmod._COL_WIDTH_REPORT_TITLE == 420
+
+
+def test_figures_report_title_wraps_inside_its_sticky_column(client):
+    """The reports table pins the Report column (the vendors-table pattern), so a long title wraps inside that column
+    instead of pushing the page sideways. Deliberate exception to "report titles never wrap" (PR 738), which still
+    holds for the digests preview below."""
+    c, appmod = client
     html = c.get("/admin/reader/figures").text
-    th = re.search(r"<th[^>]*>Report</th>", html).group(0)
-    assert f"min-width:{appmod._COL_WIDTH_REPORT_TITLE}px" in th
-
-
-def test_figures_report_title_cell_does_not_wrap(client):
-    c, _ = client
-    assert "white-space:nowrap" in _td(c.get("/admin/reader/figures").text, T90)
+    td = re.search(r'<td class="admin-sticky-col" data-label="Report"[^>]*>', html).group(0)
+    assert "white-space:nowrap" not in td
+    assert f"width:{appmod._COL_WIDTH_REPORT_STICKY}px" in html and T90 in html
 
 
 def test_the_other_figures_columns_do_not_wrap_either(client):
     c, _ = client
     html = c.get("/admin/reader/figures").text
-    row = re.search(r"<tbody><tr>(.*?)</tr></tbody>", html, re.S).group(1)
-    cells = re.findall(r"<td([^>]*)>", row)
-    # Eight cells now; the link and republished-from cells may wrap (a long address, a source name),
-    # every short-token cell and the title still may not.
-    assert len(cells) == 8
-    assert all("white-space:nowrap" in c_ for c_ in cells if not re.search(r'data-label="(Landing URL|Republished from)"', c_))
+    row = re.search(r'<tbody id="figures-approved-tbody"><tr[^>]*>(.*?)</tr>', html, re.S).group(1)
+    cells = re.findall(r'<td([^>]*)>', row)
+    # Nine cells: the title (sticky, wraps), the source, series and republished-from cells (a publisher name or a
+    # series name can be long, so they may wrap) and every short-token cell, which may not.
+    assert len(cells) == 9
+    may_wrap = r'class="admin-sticky-col"|data-label="(Source|Series|Republished from)"'
+    assert all("white-space:nowrap" in c_ for c_ in cells if not re.search(may_wrap, c_))
 
 
 def test_digests_preview_title_cell_does_not_wrap(client):
