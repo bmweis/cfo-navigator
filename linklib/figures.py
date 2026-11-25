@@ -1004,12 +1004,46 @@ def _unit_key(unit) -> str:
 _PEOPLE_WORDS = {"count", "number", "total", "n", "fte", "employee", "headcount", "people", "person", "staff", "worker", "head"}
 
 
+_UNSTATED_DENOM = re.compile(r"^\W*(?:not\s+stated|unstated|n/?a|none|unknown|not\s+specified)\W*$", re.I)
+_TIER1_NOISE = re.compile(r"\b(?:total|lines?|an?)\b")
+_REVENUES = re.compile(r"\brevenues\b")
+
+# Tier 2: explicit, confident equivalents. Each maps a tier-1 key to the key it joins, with the reason.
+# "gaap revenue" = "revenue": the same base, only the accounting basis is spelled out. It is listed only as the
+# WHOLE phrase, so "gaap subscription revenue", "gaap recurring revenue" and "gaap arr" never match (a
+# subscription, recurring, ARR, MRR or named-product-line base is a different base and stays apart).
+_DENOM_SYNONYMS = {
+    "gaap revenue": "revenue",
+}
+
+
+def denominator_group(raw) -> tuple[str, str]:
+    """(group key, tier) for a stored denominator string, used to PAIR and GROUP only (nothing stored is rewritten).
+    tier is "" when nothing but formatting was removed, "synonym" when a tier-2 equivalent applied, "own" for an
+    empty or "not stated" denominator, which group alone and never join a stated basis.
+      Tier 1, formatting only: case, punctuation, "percent of" / "% of" / "as a percent of", "total", "line",
+        "a"/"an", whitespace, a period or year tail, plural "revenues".
+      Tier 2, `_DENOM_SYNONYMS`.
+    Never merged here: revenue vs ARR, MRR vs ARR, subscription or recurring revenue vs total revenue,
+    percent of revenue vs percent of ARR, margin-adjusted vs plain (any extra word keeps a key apart)."""
+    text = str(raw or "").strip()
+    if not text:
+        return "", "own"
+    if _UNSTATED_DENOM.match(text):
+        return "(not stated)", "own"
+    t = _REVENUES.sub("revenue", _TIER1_NOISE.sub(" ", _lc(text)))
+    key = _denom_key(t)
+    if key in _DENOM_SYNONYMS:
+        return _DENOM_SYNONYMS[key], "synonym"
+    return key, ""
+
+
 def _series_denom(r: dict) -> str:
     """The denominator as part of a series key. For a count (not a percent) a denominator that only restates
     what is counted ("full-time employees" for a metric named "Employees", or the bare word "count") says
     nothing a second edition could differ on, so it is no part of the key. A percent keeps its real base
     ("revenue", "arr", "employees") because that is a different figure."""
-    dk = _denom_key(r.get("denominator"))
+    dk = denominator_group(r.get("denominator"))[0]
     if _is_percent(r.get("unit")):
         return dk
     metric_words = {_stem(w) for w in re.findall(r"[a-z0-9]+", _lc(r.get("metric")))}
@@ -1170,6 +1204,15 @@ def same_report_note(a: dict, b: dict) -> str:
     if wa and wb and wa.lower() != wb.lower():
         parts.append(f"band labelled {wa} for {a['data_period']}, {wb} for {b['data_period']}")
     return "; ".join(parts)
+
+
+def _basis_text_note(a: dict, b: dict) -> str:
+    """When the two endpoints print the denominator in different words (one group, two raw strings), the line keeps
+    each endpoint's own stated basis, so grouping never hides that the labels differed."""
+    da, db_ = str(a.get("denominator") or "").strip(), str(b.get("denominator") or "").strip()
+    if not da or not db_ or _lc(da) == _lc(db_) or not _series_denom(a):
+        return ""
+    return f"; stated basis: '{da}' in {_ends(a)}, '{db_}' in {_ends(b)}"
 
 
 def _within_report_pair(series_rows: list[dict]):
@@ -1359,7 +1402,8 @@ def _newest_edition_pair(series_rows: list[dict], a: dict, b: dict):
 
 
 def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list[dict] | None = None) -> dict:
-    """{shifts, suppressed, skipped, unpaired}. `unpaired` counts, by short reason, every candidate that
+    """Denominators pair by `denominator_group` (formatting and one explicit synonym), not by raw string; a pair
+    spanning two raw strings prints both on the line. {shifts, suppressed, skipped, unpaired}. `unpaired` counts, by short reason, every candidate that
     produced no line ("single edition", "same data period", "not an exact or adjacent-band figure", ...).
     A figure the report prints against no size band (a public index, "top 10") is its own series: it
     pairs only with the same index in another edition. `rows` come from an all-editions, recent-window lookup.
@@ -1451,6 +1495,7 @@ def compute_shifts(rows: list[dict], rules: dict | None = None, stack_rows: list
                    ((f"one series: {a['series'] or a['source']}, {same_report_note(a, b)}" if _same_report_unproven(a, b)
                      else f"one series: {a['series'] or a['source']}, the same report's own history (same respondents and definition)")
                     if within_report else f"one series: {a['series'] or a['source']}"))
+                + _basis_text_note(a, b)
                 + "; derived from stored reports")
         yrs = max(_year_num(b["data_period"]) - _year_num(a["data_period"]), 1)
         if kind == "points" and size / yrs > SHIFT_OUTLIER_POINTS_PER_YEAR:
