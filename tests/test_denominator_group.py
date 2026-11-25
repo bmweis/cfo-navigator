@@ -83,7 +83,6 @@ def test_not_stated_does_not_pair_with_a_stated_basis(lib):
 
 
 def test_audit_csv_carries_group_and_tier(tmp_path, lib):
-    import sqlite3
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
     from scripts import audit_benchmark_alignment as ab
     rows, err = fg.parse_registry_tsv("canonical_metric\tcard_url\tcontains\nGross margin\thttps://c.example.test/gm\tContains: gross margin\n")
