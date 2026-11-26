@@ -561,7 +561,7 @@ def not_in_any_table(rows: list[dict]) -> list[dict]:
              "kind": fg.row_table_kind(r)} for r in rows if id(r) not in taken][:20]
 
 
-def render_tables(text: str, rows: list[dict], cite) -> tuple[str, dict]:
+def render_tables(text: str, rows: list[dict], cite, wants: dict | None = None) -> tuple[str, dict]:
     """Replace each table placeholder in `text` with its table; returns (text, info).
     Fallbacks (recorded in info["fallback"], never raised): a kind with rows and no placeholder is appended once
     at the end; a repeated placeholder is dropped after its first use; an unknown or row-less placeholder is
@@ -572,7 +572,12 @@ def render_tables(text: str, rows: list[dict], cite) -> tuple[str, dict]:
 
     def one(kind: str) -> str:
         # The mix builder needs the sent totals too (for the derived people column); it picks its own share rows.
-        md, meta = _builder(kind)(rows if kind == "mix" else rows_for(kind, rows), lambda r, _c=cite: _c(r))
+        use = rows if kind == "mix" else rows_for(kind, rows)
+        if kind == "spend":
+            use, gone = fg.apply_statistic_intent(use, wants)
+            if gone:
+                info["stat_left_out"] = gone      # quartile, extreme, "other" and target rows a typical question did not ask for
+        md, meta = _builder(kind)(use, lambda r, _c=cite: _c(r))
         info["rendered"][kind] = {k: v for k, v in meta.items() if k not in ("allowed_extra", "dropped", "periods")}
         # The data periods of the rows this table really printed (read by the period note, not shown in the admin row).
         info.setdefault("periods", []).extend(str(x) for x in (meta.get("periods") or []) if x)

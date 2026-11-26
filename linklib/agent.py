@@ -1284,7 +1284,7 @@ def answer_question(
                 _cite = _bp.table_cite(citations, sent_docs, extra=_bp.unsent_report_source(lib))
                 tinfo = {}
                 if prestep.active and prestep.table_kinds:
-                    text, tinfo = _tr.render_tables(text, prestep.table_rows, _cite)
+                    text, tinfo = _tr.render_tables(text, prestep.table_rows, _cite, wants=getattr(prestep, "stat_wants", None))
                 _sh = list(shifts_all)
                 text, sinfo = _tr.render_shifts(text, _sh, _cite, max_lines=_bp.MAX_MERGED_SHIFT_LINES if carried else _tr.SHIFT_LINES)
                 if sinfo.get("lines") or sinfo.get("fallback"):

@@ -180,6 +180,7 @@ class Prestep:
     shifts_unpaired: dict = field(default_factory=dict)      # candidates that gave no line, by short reason
     shifts_unpaired_groups: dict = field(default_factory=dict)   # reason -> up to 10 group names (publisher, metric, the two editions)
     shifts_outliers: list = field(default_factory=list)      # flag-only: a shift endpoint far from other publishers' values
+    stat_wants: dict = field(default_factory=dict, repr=False)  # statistic intent of the question (figures.statistic_wants); the tables read it
     table_rows: list = field(default_factory=list, repr=False)   # rows really sent in the figures documents (the code-built tables read these)
     table_kinds: list = field(default_factory=list)          # which tables the code builds this turn: "spend", "margins"
     period_note: dict = field(default_factory=dict)          # the 2020 to 2022 site note: shown or not, the periods that triggered it (admin row)
@@ -1524,6 +1525,7 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
             if k in sent_keys and k not in uniq_rows:
                 uniq_rows[k] = r
     ps.table_rows = list(uniq_rows.values())
+    ps.stat_wants = fg.statistic_wants(" ".join(getattr(x, "text", "") or "" for x in todo))
     ps.table_kinds = table_render.kinds_present(ps.table_rows)
     ps.left_out_detail = {}
     for s in todo:
@@ -1679,7 +1681,8 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub], carried: list[dict] | None
     ask_text = " ".join(x.text for x in bench)
     chosen, note = fg.rank_shifts(out["shifts"], MAX_SHIFT_LINES, asked_band=next((x.band for x in bench if x.band), ""),
                                   asked_segment=next((x.segment for x in bench if x.segment), ""), text=ask_text,
-                                  quartile_asked=bool(fg.QUARTILE_ASK.search(ask_text)))
+                                  quartile_asked=bool(fg.QUARTILE_ASK.search(ask_text)),
+                                  best=bool(fg.statistic_wants(ask_text).get("best")))
     # A chart whose summed total moved between editions prints one code-rendered note instead of the line changes
     # across the break (figures.stack_break); the notes come first and share the print cap.
     ps.shifts = merge_shifts((list(out.get("breaks") or []) + chosen)[:MAX_SHIFT_LINES], carried)
