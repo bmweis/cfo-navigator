@@ -1014,7 +1014,30 @@ _REVENUES = re.compile(r"\brevenues\b")
 # subscription, recurring, ARR, MRR or named-product-line base is a different base and stays apart).
 _DENOM_SYNONYMS = {
     "gaap revenue": "revenue",
+    # Subscription revenue with the accounting basis spelled out, in either word order ("% of GAAP subscription
+    # revenue", "percent of subscription GAAP revenue"). Same logic as "gaap revenue"; it never joins total revenue.
+    "gaap subscription revenue": "subscription revenue",
+    "subscription gaap revenue": "subscription revenue",
+    # The retention family (Net/Gross Dollar Retention, Gross Dollar Churn, Net New ARR) divides by the ARR the
+    # cohort started with, and publishers spell that four ways. They group as one starting-ARR base. Deliberately
+    # NOT here, each its own group: "prior period arr" / "prior arr" (the prior period may be a quarter, not the
+    # cohort start), "average bop and eop arr", "starting arr annualized", a dated "arr contracted at ...",
+    # "window not defined", "as ndr", and any text naming MRR.
+    "beginning arr": "starting arr",
+    "beginning cohort arr": "starting arr",
+    "cohort arr": "starting arr",
 }
+_PLUS = re.compile(r"\s*\+\s*")
+_EMPLOYEES = re.compile(r"\bemployees\b")
+_FTES = re.compile(r"\bftes?\b")
+
+
+def _dedupe_adjacent(key: str) -> str:
+    out: list[str] = []
+    for w in key.split():
+        if not out or out[-1] != w:
+            out.append(w)
+    return " ".join(out)
 
 
 def denominator_group(raw) -> tuple[str, str]:
@@ -1022,7 +1045,9 @@ def denominator_group(raw) -> tuple[str, str]:
     tier is "" when nothing but formatting was removed, "synonym" when a tier-2 equivalent applied, "own" for an
     empty or "not stated" denominator, which group alone and never join a stated basis.
       Tier 1, formatting only: case, punctuation, "percent of" / "% of" / "as a percent of", "total", "line",
-        "a"/"an", whitespace, a period or year tail, plural "revenues".
+        "a"/"an", whitespace, a period or year tail, plural "revenues", "+" = "plus", and "FTE"/"FTEs"/"employees"
+        read as the one word "employee" (the shared period-word list used to DROP "fte", so "ARR per FTE" became
+        "arr per" and "EOP ARR / EOP FTEs" became "eop arr eop"; a role token such as "AE" is never dropped).
       Tier 2, `_DENOM_SYNONYMS`.
     Never merged here: revenue vs ARR, MRR vs ARR, subscription or recurring revenue vs total revenue,
     percent of revenue vs percent of ARR, margin-adjusted vs plain (any extra word keeps a key apart)."""
@@ -1031,8 +1056,10 @@ def denominator_group(raw) -> tuple[str, str]:
         return "", "own"
     if _UNSTATED_DENOM.match(text):
         return "(not stated)", "own"
-    t = _REVENUES.sub("revenue", _TIER1_NOISE.sub(" ", _lc(text)))
-    key = _denom_key(t)
+    t = _PLUS.sub(" plus ", _lc(text))
+    t = _REVENUES.sub("revenue", _TIER1_NOISE.sub(" ", t))
+    t = _FTES.sub("employee", _EMPLOYEES.sub("employee", t))
+    key = _dedupe_adjacent(_denom_key(t))
     if key in _DENOM_SYNONYMS:
         return _DENOM_SYNONYMS[key], "synonym"
     return key, ""
