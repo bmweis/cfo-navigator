@@ -1525,7 +1525,7 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
             if k in sent_keys and k not in uniq_rows:
                 uniq_rows[k] = r
     ps.table_rows = list(uniq_rows.values())
-    ps.stat_wants = fg.statistic_wants(" ".join(getattr(x, "text", "") or "" for x in subs))
+    ps.stat_wants = fg.statistic_wants(" ".join(getattr(x, "text", "") or "" for x in todo))
     ps.table_kinds = table_render.kinds_present(ps.table_rows)
     ps.left_out_detail = {}
     for s in todo:
