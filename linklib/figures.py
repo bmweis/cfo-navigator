@@ -617,6 +617,19 @@ def _basis_key(s) -> str:
     return _BASIS.get(t, t)
 
 
+# A band printed on one of these bases is a tier of something other than company size (an ACV or ARPA price tier, a
+# customer count, a headcount range), so it is never "exact" or "adjacent" to a company ARR or revenue band
+# (ask_questions id 104: High Alpha "Greater than $250k" by ACV matched a $20M-$50M ask as containing it).
+# ARR and revenue stay comparable (a band labelled ARR in one edition and revenue in the next is the same size ask);
+# an empty, "none" or unrecognised basis is left alone (fail open: nothing is dropped on a value we have not seen).
+NON_SIZE_BASES = frozenset({"other", "employees", "customers", "acv", "arpa", "price"})
+
+
+def size_basis_comparable(basis) -> bool:
+    """True when a figure's band basis can be matched against a company-size (ARR or revenue) band."""
+    return _basis_key(basis) not in NON_SIZE_BASES
+
+
 # --- editions ------------------------------------------------------------------
 
 _YEAR_IN_NAME = re.compile(r"\b(?:19|20)\d{2}\b")
@@ -1628,8 +1641,10 @@ def is_quartile_stat(statistic) -> bool:
     return bool(_QUARTILE_STATS.match(_lc(statistic).strip()))
 
 
-def _stat_rank(statistic) -> int:
+def _stat_rank(statistic, best: bool = False) -> int:
     t = _lc(statistic)
+    if best and (is_quartile_stat(t) or re.search(r"\btargets?\b", t)):
+        return -1
     return 0 if t == "median" else (1 if t in ("mean", "average", "avg") else 2)
 
 
@@ -1650,7 +1665,7 @@ def shift_tier(sh: dict, asked_band: str = "", asked_segment: str = "", text: st
 
 
 def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segment: str = "", text: str = "",
-                quartile_asked: bool = False) -> tuple[list[dict], dict]:
+                quartile_asked: bool = False, best: bool = False) -> tuple[list[dict], dict]:
     """(the shifts to print, in the order to print them, and a note dict). The CODE chooses and orders; the model
     prints the first four of the list (the system inserts them; six when lines carried from the earlier answer are merged). Order: tier (headline series, then a named cohort, then other cohorts), median
     before mean before other, then size. A bottom or top quartile shift is left out unless the question asked for a
@@ -1662,13 +1677,13 @@ def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segmen
     is unchanged; the lowest-ranked older-only line gives way. Returns note {"quartile_left_out": n}."""
     pool, quart = [], 0
     for sh in shifts:
-        if is_quartile_stat(sh.get("statistic")) and not quartile_asked:
+        if is_quartile_stat(sh.get("statistic")) and not (quartile_asked or best):
             quart += 1
             continue
         pool.append(sh)
     # A line that reaches the newest edition of its series (_newest_edition_pair) sorts ahead of an older-only line of the
     # same tier and statistic, and is its own family, so the history line of the same metric cannot push it into `rest`.
-    ordered = sorted(pool, key=lambda sh: (shift_tier(sh, asked_band, asked_segment, text), _stat_rank(sh.get("statistic")),
+    ordered = sorted(pool, key=lambda sh: (shift_tier(sh, asked_band, asked_segment, text), _stat_rank(sh.get("statistic"), best),
                                            0 if sh.get("newest_edition") else 1,
                                            -(sh.get("size") or 0) / (sh.get("threshold") or 1), sh["line"]))
     seen: set = set()
@@ -1753,16 +1768,29 @@ def _flag(row: dict, match: str, gap: str) -> None:
 # what a row cap cuts first; nothing is removed because of its statistic.
 _WANT_RANGE = re.compile(r"\b(?:ranges?|spread|quartiles?|interquartile|percentiles?|p25|p75|iqr)\b")
 _WANT_EXTREME = re.compile(r"\b(?:min|max|minimum|maximum|lowest|highest|smallest|largest)\b")
+# "Typical" is the default and needs no cue: median, then mean. A best-in-class cue moves top quartile, top decile and
+# target rows to the front. When a typical cue is also present ("typical ... for a high performing company") it wins:
+# the question asks what is normal, so nothing is pulled forward. Used by find_figures, pick_rows and the tables.
+_WANT_BEST = re.compile(r"\b(?:good|strong|best|top|high[- ]performing|high[- ]performers?|top[- ]performers?|best[- ]in[- ]class|"
+                        r"elite|leading|aim(?:ing)? for|targets?|to aspire)\b")
+_WANT_TYPICAL = re.compile(r"\b(?:typical|typically|average|norm|normal|median|common|commonly|usual|usually)\b")
 
 
 def statistic_wants(text: str) -> dict:
     low = _lc(text)
-    return {"range": bool(_WANT_RANGE.search(low)), "extreme": bool(_WANT_EXTREME.search(low))}
+    typical = bool(_WANT_TYPICAL.search(low))
+    return {"range": bool(_WANT_RANGE.search(low)), "extreme": bool(_WANT_EXTREME.search(low)),
+            "best": bool(_WANT_BEST.search(low)) and not typical, "typical": typical}
+
+
+_TOP_STAT = re.compile(r"^(?:top[\s_-]?quartile|upper[\s_-]?quartile|top[\s_-]?decile|p\s?(?:75|90)|q3|75th|90th)")
 
 
 def statistic_rank(statistic, wants: dict | None = None) -> float:
     wants = wants or {}
     s = _lc(statistic)
+    if wants.get("best") and (_TOP_STAT.match(s) or re.search(r"\btargets?\b", s)):
+        return -1          # a best-in-class question leads with the top quartile, decile and target rows
     if s in ("median", "p50", "50th percentile", "50th"):
         return 0
     if s in ("mean", "average", "avg"):
@@ -1771,7 +1799,22 @@ def statistic_rank(statistic, wants: dict | None = None) -> float:
         return 2.5 if wants.get("extreme") else 5
     if re.match(r"^(p\d+|\d+(st|nd|rd|th)( percentile)?|q[1-4]|(top|bottom|upper|lower) quartile|top_quartile|bottom_quartile)", s):
         return 1.5 if wants.get("range") else 4
+    if s == "other" or re.search(r"\btargets?\b", s):
+        return 3          # "other" is a printed extreme (a decile row, a best-in-class row) and a target is a plan: both after the central values
     return 2          # empty, "value", "reported": the single printed value
+
+
+def apply_statistic_intent(rows: list[dict], wants: dict | None) -> tuple[list[dict], int]:
+    """(rows, n left out). For a plain or "typical" question the table shows central values only: quartile, decile,
+    min/max, "other" and target rows are left out WHEN at least one median, mean or single printed value is present
+    (so a question never ends up with an empty table). A best-in-class, range or extreme question keeps everything."""
+    wants = wants or {}
+    if wants.get("best") or wants.get("range") or wants.get("extreme"):
+        return rows, 0
+    if not any(statistic_rank(r.get("statistic")) <= 2 for r in rows):
+        return rows, 0
+    keep = [r for r in rows if statistic_rank(r.get("statistic")) <= 2]
+    return keep, len(rows) - len(keep)
 
 
 _ISO_DATE = re.compile(r"(?<!\d)((?:19|20)\d{2})-(\d{2})(?:-(\d{2}))?(?!\d)")
@@ -1840,6 +1883,10 @@ def row_table_kind(row: dict) -> str:
         if re.search(r"\bmargin\b|\bprofit", name) and not expense_line_of(row.get("metric") or "", row.get("denominator") or "", unit):
             return "margin"
         if re.search(r"revenue|arr", denom) or expense_line_of(row.get("metric") or "", row.get("denominator") or "", unit):
+            return "spend_share"
+        # A growth rate printed "percent year over year" has neither word in its denominator; it is still a percent
+        # row the percent table shows (ask_questions id 104: Benchmarkit's $20M-$50M median of 15 was sent and never shown).
+        if re.search(r"\bgrowth\b|\byoy\b", name) and re.search(r"year|yoy|prior|annual", denom):
             return "spend_share"
         return "other"
     if _lc(unit) in ("count", "fte", "ftes", "employees", "people", "") and _HEAD_DENOM.search(name):
@@ -2197,6 +2244,13 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
     pb = parse_band(band) if band not in (None, "") else None
     if band not in (None, "") and pb is None:
         notes.append(f"The requested band '{band}' could not be read, so bands were not matched.")
+    if pb is not None and pb["kind"] == "money" and _basis_key(basis) not in NON_SIZE_BASES:
+        other_basis = [r for r in rows if not size_basis_comparable(r["band_basis"])]
+        if other_basis:
+            rows = [r for r in rows if size_basis_comparable(r["band_basis"])]
+            shown = sorted({f"{r['band']} ({r['segment'] or r['band_basis']})" for r in other_basis})[:4]
+            notes.append(f"{len(other_basis)} figure(s) are banded on something other than company ARR or revenue "
+                         f"(for example {'; '.join(shown)}), so they were not matched against the size you asked and are left out.")
     if pb is not None:
         groups: dict[tuple, list[dict]] = {}
         for r in rows:
