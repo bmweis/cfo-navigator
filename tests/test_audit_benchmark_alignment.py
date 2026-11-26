@@ -121,7 +121,7 @@ def test_all_files_written_with_headers(tmp_path):
     heads = {
         "metrics.csv": ["metric", "rows", "reports", "resolves_to", "resolved_via", "sample_report_slug"],
         "canonical.csv": ["canonical_metric", "raw_strings", "reports", "rows", "aliases"],
-        "denominators.csv": ["canonical_metric", "denominator", "rows", "reports", "basis"],
+        "denominators.csv": ["canonical_metric", "denominator", "rows", "reports", "basis", "group", "tier"],
         "statistics.csv": ["value", "rows"], "read_from.csv": ["value", "rows"],
         "units.csv": ["value", "rows"], "band_basis.csv": ["value", "rows"],
         "bands.csv": ["band", "rows", "reports", "sources", "parsed", "placed", "band_basis_values"],

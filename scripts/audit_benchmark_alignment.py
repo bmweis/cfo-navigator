@@ -138,9 +138,20 @@ def build(conn: sqlite3.Connection, out_dir: str) -> str:
             for r in by_metric[m]:
                 groups[r["denominator"]].append(r)
         for d, rs in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
-            den_out.append((c, d, len(rs), len({x["report_slug"] for x in rs}), fg.denominator_basis(d)))
+            den_out.append([c, d, len(rs), len({x["report_slug"] for x in rs}), fg.denominator_basis(d)])
+    # group and tier (what pairing sees): a string alone in its group, or empty / "not stated", is "own"; a group of
+    # several raw strings is "mechanical" (formatting only) unless a tier-2 synonym joined it ("synonym").
+    members: dict[tuple, set] = defaultdict(set)
+    for row in den_out:
+        members[(row[0], fg.denominator_group(row[1])[0])].add(row[1])
+    for row in den_out:
+        g, tier = fg.denominator_group(row[1])
+        if tier != "synonym":
+            tier = "own" if tier == "own" or len(members[(row[0], g)]) == 1 else "mechanical"
+        row += [g or "(empty)", tier]
+    den_out = [tuple(r) for r in den_out]
     den_out.sort(key=lambda t: (t[0], -t[2]))
-    _write_csv(out_dir, "denominators.csv", ["canonical_metric", "denominator", "rows", "reports", "basis"], den_out)
+    _write_csv(out_dir, "denominators.csv", ["canonical_metric", "denominator", "rows", "reports", "basis", "group", "tier"], den_out)
 
     # --- plain value counts ----------------------------------------------------------------
     for col, fname in (("statistic", "statistics.csv"), ("read_from", "read_from.csv"),
