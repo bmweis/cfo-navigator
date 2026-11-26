@@ -1039,6 +1039,16 @@ _DENOM_SYNONYMS = {
     "beginning arr": "starting arr",
     "beginning cohort arr": "starting arr",
     "cohort arr": "starting arr",
+    # ARR growth (percent change in ARR over twelve months): publishers word the one measure seven ways. Each key
+    # below is the tier-1 key of one printed wording and joins the first ("year over year arr growth"). The metric
+    # name is part of every series key, so a bare "year over year" here can never merge ARR growth with another
+    # metric's growth. "prior arr" and "prior period arr" (retention bases) stay apart: those are not these.
+    "yoy arr growth": "year over year arr growth",                         # "YoY ARR growth"
+    "arr year earlier": "year over year arr growth",                       # "% of ARR a year earlier"
+    "current arr minu arr 12 month prior arr 12 month prior": "year over year arr growth",   # "(current ARR minus ARR 12 months prior) / ARR 12 months prior"
+    "year over year": "year over year arr growth",                         # "percent year over year"
+    "arr prior year arr 1": "year over year arr growth",                   # "ARR / Prior Year ARR - 1"
+    "prior year arr": "year over year arr growth",                         # "percent of prior-year ARR"
 }
 _PLUS = re.compile(r"\s*\+\s*")
 _EMPLOYEES = re.compile(r"\bemployees\b")
