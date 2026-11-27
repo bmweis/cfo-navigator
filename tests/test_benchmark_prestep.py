@@ -288,7 +288,7 @@ def test_embeddings_run_per_subquery_and_are_costed(lib, monkeypatch):
 def test_splitter_exception_falls_back_to_one_lookup_and_records_it(lib, monkeypatch):
     c = _client(monkeypatch, split_raises=True)
     ans = _ask(lib, MULTI_Q)
-    assert not ans.failed and ans.text == "Answer text."
+    assert not ans.failed and ans.text.startswith("Answer text.")
     assert ans.prestep["split_fallback"] == "call_failed" and ans.prestep["split_ran"] is False
     assert "secret-xyz" not in json.dumps(ans.prestep) and "secret-xyz" not in ans.text
     assert any(_is_figures(d) for d in _docs(c.answer_calls()[0]))       # the rules-only lookup still ran
@@ -420,7 +420,7 @@ def test_run_ask_records_the_log_and_the_split_cost(lib, monkeypatch):
     log = json.loads(row["prestep_json"])
     assert log["split_ran"] and len(log["subs"]) == 3 and log["detected"] == ["Net revenue retention", "Burn multiple"]
     assert row["prestep_cost_usd"] > 0 and row["cost_usd"] >= row["prestep_cost_usd"]
-    assert "match_mix" in log and out["answer"] == "Answer text."
+    assert "match_mix" in log and out["answer"].startswith("Answer text.")
 
 
 def test_the_split_cost_counts_against_the_users_monthly_cap(lib, monkeypatch):

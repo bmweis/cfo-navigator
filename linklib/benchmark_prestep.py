@@ -1059,6 +1059,7 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
             key = (r["report_slug"], r["figure_key"])
             if key not in seen_keys:
                 seen_keys.add(key)
+                r["segment_asked"] = bool(seg_m)      # read by table_render: with a segment asked, no row ranks by segment
                 rows.append(r)
     # Closest match first, then newest edition first across ALL the sub-query's metrics. Always
     # newest first, change over time included: oldest first let a long run of old editions use up
@@ -1682,7 +1683,8 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub], carried: list[dict] | None
     chosen, note = fg.rank_shifts(out["shifts"], MAX_SHIFT_LINES, asked_band=next((x.band for x in bench if x.band), ""),
                                   asked_segment=next((x.segment for x in bench if x.segment), ""), text=ask_text,
                                   quartile_asked=bool(fg.QUARTILE_ASK.search(ask_text)),
-                                  best=bool(fg.statistic_wants(ask_text).get("best")))
+                                  best=bool(fg.statistic_wants(ask_text).get("best")),
+                                  wants=fg.statistic_wants(ask_text))
     # A chart whose summed total moved between editions prints one code-rendered note instead of the line changes
     # across the break (figures.stack_break); the notes come first and share the print cap.
     ps.shifts = merge_shifts((list(out.get("breaks") or []) + chosen)[:MAX_SHIFT_LINES], carried)
@@ -1692,6 +1694,9 @@ def _shift_notes(lib, ps: "Prestep", subs: list[Sub], carried: list[dict] | None
         ps.shifts_skipped = ps.shifts_skipped[:10] + [f"and {len(out['skipped']) - 10} more"]
     if note["quartile_left_out"]:
         ps.shifts_skipped.append(f"{note['quartile_left_out']} quartile shift(s) left out: the question did not ask for a quartile")
+    if note.get("stat_left_out"):
+        ps.shifts_skipped.append(f"{note['stat_left_out']} shift(s) left out: a median or mean shift exists and the "
+                                 "question did not ask for a quartile, extreme or target")
     for sh in chosen:
         if sh.get("line_item_differs"):
             ps.shifts_outliers.append(f"endpoint basis differs: {sh['metric_from']} (from) vs {sh['metric']} (to) in one computed line; check they are the same line item")
