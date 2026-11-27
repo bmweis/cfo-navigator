@@ -393,6 +393,100 @@ def parse_registry_tsv(text: str) -> tuple[list[RegistryRow], list[str]]:
     return rows, errors
 
 
+NAME_MAP_STATUSES = ("safe", "keep_separate", "decision")
+
+
+def parse_name_map_tsv(text: str) -> tuple[list[dict], list[str]]:
+    """(rows, errors) for a metric-name map file: header `raw_name<TAB>canonical_metric<TAB>status`
+    (required), one row per line. Format errors only; the checks that need the database are in
+    plan_name_map. The same raw name twice with different values is an error; an identical
+    repeat is dropped."""
+    rows: list[dict] = []
+    errors: list[str] = []
+    seen: dict[str, tuple] = {}
+    lines = [(i, ln) for i, ln in enumerate((text or "").splitlines(), start=1) if ln.strip()]
+    if not lines:
+        return [], ["The file has no rows."]
+    head = [c.strip().lower() for c in lines[0][1].split("\t")]
+    if head != ["raw_name", "canonical_metric", "status"]:
+        return [], ["The first line must be the header: raw_name, canonical_metric, status (tab-separated)."]
+    for i, ln in lines[1:]:
+        cells = ln.split("\t")
+        if len(cells) != 3:
+            errors.append(f"Line {i} has {len(cells)} fields, not 3.")
+            continue
+        raw, canon, status = (c.strip() for c in cells)
+        key = _lc(raw)
+        if not key:
+            errors.append(f"Line {i} has no raw_name.")
+            continue
+        status = status.lower()
+        if status not in NAME_MAP_STATUSES:
+            errors.append(f"Line {i}: status {status!r} is not one of safe, keep_separate, decision.")
+            continue
+        if status == "safe" and not canon:
+            errors.append(f"Line {i}: {raw!r} is safe but has no canonical_metric.")
+            continue
+        if status != "safe" and canon:
+            errors.append(f"Line {i}: {raw!r} is {status}, so canonical_metric must be empty.")
+            continue
+        val = (canon.casefold(), status)
+        if key in seen:
+            if seen[key] != val:
+                errors.append(f"Line {i}: {raw!r} appears twice with different values.")
+            continue
+        seen[key] = val
+        rows.append({"line": i, "raw": raw, "raw_lower": key, "canonical": canon, "status": status})
+    if not rows and not errors:
+        errors.append("The file has no rows.")
+    return rows, errors
+
+
+def plan_name_map(lib, rows: list[dict]) -> dict:
+    """What loading these rows would do, with every refusal reason. Reads only.
+    {"errors": [...], "writes": [(raw_lower, canonical, status)], "new": n, "changed": n,
+    "unchanged": n}. A safe row must name a registry canonical (matched ignoring case, stored
+    in the registry's spelling); a short alias is refused, and so is a raw name that is already
+    an alias or canonical of a different metric. Any error means nothing should be written."""
+    idx = _load_metric_index(lib)
+    existing = {r["raw_name_lower"]: (r["canonical_metric"] or "", r["status"])
+                for r in lib.conn.execute("SELECT raw_name_lower, canonical_metric, status FROM metric_name_map")}
+    errors: list[str] = []
+    writes: list[tuple[str, str, str]] = []
+    counts = {"new": 0, "changed": 0, "unchanged": 0}
+    for r in rows:
+        canonical = ""
+        if r["status"] == "safe":
+            c = idx["canon"].get(r["canonical"].casefold())
+            if c is None:
+                owners = sorted(idx["claims"].get(r["canonical"].casefold(), ()))
+                hint = (f" It is an alias of {', '.join(repr(o) for o in owners)}; use the full canonical name."
+                        if owners else "")
+                errors.append(f"Line {r['line']}: {r['canonical']!r} is not a canonical metric in the registry.{hint}")
+                continue
+            canonical = c
+            owners = idx["claims"].get(r["raw_lower"], set())
+            if idx["canon"].get(r["raw_lower"], canonical) != canonical:
+                errors.append(f"Line {r['line']}: {r['raw']!r} is already the canonical name "
+                              f"{idx['canon'][r['raw_lower']]!r}, not {canonical!r}.")
+                continue
+            if owners and owners != {canonical}:
+                errors.append(f"Line {r['line']}: {r['raw']!r} is already an alias of "
+                              + ", ".join(repr(o) for o in sorted(owners)) + f", not {canonical!r}; the alias is not overwritten.")
+                continue
+        new = (canonical, r["status"])
+        old = existing.get(r["raw_lower"])
+        if old is None:
+            counts["new"] += 1
+        elif old == new:
+            counts["unchanged"] += 1
+            continue
+        else:
+            counts["changed"] += 1
+        writes.append((r["raw_lower"], canonical, r["status"]))
+    return {"errors": errors, "writes": writes, **counts}
+
+
 # =============================================================================
 # Phase B (issue #738): the query layer. No model calls, no HTML, read-only.
 # Everything below takes an open Library and returns plain dicts, so the admin
@@ -476,7 +570,9 @@ def _load_metric_index(lib) -> dict:
     canonical names. Aliases come from metric_aliases AND from each registry
     row's Contains line, because metric_aliases keeps one owner per alias (the
     seed's first-wins rule) while the Contains lines show every claimant. An
-    alias a human edited (edited=1) is that metric's alone."""
+    alias a human edited (edited=1) is that metric's alone. metric_name_map
+    rows count only when status is 'safe' with a canonical; 'keep_separate' and
+    'decision' rows are review records and never resolve a name."""
     canon: dict[str, str] = {}
     card: dict[str, str] = {}
     claims: dict[str, set[str]] = {}
@@ -494,7 +590,8 @@ def _load_metric_index(lib) -> dict:
             claims.setdefault(a, set()).add(r["canonical_metric"])
     mapped: dict[str, set[str]] = {}
     for r in lib.conn.execute(
-            "SELECT raw_name_lower, canonical_metric FROM metric_name_map WHERE canonical_metric IS NOT NULL AND canonical_metric <> ''"):
+            "SELECT raw_name_lower, canonical_metric FROM metric_name_map "
+            "WHERE status = 'safe' AND canonical_metric IS NOT NULL AND canonical_metric <> ''"):
         mapped.setdefault(r["canonical_metric"], set()).add(r["raw_name_lower"].casefold())
     return {"canon": canon, "card": card, "claims": claims, "mapped": mapped}
 
@@ -525,6 +622,42 @@ def _names_for(idx: dict, canonical: str) -> set[str]:
     names |= {a for a, owners in idx["claims"].items() if canonical in owners}
     names |= idx["mapped"].get(canonical, set())
     return names
+
+
+RESOLVED_BY = ("canonical", "alias", "name_map", "name_key_family", "ambiguous_alias", "none")
+
+
+def family_index(idx: dict) -> dict[frozenset, set[str]]:
+    """name_key -> canonical metrics whose known names (canonical, aliases, safe mapped names)
+    fold to that key. find_figures returns a stored name when its key is in this index for the
+    resolved metric, so this is the same rule, built once for a whole list of names."""
+    out: dict[frozenset, set[str]] = {}
+    for c in idx["canon"].values():
+        for n in _names_for(idx, c):
+            k = name_key(n)
+            if k:
+                out.setdefault(k, set()).add(c)
+    return out
+
+
+def classify_metric_name(lib, raw: str, idx: dict | None = None, fam: dict | None = None) -> tuple[str, list[str]]:
+    """(resolved_by, canonicals) for one stored metric string, by the precedence find_figures
+    uses: canonical, alias, name_map (resolve_metric), then name_key_family (the stored name
+    folds to the same key as a known name of exactly one metric). Several owners, by alias or
+    by family, is "ambiguous_alias". No match is ("none", [])."""
+    idx = idx or _load_metric_index(lib)
+    res = resolve_metric(lib, raw, idx)
+    if res:
+        if len(res) > 1:
+            return "ambiguous_alias", sorted(x["canonical"] for x in res)
+        return res[0]["match"], [res[0]["canonical"]]
+    k = name_key(raw)
+    owners = sorted((fam if fam is not None else family_index(idx)).get(k, ())) if k else []
+    if len(owners) == 1:
+        return "name_key_family", owners
+    if len(owners) > 1:
+        return "ambiguous_alias", owners
+    return "none", []
 
 
 def detect_metrics(lib, text: str) -> list[dict]:
