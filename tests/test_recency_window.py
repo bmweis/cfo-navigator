@@ -146,3 +146,20 @@ def test_plain_questions_are_not(q):
 def test_history_of_a_metric_still_counts_as_history():
     # Chosen: "history" asks about the past even in a definition-shaped sentence (showing more is the safe error).
     assert bp.asks_about_past("what is the history of the SaaS metric")
+
+
+@pytest.mark.parametrize("q", ["typical NRR in SaaS", "growth in the $20M-$50M band", "NRR in the current year"])
+def test_in_without_a_past_year_is_not_history(q):
+    assert not bp.asks_about_past(q), q
+
+
+def test_in_past_year_only(monkeypatch):
+    assert bp.asks_about_past("NRR in 2022") and bp.asks_about_past("back in 2021 what was growth")
+
+
+@pytest.mark.parametrize("q", ["typical NRR in SaaS", "growth in the $20M-$50M band", "NRR in the current year"])
+def test_overbroad_in_pattern_would_fail(q):
+    """Guard on the guard: a loose "in <anything>" pattern matches all three non-triggers; the real one matches none."""
+    import re
+    assert re.search(r"\bin\s+\S+", q, re.I), "the loose pattern would trigger"
+    assert not bp._IN_YEAR.search(q)
