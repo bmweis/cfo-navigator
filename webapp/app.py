@@ -27390,7 +27390,7 @@ _SCRIPT_REGISTRY = [
      "tables.",
      "After each figures ingest, and before changing any alias, band or family rule.",
      ["None beyond the database path"],
-     ["python -m scripts.audit_benchmark_alignment --db /data/library.db --out-dir /tmp/alignment-audit"]),
+     ["python -m scripts.audit_benchmark_alignment --db /data/library.db --out-dir /data/alignment-audit-YYYY-MM-DD"]),
     ("report_figure_landings.py", "scripts.report_figure_landings", "Reusable diagnostic",
      "Read-only report of how many loaded benchmark reports resolve to a landing URL, by which "
      "rule (set on /admin/reader/figures, stored, linked digest, or digest slug), and which do "

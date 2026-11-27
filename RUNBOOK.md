@@ -172,6 +172,11 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
       zip again at `/admin/reader/figures` (a reload is idempotent). The load
       history is in `figures-audit.jsonl` beside the database, which the
       restore does not replace.
+- [ ] Check the **Metric name map** line on `/admin/reader/figures`. The map
+      (`metric_name_map`) lives inside `library.db`, so a restore to an older
+      snapshot drops mappings loaded since. Keep the approved TSV files outside
+      the database and upload them again there (preview, then load; a reload is
+      idempotent and takes effect on the next lookup).
 - [ ] If you restored an older snapshot: diff against the step-1 download
       for member saves / contacts / ask history created since the snapshot,
       and re-add anything worth keeping (article re-saves are idempotent —
