@@ -630,6 +630,29 @@ def size_basis_comparable(basis) -> bool:
     return _basis_key(basis) not in NON_SIZE_BASES
 
 
+# The question itself names a non-size basis (ACV, ARPA, a price tier, employees or headcount): those rows are what
+# was asked for, so a question with no size band keeps them. Matched on the metric name and the user's own words.
+# Deliberately broad on the "keep" side: a false hit only returns the pre-Phase-1 behaviour (every row).
+_NAMES_NON_SIZE_BASIS = re.compile(
+    r"\b(?:acv|arpa|arpu|price tiers?|pricing tiers?|price points?|plan tiers?|employees?|headcount|ftes?|"
+    r"customer counts?|number of customers)\b", re.I)
+
+
+def names_non_size_basis(*texts) -> bool:
+    """True when the metric or the question names ACV, ARPA, a price tier, employees or a customer count."""
+    return bool(_NAMES_NON_SIZE_BASIS.search(" ".join(str(t or "") for t in texts)))
+
+
+# A segment cell that means "every company": empty, "all", "overall", the index wordings the publishers use. Stored text
+# is never rewritten; this only decides how a row ranks and what the Segment column calls it.
+_ALL_SEGMENTS = frozenset({"", "all", "overall", "total population", "all saas companies"})
+
+
+def segment_is_all(segment) -> bool:
+    """True for the all-segment case (case-insensitive, spacing collapsed). One helper for ranking and the "All" label."""
+    return _lc(segment) in _ALL_SEGMENTS
+
+
 # --- editions ------------------------------------------------------------------
 
 _YEAR_IN_NAME = re.compile(r"\b(?:19|20)\d{2}\b")
@@ -1675,7 +1698,7 @@ def shift_tier(sh: dict, asked_band: str = "", asked_segment: str = "", text: st
 
 
 def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segment: str = "", text: str = "",
-                quartile_asked: bool = False, best: bool = False) -> tuple[list[dict], dict]:
+                quartile_asked: bool = False, best: bool = False, wants: dict | None = None) -> tuple[list[dict], dict]:
     """(the shifts to print, in the order to print them, and a note dict). The CODE chooses and orders; the model
     prints the first four of the list (the system inserts them; six when lines carried from the earlier answer are merged). Order: tier (headline series, then a named cohort, then other cohorts), median
     before mean before other, then size. A bottom or top quartile shift is left out unless the question asked for a
@@ -1691,6 +1714,12 @@ def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segmen
             quart += 1
             continue
         pool.append(sh)
+    # Statistic intent, the same rule the tables use (apply_statistic_intent; shifts carry `statistic` at the top
+    # level, so no adapter is needed): a plain or typical question keeps median, mean and single-value shifts and leaves
+    # out "other", min/max and target ones WHEN a central shift exists. All kinds, margins included.
+    stat_gone = 0
+    if wants is not None:
+        pool, stat_gone = apply_statistic_intent(pool, wants)
     # A line that reaches the newest edition of its series (_newest_edition_pair) sorts ahead of an older-only line of the
     # same tier and statistic, and is its own family, so the history line of the same metric cannot push it into `rest`.
     ordered = sorted(pool, key=lambda sh: (shift_tier(sh, asked_band, asked_segment, text), _stat_rank(sh.get("statistic"), best),
@@ -1707,7 +1736,8 @@ def rank_shifts(shifts: list[dict], cap: int, asked_band: str = "", asked_segmen
             fam = ("newest", fam)
         (rest if fam in seen else first).append(sh)
         seen.add(fam)
-    return (first + rest)[:cap], {"quartile_left_out": quart, "over_cap": max(len(first) + len(rest) - cap, 0)}
+    return (first + rest)[:cap], {"quartile_left_out": quart, "stat_left_out": stat_gone,
+                                  "over_cap": max(len(first) + len(rest) - cap, 0)}
 
 
 # --- find_figures --------------------------------------------------------------
@@ -1897,6 +1927,11 @@ def row_table_kind(row: dict) -> str:
         # A growth rate printed "percent year over year" has neither word in its denominator; it is still a percent
         # row the percent table shows (ask_questions id 104: Benchmarkit's $20M-$50M median of 15 was sent and never shown).
         if re.search(r"\bgrowth\b|\byoy\b", name) and re.search(r"year|yoy|prior|annual", denom):
+            return "spend_share"
+        # A retention rate whose denominator is a formula or a cohort description names neither revenue nor ARR
+        # (Jurassic: "1 plus (upsold minus ...) / sum of MRR from same cohort"; OpenView: "annual, after churn,
+        # including upsell and expansion, in cohorts"): the metric name decides, so it is not "other" (id 106).
+        if re.search(r"\bretention\b", name):
             return "spend_share"
         return "other"
     if _lc(unit) in ("count", "fte", "ftes", "employees", "people", "") and _HEAD_DENOM.search(name):
@@ -2254,6 +2289,22 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
     pb = parse_band(band) if band not in (None, "") else None
     if band not in (None, "") and pb is None:
         notes.append(f"The requested band '{band}' could not be read, so bands were not matched.")
+    if band in (None, "") and not names_non_size_basis(metric, basis_hint, denominator) \
+            and _basis_key(basis) not in NON_SIZE_BASES:
+        # No size asked and no other basis named: a band that is not company size (ACV, ARPA, a price tier, headcount)
+        # must not share the default table with ARR bands (ask_questions id 106). Fail open: when nothing else is on
+        # file the rows stay, with a note.
+        other_basis = [r for r in rows if not size_basis_comparable(r["band_basis"])]
+        if other_basis:
+            shown = sorted({f"{r['band']} ({r['segment'] or r['band_basis']})" for r in other_basis})[:4]
+            if len(other_basis) < len(rows):
+                rows = [r for r in rows if size_basis_comparable(r["band_basis"])]
+                notes.append(f"{len(other_basis)} figure(s) banded by something other than company size "
+                             f"(for example {'; '.join(shown)}) were left out. Ask for that basis by name "
+                             "(ACV, ARPA, a price tier, employees) to see them.")
+            else:
+                notes.append(f"Every figure on file for this metric is banded by something other than company size "
+                             f"(for example {'; '.join(shown)}); they are returned as printed.")
     if pb is not None and pb["kind"] == "money" and _basis_key(basis) not in NON_SIZE_BASES:
         other_basis = [r for r in rows if not size_basis_comparable(r["band_basis"])]
         if other_basis:

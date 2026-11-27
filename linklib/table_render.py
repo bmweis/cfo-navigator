@@ -159,8 +159,16 @@ def _size_rank(r: dict) -> tuple:
     return (1, k[1], k[2], "")
 
 
+def _hygiene_rank(r: dict) -> tuple:
+    """(estimate, segment) flags, each 0 first. An estimate or forecast row ("2026E") ranks after actual-period rows;
+    a segment-specific row ranks after all-segment rows UNLESS a segment was asked (the prestep stamps segment_asked on
+    every row it gathers: then the rows are what was asked and none ranks by segment). Never a drop."""
+    seg = 0 if r.get("segment_asked") or fg.segment_is_all(r.get("segment")) else 1
+    return (1 if fg.is_estimate(r) else 0, seg)
+
+
 def row_order_key(r: dict) -> tuple:
-    return (_size_rank(r) + _edition_rank(r) + (fg.statistic_rank(r.get("statistic")),)
+    return (_size_rank(r) + _hygiene_rank(r) + _edition_rank(r) + (fg.statistic_rank(r.get("statistic")),)
             + (str(r.get("source") or ""), str(r.get("figure_key"))))
 
 
@@ -271,7 +279,9 @@ def select_rows(rows: list[dict], cap: int, within) -> list[dict]:
     """The rows a capped table keeps, chosen BEFORE the display sort so the cap never cuts the newest data.
     Rule: every publisher's newest edition per band comes first, taking one row from each publisher-and-band group
     in turn (public, band-less groups ahead of banded ones, then the more recent edition), then the next row of
-    each group, and so on; rows of an older edition fill what is left. `within` orders the rows inside one group.
+    each group, and so on; rows of an older edition fill what is left. Estimate rows ("2026E") rank after every
+    actual row and, when no segment was asked, segment-specific rows after all-segment rows (_hygiene_rank); both
+    are printed when room allows, never dropped here. `within` orders the rows inside one group.
     Returns at most `cap` rows; the caller sorts them for display."""
     groups: dict[tuple, list[dict]] = {}
     for r in rows:
@@ -282,9 +292,9 @@ def select_rows(rows: list[dict], cap: int, within) -> list[dict]:
         cur = sorted([r for r in g if r.get("report_slug") == newest], key=within)
         old = sorted([r for r in g if r.get("report_slug") != newest], key=lambda r: (_edition_rank(r), within(r)))
         for i, r in enumerate(cur):
-            ranked.append((0, i, _size_rank(r)[0] != 0) + _edition_rank(r) + _size_rank(r)[1:3] + (str(r.get("source") or ""), str(r.get("figure_key")), id(r), r))
+            ranked.append(_hygiene_rank(r) + (0, i, _size_rank(r)[0] != 0) + _edition_rank(r) + _size_rank(r)[1:3] + (str(r.get("source") or ""), str(r.get("figure_key")), id(r), r))
         for i, r in enumerate(old):
-            ranked.append((1,) + _edition_rank(r) + (i,) + (str(r.get("source") or ""), str(r.get("figure_key")), id(r), r))
+            ranked.append(_hygiene_rank(r) + (1,) + _edition_rank(r) + (i,) + (str(r.get("source") or ""), str(r.get("figure_key")), id(r), r))
     ranked.sort(key=lambda t: t[:-2])
     return [t[-1] for t in ranked[:cap]]
 
@@ -295,7 +305,7 @@ def _is_expense_row(r: dict) -> bool:
 
 def _segment_text(r: dict) -> str:
     seg = _cell(r.get("segment"))
-    return "All" if not seg or seg.lower() in ("all", "overall") else seg
+    return "All" if fg.segment_is_all(seg) else seg
 
 
 def _basis_line(shown: list[dict]) -> str:
