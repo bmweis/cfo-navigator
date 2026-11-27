@@ -119,7 +119,8 @@ def test_db_without_figure_tables_is_refused_plainly(tmp_path, capsys):
 def test_all_files_written_with_headers(tmp_path):
     _, out = _run(tmp_path)
     heads = {
-        "metrics.csv": ["metric", "rows", "reports", "resolves_to", "resolved_via", "sample_report_slug"],
+        "metrics.csv": ["raw", "raw_lower", "name_key", "resolved_by", "canonical", "rows", "reports", "unit_top",
+                        "denominator_top", "sample_1", "sample_2", "sample_3"],
         "canonical.csv": ["canonical_metric", "raw_strings", "reports", "rows", "aliases"],
         "denominators.csv": ["canonical_metric", "denominator", "rows", "reports", "basis", "group", "tier"],
         "statistics.csv": ["value", "rows"], "read_from.csv": ["value", "rows"],
@@ -138,13 +139,13 @@ def test_all_files_written_with_headers(tmp_path):
 
 def test_metrics_resolution_and_illustrative_exclusion(tmp_path):
     _, out = _run(tmp_path)
-    m = {r["metric"]: r for r in _csv(out, "metrics.csv")}
-    assert m["NRR"]["resolves_to"] == "Net revenue retention" and m["NRR"]["resolved_via"] == "alias"
-    assert m["NRR"]["rows"] == "2" and m["NRR"]["reports"] == "2" and m["NRR"]["sample_report_slug"] == "eb-2098"
-    assert m["Net revenue retention"]["resolved_via"] == "canonical"
-    assert m["Mystery ratio"]["resolves_to"] == "" and m["Mystery ratio"]["resolved_via"] == "none"
+    m = {r["raw"]: r for r in _csv(out, "metrics.csv")}
+    assert m["NRR"]["canonical"] == "Net revenue retention" and m["NRR"]["resolved_by"] == "alias"
+    assert m["NRR"]["rows"] == "2" and m["NRR"]["reports"] == "2" and m["NRR"]["sample_1"].startswith("eb-2099 |")
+    assert m["Net revenue retention"]["resolved_by"] == "canonical"
+    assert m["Mystery ratio"]["canonical"] == "" and m["Mystery ratio"]["resolved_by"] == "none"
     amb = m["net new mrr"]
-    assert amb["resolves_to"] == "ambiguous:MRR;Net New ARR" and amb["resolved_via"] == "ambiguous_alias"
+    assert amb["canonical"] == "ambiguous:MRR;Net New ARR" and amb["resolved_by"] == "ambiguous_alias"
     assert m["Burn multiple"]["rows"] == "2"          # the illustrative third row is not counted
     assert [int(r["rows"]) for r in _csv(out, "metrics.csv")] == sorted(
         (int(r["rows"]) for r in _csv(out, "metrics.csv")), reverse=True)

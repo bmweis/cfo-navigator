@@ -338,7 +338,7 @@ def test_vendors_short_description_has_a_named_width(env):
 def test_metric_name_map_copy_no_longer_promises_a_job(env):
     appmod, c = env
     html = c.get("/admin/reader/figures").text
-    assert "Metric name map: not used yet." in html and "later job" not in html
+    assert "Metric name map: empty" in html and "later job" not in html
 
 
 # --- C2: shift thresholds ------------------------------------------------------------------------------------

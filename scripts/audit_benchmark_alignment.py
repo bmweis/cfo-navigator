@@ -21,7 +21,8 @@ directory the shell is in).
 Usage (production, over `railway ssh`):
     python -m scripts.audit_benchmark_alignment --db /data/library.db --out-dir /tmp/alignment-audit
 
-Files written: metrics.csv, canonical.csv, denominators.csv, statistics.csv,
+Files written: metrics.csv (raw, raw_lower, name_key, resolved_by, canonical, rows, reports, unit_top,
+denominator_top, three samples), canonical.csv, denominators.csv, statistics.csv,
 read_from.csv, units.csv, band_basis.csv, bands.csv, duplicates.csv, conflicts.csv (one row
 per conflicting cell: the cell key, then the figure ids, values, pages and read_from of the rows
 that disagree), editions.csv, summary.txt (the same text is printed to stdout).
@@ -98,27 +99,29 @@ def build(conn: sqlite3.Connection, out_dir: str) -> str:
     by_metric: dict[str, list[dict]] = defaultdict(list)
     for r in rows:
         by_metric[r["metric"]].append(r)
-    resolved: dict[str, list[dict]] = {m: fg.resolve_metric(shim, m, idx) for m in by_metric}
+    fam = fg.family_index(idx)
+    resolved: dict[str, tuple[str, list[str]]] = {m: fg.classify_metric_name(shim, m, idx, fam) for m in by_metric}
     metric_out = []
     for m, rs in by_metric.items():
-        res = resolved[m]
-        if not res:
-            to, via = "", "none"
-        elif len(res) > 1:
-            to, via = "ambiguous:" + ";".join(sorted(x["canonical"] for x in res)), "ambiguous_alias"
-        else:
-            to, via = res[0]["canonical"], res[0]["match"]
-        metric_out.append((m, len(rs), len({x["report_slug"] for x in rs}), to, via,
-                           min(x["report_slug"] for x in rs)))
-    metric_out.sort(key=lambda t: (-t[1], t[0]))
+        via, cans = resolved[m]
+        to = (";".join(cans) if via != "ambiguous_alias" else "ambiguous:" + ";".join(cans)) if cans else ""
+        top = lambda col: Counter(x[col] for x in rs).most_common(1)[0][0]
+        samples = [f"{x['report_slug']} | {x['band']} | {x['statistic']} | {x['denominator']} | {x['value']}"
+                   for x in sorted(rs, key=lambda x: x["id"])[:3]]
+        samples += [""] * (3 - len(samples))
+        key = " ".join(sorted(fg.name_key(m)))
+        metric_out.append((m, m.strip().casefold(), key, via, to, len(rs), len({x["report_slug"] for x in rs}),
+                           top("unit"), top("denominator"), *samples))
+    metric_out.sort(key=lambda t: (-t[5], t[0]))
     _write_csv(out_dir, "metrics.csv",
-               ["metric", "rows", "reports", "resolves_to", "resolved_via", "sample_report_slug"], metric_out)
+               ["raw", "raw_lower", "name_key", "resolved_by", "canonical", "rows", "reports", "unit_top",
+                "denominator_top", "sample_1", "sample_2", "sample_3"], metric_out)
 
     # --- canonical.csv: one row per registry metric (an ambiguous string counts under every owner)
     owners: dict[str, list[str]] = defaultdict(list)       # canonical -> raw strings
-    for m, res in resolved.items():
-        for x in res:
-            owners[x["canonical"]].append(m)
+    for m, (_via, cans) in resolved.items():
+        for c in cans:
+            owners[c].append(m)
     canon_out = []
     for c in sorted(idx["canon"].values()):
         raws = owners.get(c, [])
@@ -227,21 +230,28 @@ def build(conn: sqlite3.Connection, out_dir: str) -> str:
                          ("metric", "denominator", "statistic", "unit", "read_from", "band", "band_basis",
                           "segment", "data_period"))
     L.append("Distinct values: " + distinct)
-    unresolved = [t for t in metric_out if t[4] == "none"]
-    ambiguous = [t for t in metric_out if t[4] == "ambiguous_alias"]
-    L.append(f"Metric strings: {len(metric_out)}; do not resolve: {len(unresolved)} "
-             f"({sum(t[1] for t in unresolved)} rows); ambiguous: {len(ambiguous)} ({sum(t[1] for t in ambiguous)} rows)")
+    unresolved = [t for t in metric_out if t[3] == "none"]
+    ambiguous = [t for t in metric_out if t[3] == "ambiguous_alias"]
+    by_via = Counter(t[3] for t in metric_out)
+    exact_phrase_unresolved = [t for t in metric_out if t[3] in ("none", "name_key_family")]
+    L.append(f"Metric strings: {len(metric_out)}; do not resolve (resolved_by none): {len(unresolved)} "
+             f"({sum(t[5] for t in unresolved)} rows); ambiguous: {len(ambiguous)} ({sum(t[5] for t in ambiguous)} rows)")
+    L.append("Resolved by: " + ", ".join(f"{v}={by_via.get(v, 0)}" for v in fg.RESOLVED_BY))
+    L.append(f"Old exact-phrase count (none + name_key_family, what the audit used to call unresolved): "
+             f"{len(exact_phrase_unresolved)} ({sum(t[5] for t in exact_phrase_unresolved)} rows)")
     unplaced = [t for t in band_out if t[5] == "no"]
     L.append(f"Bands: {len(band_out)}; unplaced: {len(unplaced)} ({sum(t[1] for t in unplaced)} rows)")
     L.append(f"Reports: {len(ed_out)}; duplicate rows: {sum(t[2] for t in dup_out)}; "
              f"conflicting cells: {sum(t[3] for t in dup_out)}")
     L.append("Ten largest unresolved metric strings (rows):")
     for t in unresolved[:10]:
-        L.append(f"  {t[1]:>6}  {t[0]}")
+        L.append(f"  {t[5]:>6}  {t[0]}")
     if not unresolved:
         L.append("  none")
     L.append("Files: metrics, canonical, denominators, statistics, read_from, units, band_basis, bands, "
              "duplicates, conflicts, editions (.csv)")
+    L.append(f"Output folder: {os.path.abspath(out_dir)}")
+    L.append("Reminder: /tmp output is lost at the next deploy; copy the files off the container before then.")
     text = "\n".join(L) + "\n"
     with open(os.path.join(out_dir, "summary.txt"), "w", encoding="utf-8") as f:
         f.write(text)

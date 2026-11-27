@@ -8509,6 +8509,24 @@ class Library:
             raise
         return out
 
+    def apply_name_map(self, writes) -> int:
+        """Upsert planned metric_name_map rows (figures.plan_name_map's `writes`:
+        (raw_name_lower, canonical_metric, status)), one transaction. Idempotent.
+        Returns the number of rows written."""
+        if self.conn.in_transaction:
+            self.conn.commit()
+        try:
+            for raw_lower, canonical, status in writes:
+                self.conn.execute(
+                    "INSERT INTO metric_name_map (raw_name_lower, canonical_metric, status) VALUES (?, ?, ?) "
+                    "ON CONFLICT(raw_name_lower) DO UPDATE SET canonical_metric = excluded.canonical_metric, "
+                    "status = excluded.status", (raw_lower, canonical or None, status))
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        return len(writes)
+
     def list_unmirrored_original_content(self) -> list[dict]:
         """Every original_content row that SHOULD have a working articles
         mirror (per linklib.original_content_sync.sync_original_content_

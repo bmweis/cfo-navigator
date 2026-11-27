@@ -27378,7 +27378,9 @@ _SCRIPT_REGISTRY = [
       "python -m scripts.probe_digest_rank --db /data/library.db --question \"...\" --watch-text \"High Alpha\""]),
     ("audit_benchmark_alignment.py", "scripts.audit_benchmark_alignment", "Reusable diagnostic",
      "Read-only audit of the benchmark figures, for the counts the MCP cannot return: every raw "
-     "metric string with its row count and whether it resolves to a canonical metric, canonical "
+     "metric string with its row count, how it resolves (resolved_by: canonical, alias, name_map, "
+     "name_key_family, ambiguous_alias or none, by the same rules find_figures uses), the canonical "
+     "metric, top unit and denominator and three samples; canonical "
      "metrics with zero rows, denominators, statistics, units, read_from values, bands the parser "
      "cannot place, duplicate and conflicting cells per report, and editions per report family. "
      "denominators.csv also shows the group each raw denominator pairs under and its tier. "
@@ -27388,7 +27390,7 @@ _SCRIPT_REGISTRY = [
      "tables.",
      "After each figures ingest, and before changing any alias, band or family rule.",
      ["None beyond the database path"],
-     ["python -m scripts.audit_benchmark_alignment --db /data/library.db --out-dir /tmp/alignment-audit"]),
+     ["python -m scripts.audit_benchmark_alignment --db /data/library.db --out-dir /data/alignment-audit-YYYY-MM-DD"]),
     ("report_figure_landings.py", "scripts.report_figure_landings", "Reusable diagnostic",
      "Read-only report of how many loaded benchmark reports resolve to a landing URL, by which "
      "rule (set on /admin/reader/figures, stored, linked digest, or digest slug), and which do "
@@ -39177,7 +39179,7 @@ applySortFilter('figures');
 </form>
 
 <h2 style="font-size:16px;margin:28px 0 10px;">What is loaded</h2>
-<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;max-width:900px;">{summary["reports"]:,} reports, {summary["figures"]:,} figures, {summary["metrics"]:,} distinct metric names. {summary["null_value_num"]:,} {"figure has" if summary["null_value_num"] == 1 else "figures have"} a value that is not a plain number. Metric registry: {summary["registry"]:,} metrics, {summary["aliases"]:,} aliases. Metric name map: {"not used yet" if not summary["name_map"] else format(summary["name_map"], ",") + " rows"}.</p>
+<p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 12px;max-width:900px;">{summary["reports"]:,} reports, {summary["figures"]:,} figures, {summary["metrics"]:,} distinct metric names. {summary["null_value_num"]:,} {"figure has" if summary["null_value_num"] == 1 else "figures have"} a value that is not a plain number. Metric registry: {summary["registry"]:,} metrics, {summary["aliases"]:,} aliases. Metric name map: {"empty" if not summary["name_map"] else format(summary["name_map"], ",") + " rows"} (only <code>safe</code> rows resolve a name).</p>
 {reports_table}
 
 <h2 style="font-size:16px;margin:28px 0 10px;">Shift thresholds</h2>
@@ -39207,6 +39209,18 @@ applySortFilter('figures');
     <span style="font-size:12.5px;color:var(--muted);">Safe to run again. An alias edited by hand is never changed.</span>
   </div>
 </form>
+
+<h2 style="font-size:16px;margin:28px 0 10px;">Metric name map</h2>
+<form method="post" action="/admin/reader/figures/name-map-preview" enctype="multipart/form-data"
+      style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:12px;max-width:900px;">
+  <label for="name-map-tsv" style="display:block;font-size:13px;font-weight:600;margin:0 0 6px;">Name map (TSV)</label>
+  <input type="file" id="name-map-tsv" name="tsv" accept=".tsv,.txt,text/tab-separated-values,text/plain" style="max-width:100%;margin:0 0 14px;">
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Preview</button>
+    <span style="font-size:12.5px;color:var(--muted);">Preview writes nothing.</span>
+  </div>
+</form>
+<p style="font-size:13px;color:var(--muted);margin:0 0 8px;max-width:900px;">Header line required: <code>raw_name</code>, <code>canonical_metric</code>, <code>status</code>, tab-separated. Status is <code>safe</code> (needs a canonical metric from the registry), <code>keep_separate</code> or <code>decision</code> (canonical left empty). Only <code>safe</code> rows change how a name resolves; the other two are kept for review. A change takes effect on the next lookup. The map lives in the database, so a restore to an older backup drops newer rows; load the approved file again.</p>
 
 <h2 style="font-size:16px;margin:32px 0 10px;">Zip format</h2>
 <ul style="max-width:900px;font-size:13.5px;color:var(--ink-soft);line-height:1.65;padding-left:20px;margin:0 0 14px;">
@@ -39799,6 +39813,93 @@ async def admin_figures_registry(request: Request):
     if out["conflicts"]:
         note += " Conflicts: " + "; ".join(out["conflicts"]) + "."
     return _figures_page(notice=_esc(note))
+
+
+def _name_map_preview_page(plan: dict, rows: list[dict], tsv_text: str) -> HTMLResponse:
+    n_write = len(plan["writes"])
+    errs = "".join(f"<li>{_esc(e)}</li>" for e in plan["errors"])
+    if plan["errors"]:
+        action = (f'<div style="background:var(--coral-wash);border:1px solid var(--coral);border-radius:10px;padding:12px 16px;max-width:900px;">'
+                  f'<strong>Nothing can be loaded until these are fixed:</strong><ul style="margin:8px 0 0;padding-left:20px;">{errs}</ul></div>')
+    elif n_write:
+        action = f"""<form method="post" action="/admin/reader/figures/name-map-load" style="margin:16px 0 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+  <textarea name="tsv_text" hidden>{_esc(tsv_text)}</textarea>
+  <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Load {n_write} mapping{"s" if n_write != 1 else ""}</button>
+  <span style="font-size:12.5px;color:var(--muted);">All or none are written in one step.</span>
+</form>"""
+    else:
+        action = '<p style="font-size:13.5px;color:var(--muted);margin:16px 0 0;">Nothing would change.</p>'
+    summary = (f"{len(rows)} row{'s' if len(rows) != 1 else ''}: {plan['new']} new, {plan['changed']} changed, "
+               f"{plan['unchanged']} unchanged. Nothing has been written.")
+    body = f"""<div class="page page-standard">
+<p style="margin:0 0 4px;"><a href="/admin/reader/figures" style="font-size:13px;color:var(--muted);">&larr; Benchmark figures</a></p>
+<h1>Preview metric name map</h1>
+<p style="color:var(--muted);margin:0 0 16px;">{_esc(summary)}</p>
+{action}
+</div>"""
+    return HTMLResponse(_page("Preview metric name map—Admin", "Admin", body, authed=True),
+                        status_code=400 if plan["errors"] else 200)
+
+
+@app.post("/admin/reader/figures/name-map-preview", response_class=HTMLResponse)
+async def admin_figures_name_map_preview(request: Request):
+    """Parses a metric-name map TSV and shows what loading it would do. Writes nothing."""
+    _digest_gate(request, post=True)
+    from linklib.figures import parse_name_map_tsv, plan_name_map
+    form = await request.form(max_part_size=_DIGESTS_FORM_MAX_BYTES)
+    data = _figures_upload_bytes(form, "tsv")
+    if not data:
+        return _figures_page(error="Choose a name-map TSV file.", status=400)
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return _figures_page(error="The file is not UTF-8 text. Nothing was written.", status=400)
+    rows, errors = parse_name_map_tsv(text)
+    if errors:
+        return _figures_page(error="Nothing was written. " + " ".join(errors), status=400)
+
+    def _work():
+        lib = _lib()
+        try:
+            return plan_name_map(lib, rows)
+        finally:
+            lib.close()
+    plan = await run_in_threadpool(_work)
+    return _name_map_preview_page(plan, rows, text)
+
+
+@app.post("/admin/reader/figures/name-map-load", response_class=HTMLResponse)
+async def admin_figures_name_map_load(request: Request):
+    """Loads the name map. Re-parses and re-plans against the current database (never
+    trusts the preview), one transaction, one archive_audit_log row and one figures-audit line."""
+    _digest_gate(request, post=True)
+    from linklib import figures as _fg
+    form = await request.form(max_part_size=_DIGESTS_FORM_MAX_BYTES)
+    rows, errors = _fg.parse_name_map_tsv(str(form.get("tsv_text") or ""))
+    if errors:
+        return _figures_page(error="Nothing was written. " + " ".join(errors), status=400)
+    username = (_current_claims(request) or {}).get("username", "") or ""
+
+    def _work():
+        lib = _lib()
+        try:
+            plan = _fg.plan_name_map(lib, rows)
+            if plan["errors"]:
+                return plan, 0
+            lib.apply_name_map(plan["writes"])
+            _log_archive_audit(lib, request, "edit", None,
+                               detail=(f"metric name map load: {plan['new']} new, {plan['changed']} changed, "
+                                       f"{plan['unchanged']} unchanged"))
+            return plan, len(plan["writes"])
+        finally:
+            lib.close()
+    plan, written = await run_in_threadpool(_work)
+    if plan["errors"]:
+        return _figures_page(error="Nothing was written. " + " ".join(plan["errors"]), status=400)
+    _fg.append_audit(DB_PATH, {"event": "name_map_load", "user": username, "rows": len(rows),
+                               "new": plan["new"], "changed": plan["changed"], "unchanged": plan["unchanged"]})
+    return _figures_page(notice=_esc(f"Metric name map loaded: {plan['new']} new, {plan['changed']} changed, "
+                                     f"{plan['unchanged']} unchanged."))
 
 
 def _backup_status_banner(backup_rows: list[dict]) -> str:
