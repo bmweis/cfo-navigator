@@ -109,13 +109,30 @@ def _basis_text(r: dict) -> str:
 
 
 def _is_target(r: dict) -> bool:
-    return fg.is_estimate(r) or bool(re.search(r"\b(?:targets?|benchmark target|plan|goal)\b", (r.get("statistic") or "").lower()))
+    return fg.is_estimate(r) or _stat_is_target(r)
+
+
+def _stat_is_target(r: dict) -> bool:
+    return bool(re.search(r"\b(?:targets?|benchmark target|plan|goal)\b", (r.get("statistic") or "").lower()))
+
+
+# One display map for a stored statistic: plain words and spaces, never an underscore. p25, p75 and p90 stay as printed.
+_STAT_DISPLAY = {"top_quartile": "top quartile", "bottom_quartile": "bottom quartile",
+                 "upper_quartile": "upper quartile", "lower_quartile": "lower quartile", "top_decile": "top decile",
+                 "bottom_decile": "bottom decile"}
+
+
+def statistic_display(stat) -> str:
+    s = _cell(stat)
+    return _STAT_DISPLAY.get(s.lower()) or s.replace("_", " ")
 
 
 def statistic_text(r: dict) -> str:
-    if _is_target(r):
+    """The stored statistic as stored (display map applied). Only a statistic that itself says target, plan or goal
+    prints "target"; a forward estimate keeps its statistic and is marked in the Report and period cell."""
+    if _stat_is_target(r):
         return "target"
-    return _cell(r.get("statistic")) or "not stated"
+    return statistic_display(r.get("statistic")) or "not stated"
 
 
 def _band_text(r: dict) -> str:
@@ -147,12 +164,24 @@ def row_order_key(r: dict) -> tuple:
             + (str(r.get("source") or ""), str(r.get("figure_key"))))
 
 
+def canonical_display(name) -> str:
+    """A canonical metric name in sentence case: first letter capital, other words lower case, acronyms (ARR, NDR)
+    and words with digits or symbols as written. "Net Dollar Retention" gives "Net dollar retention"."""
+    out = []
+    for i, w in enumerate(_cell(name).split()):
+        keep = (w.isupper() and len(w) > 1) or any(c.isdigit() or c in "&/" for c in w)
+        out.append(w if keep else (w[:1].upper() + w[1:].lower() if i == 0 else w.lower()))
+    return " ".join(out)
+
+
 def _item_of(r: dict) -> tuple[str, str]:
     """(sort key, label) for the line item a spend row is."""
     line = fg.expense_line_of(r.get("metric") or "", r.get("denominator") or "", r.get("unit") or "")
     if line:
         return (f"0{_ITEM_ORDER.index(line) if line in _ITEM_ORDER else 9}", _ITEM_LABEL.get(line, line))
-    name = _cell(r.get("metric"))
+    # A metric the registry resolved prints its one canonical name; an unresolved one keeps the raw name.
+    canon = _cell(r.get("canonical_metric"))
+    name = canonical_display(canon) if canon else _cell(r.get("metric"))
     return ("1" + name.lower(), name)
 
 
@@ -161,6 +190,9 @@ def _report_text(r: dict, n: int | None) -> str:
     per = _cell(r.get("data_period"))
     if per:
         t += f", {per}"
+    if fg.is_estimate(r) and not _stat_is_target(r):
+        # a forward estimate keeps its stored statistic; the period cell says what it is
+        t += ", respondent expectation" if re.search(r"expectation", str(r.get("note") or ""), re.I) else ", estimate"
     return t + (f" [{n}]" if n else "")
 
 
@@ -192,7 +224,8 @@ def _ranges(rows: list[dict], cite) -> list[str]:
             continue
         if r.get("band_context") or not (r.get("band") or "").strip():
             continue
-        groups.setdefault((_item_of(r)[1], _basis_text(r), statistic_text(r).lower()), []).append(r)
+        bkey = _basis_text(r) if r.get("basis_group") else (fg.denominator_group(r.get("denominator"))[0] or _basis_text(r))
+        groups.setdefault((_item_of(r)[1], bkey, statistic_text(r).lower()), []).append(r)
     lines: list[str] = []
     for key in sorted(groups, key=lambda k: (_item_of(groups[k][0])[0], k[1], k[2])):
         clusters: list[list[dict]] = []
@@ -217,7 +250,8 @@ def _ranges(rows: list[dict], cite) -> list[str]:
             hi = max(uniq, key=lambda p: p["value_num"])
             if lo["value_num"] == hi["value_num"]:
                 continue
-            item, basis, stat = key
+            item, stat = key[0], key[2]
+            basis = _basis_text(uniq[0])
             band = _band_text(pts[0]) if len(clusters) > 1 else ""
             lines.append(f"- {item}{', ' + band if band else ''}, {stat}, {basis}: {value_text(lo)} to {value_text(hi)} "
                          f"({len(uniq)} sources). Low: {_report_text(lo, cite(lo))}. High: {_report_text(hi, cite(hi))}.")
@@ -255,8 +289,76 @@ def select_rows(rows: list[dict], cap: int, within) -> list[dict]:
     return [t[-1] for t in ranked[:cap]]
 
 
+def _is_expense_row(r: dict) -> bool:
+    return bool(fg.expense_line_of(r.get("metric") or "", r.get("denominator") or "", r.get("unit") or ""))
+
+
+def _segment_text(r: dict) -> str:
+    seg = _cell(r.get("segment"))
+    return "All" if not seg or seg.lower() in ("all", "overall") else seg
+
+
+def _basis_line(shown: list[dict]) -> str:
+    """"Basis as printed: ..." for a table whose rows all share one denominator group: the most frequent raw
+    wording, and a note when publishers worded it differently."""
+    raws: dict[str, int] = {}
+    for r in shown:
+        raws[_basis_text(r)] = raws.get(_basis_text(r), 0) + 1
+    top = max(raws, key=lambda k: (raws[k], -len(k)))
+    return f"Basis as printed: {top}" + (" (publisher wording varies slightly)" if len(raws) > 1 else "")
+
+
+def build_metric_table(rows: list[dict], cite) -> tuple[str, dict]:
+    """The table for percent rows that are not expense lines (ARR growth, retention, ...). Headed by the canonical
+    metric name(s), never "Spend by function". The Line item column shows only when more than one metric is printed;
+    the Basis column only when the printed bases differ in substance (otherwise one line under the table); a Segment
+    column only when some printed row has a segment other than all."""
+    kept = select_rows(rows, SPEND_ROW_CAP, lambda r: (_item_of(r)[0], fg.statistic_rank(r.get("statistic"))))
+    shown = sorted(kept, key=lambda r: (_item_of(r)[0],) + row_order_key(r))
+    capped = max(len(rows) - len(shown), 0)
+    names: list[str] = []
+    for r in shown:
+        n = _item_of(r)[1]
+        if n not in names:
+            names.append(n)
+    multi = len(names) > 1
+    groups = {fg.denominator_group(r.get("denominator"))[0] for r in shown}
+    one_basis = len(groups) == 1
+    segs = any(_segment_text(r) != "All" for r in shown)
+    head = (["Line item"] if multi else []) + ["Band"] + (["Segment"] if segs else []) + ["Statistic", "Value"] \
+        + ([] if one_basis else ["Basis"]) + ["Report and period"]
+    body = []
+    for r in shown:
+        body.append(([_item_of(r)[1]] if multi else []) + [_band_text(r)] + ([_segment_text(r)] if segs else [])
+                    + [statistic_text(r), value_text(r)] + ([] if one_basis else [_basis_text(r)]) + [_report_text(r, cite(r))])
+    md = f"**{' and '.join(names)}**\n\n" + _table(head, body)
+    if one_basis:
+        md += "\n\n" + _basis_line(shown)
+    rng = _ranges(shown, cite)
+    if rng:
+        md += "\n\nRanges across the sent points:\n" + "\n".join(rng)
+    return md, {"rows": len(shown), "capped": capped, "ranges": len(rng), "dropped": _dropped(rows, kept),
+                "periods": [r.get("data_period") for r in shown]}
+
+
 def build_spend(rows: list[dict], cite) -> tuple[str, dict]:
-    """(markdown, info). rows: the sent spend rows; cite(row) -> the [n] of the row's report document."""
+    """(markdown, info). rows: the sent percent rows; cite(row) -> the [n] of the row's report document. Expense-line
+    rows (S&M, R&D, G&A, ...) get the "Spend by function" table; any other percent row (ARR growth, retention) gets its
+    own table headed by its canonical metric, so growth is never shown as spend."""
+    exp = [r for r in rows if _is_expense_row(r)]
+    other = [r for r in rows if not _is_expense_row(r)]
+    if other and not exp:
+        return build_metric_table(other, cite)
+    if other:
+        md1, i1 = _build_expense_table(exp, cite)
+        md2, i2 = build_metric_table(other, cite)
+        return md1 + "\n\n" + md2, {"rows": i1["rows"] + i2["rows"], "capped": i1["capped"] + i2["capped"],
+                                    "ranges": i1["ranges"] + i2["ranges"], "dropped": i1["dropped"] + i2["dropped"],
+                                    "periods": i1["periods"] + i2["periods"]}
+    return _build_expense_table(exp, cite)
+
+
+def _build_expense_table(rows: list[dict], cite) -> tuple[str, dict]:
     kept = select_rows(rows, SPEND_ROW_CAP, lambda r: (_item_of(r)[0], fg.statistic_rank(r.get("statistic"))))
     shown = sorted(kept, key=lambda r: (_item_of(r)[0],) + row_order_key(r))
     capped = max(len(rows) - len(shown), 0)
