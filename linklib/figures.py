@@ -910,6 +910,58 @@ def _year_num(y) -> int:
     return 2000 + int(m.group(1)) if m else -1
 
 
+_PE_YEAR4 = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_PE_YEAR2 = re.compile(r"(?:\b(?:CY|FY)[\s-]*'?|\b[12]H|\bQ[1-4][\s-]*'?)(\d{2})(?!\d)", re.I)
+
+
+def period_end_year(period) -> int | None:
+    """The year a data period ENDS in, None when it names none. `_year_num` takes the first year, so a range
+    ("Q2 2024 to Q2 2025") reads as its start; this reads the last year named in the text ("2010-1H21" is 2021,
+    "Q2 2020 to Q2 2021" is 2021, "12 months ending Mar 2023" is 2023, "CY-24" is 2024). A four-digit year or a
+    two-digit CY/FY/H/Q year counts. `_year_num` stays as it is (it has many callers) and is the fallback."""
+    text = str(period or "")
+    hits = [(m.start(), int(m.group())) for m in _PE_YEAR4.finditer(text)]
+    hits += [(m.start(), 2000 + int(m.group(1))) for m in _PE_YEAR2.finditer(text)]
+    if hits:
+        return max(hits)[1]
+    y = _year_num(text)
+    return y if y > 0 else None
+
+
+# The recency window for a plain (no history asked) lookup: the newest ACTUAL period-end year among the rows
+# plus this many years before it. Fewer than WINDOW_MIN_REPORTS reports inside widens it once, by one year.
+PERIOD_WINDOW_BACK = 1
+WINDOW_MIN_REPORTS = 3
+
+
+def apply_period_window(rows: list[dict]) -> tuple[list[dict], dict | None]:
+    """(rows inside the recency window, info). Anchor = the newest period-end year among rows that are not
+    estimates; kept = anchor and `PERIOD_WINDOW_BACK` years before it. An estimate belongs to the newest
+    edition (the caller only windows newest-edition rows), so it is kept whatever its year, and a row whose
+    period names no year is kept. When fewer than WINDOW_MIN_REPORTS reports are inside, the window widens once
+    by a year. Never returns fewer rows than it would keep for the anchor row itself: with no readable actual
+    year there is no anchor and nothing is dropped (info None).
+    info = {anchor, kept_from, left_out, widened}."""
+    years = [(r, period_end_year(r.get("data_period"))) for r in rows]
+    actual = [y for r, y in years if y is not None and not is_estimate(r)]
+    if not actual:
+        return rows, None
+    anchor = max(actual)
+
+    def keep_from(back: int) -> list[dict]:
+        return [r for r, y in years if y is None or is_estimate(r) or y >= anchor - back]
+
+    back, widened = PERIOD_WINDOW_BACK, False
+    kept = keep_from(back)
+    reports = lambda rs: {r.get("report_slug") or r.get("report") for r in rs if period_end_year(r.get("data_period")) is not None}
+    if len(reports(kept)) < WINDOW_MIN_REPORTS and len(kept) < len(rows):
+        back, widened = back + 1, True
+        kept = keep_from(back)
+    if len(kept) == len(rows):
+        return rows, None
+    return kept, {"anchor": anchor, "kept_from": anchor - back, "left_out": len(rows) - len(kept), "widened": widened}
+
+
 def mark_period_gap(rows: list[dict]) -> None:
     """Set r["period_gap"]: how many years the row's data period is behind the newest data period
     of the SAME report (0 = newest, or unreadable). Within a report the newest period ranks first
@@ -2238,7 +2290,8 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
                  basis=None, denominator=None, all_editions: bool = False,
                  limit: int = DEFAULT_LIMIT, include_illustrative: bool = False,
                  basis_hint: str = "", recent_window: bool = False,
-                 from_year: int | None = None, default_window: bool = False) -> dict:
+                 from_year: int | None = None, default_window: bool = False,
+                 period_window: bool = False) -> dict:
     """Stored figures for a metric, exact matches first, every gap disclosed.
 
     Returns {rows, resolution, notes, total_matching, returned, truncated,
@@ -2543,6 +2596,13 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         rows, rep_notes = collapse_republished(rows, rep_meta)
         notes += rep_notes
 
+    # The recency window (opt-in, a plain lookup only): after the band, basis, segment and non-size-band
+    # filters, so a dropped row can never set the anchor, and before the sort and every cap, so old rows cannot
+    # crowd newer ones out. Off when history, a named year or all editions was asked.
+    period_info = None
+    if period_window and not all_editions and not (year is not None and str(year).strip()):
+        rows, period_info = apply_period_window(rows)
+
     # Newest edition first, always: when a cap cuts rows it cuts the oldest.
     wants = statistic_wants(f"{metric} {basis_hint}")
     mark_period_gap(rows)
@@ -2585,7 +2645,8 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         r.pop("series_override", None)
     return {"rows": rows, "resolution": resolution, "notes": notes, "groups": groups_out, "total_matching": total,
             "returned": len(rows), "truncated": truncated, "unplaced_bands": unplaced,
-            "illustrative_left_out": illustrative_left_out, "illustrative_ids": illustrative_ids}
+            "illustrative_left_out": illustrative_left_out, "illustrative_ids": illustrative_ids,
+            "period_window": period_info}
 
 
 # --- coverage ------------------------------------------------------------------

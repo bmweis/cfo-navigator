@@ -29,6 +29,7 @@ budget; nothing is divided) and sends the documents.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -99,6 +100,22 @@ _SINCE = re.compile(r"\bsince\s+(?:fy\s?)?((?:19|20)\d{2})\b", re.I)
 _FULL_HISTORY = re.compile(
     r"\b(historically|full history|entire history|all editions|every edition|all years|going back|as far back|"
     r"decades?|over the (?:last|past) (?:[6-9]|\d{2,}|ten|twelve|fifteen|twenty) years)\b", re.I)
+# More ways to ask about the past; each turns the recency window off (the same flag as _OVER_TIME).
+_HISTORY_MORE = re.compile(
+    r"\b(last year|prior year|a year ago|years? ago|how (?:has|have)\b|used to(?! (?:calculate|measure|determine|compute|assess|evaluate))|"
+    r"(?:compared (?:to|with)|vs\.?|versus|back in)\s+(?:19|20)\d{2})\b", re.I)
+_IN_YEAR = re.compile(r"\bin\s+((?:19|20)\d{2})\b", re.I)
+
+
+def asks_about_past(question: str) -> bool:
+    """True when the question asks about the past, a shift or a comparison with an earlier time: the recency window
+    is then off. "in <year>" counts only for a year before the current one."""
+    q = question or ""
+    if _OVER_TIME.search(q) or _HISTORY_MORE.search(q):
+        return True
+    return any(int(m.group(1)) < datetime.date.today().year for m in _IN_YEAR.finditer(q))
+
+
 _DEFINITION = re.compile(
     r"\b(define|definition|formula|calculate[ds]?|calculation|computed?|stand for|how is .{0,40} (measured|derived))\b", re.I)
 
@@ -139,6 +156,9 @@ class Sub:
     # Over-time lookups: "" = the recent window, "full" = every edition (historically, all editions),
     # a year = editions from that year on ("since 2015").
     history: str = ""
+    window_left_out: int = 0             # figures the recency window left out (a plain lookup only)
+    window_from: int = 0                 # the earliest year the window kept (lowest across this part's lookups)
+    window_widened: bool = False
     candidates: list = field(default_factory=list, repr=False)   # rows found, before the caps
     capped_rows: int = 0                 # candidates left out by the row cap (oldest, least close first)
     fetch_cut: int = 0                   # rows the per-metric fetch limit cut (oldest first)
@@ -204,6 +224,7 @@ class Prestep:
                       "library_hits": s.library_hits, "figure_rows_left_out": s.truncated_rows + s.capped_rows + s.fetch_cut,
                       "rows_capped": s.capped_rows + s.fetch_cut, "history": s.history,
                       "editions_left_out": next((n for n in s.notes if n.startswith(WINDOW_NOTE_PREFIX)), ""),
+                      "window_left_out": s.window_left_out, "window_from": s.window_from, "window_widened": s.window_widened,
                       "illustrative_left_out": s.illustrative_left_out, "segment_dropped": s.segment_dropped,
                       "documents": s.documents,
                       "match_mix": s.match_mix} for s in self.subs],
@@ -381,7 +402,7 @@ def detect(lib, question: str) -> dict:
     rest_words = [w for w in re.findall(r"[a-z]+", left) if len(w) > 2 and w not in _NOT_BROADER]
     mixed = (questions >= 2 or words > 40 or len(rest_words) >= 6
              or (len(rest_words) >= 3 and bool(re.search(r"\b(and|also|plus|then|as well as)\b", left))))
-    over_time = bool(_OVER_TIME.search(question or ""))
+    over_time = asks_about_past(question)
     history = ""
     if over_time:
         since = _SINCE.search(question or "")
@@ -1044,8 +1065,13 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
                               year=(sub.year if sub.year not in ("", "all") else None),
                               all_editions=all_ed, limit=FIGURE_FETCH_LIMIT,
                               include_illustrative=include_illustrative, basis_hint=sub.text,
-                              default_window=not all_ed,
+                              default_window=not all_ed, period_window=not all_ed and not sub.year,
                               **(_window_args(sub) if all_ed else {}))
+        pw = res.get("period_window")
+        if pw:
+            sub.window_left_out += pw["left_out"]
+            sub.window_from = pw["kept_from"] if not sub.window_from else min(sub.window_from, pw["kept_from"])
+            sub.window_widened = sub.window_widened or pw["widened"]
         sub.fetch_cut += max(res["total_matching"] - res["returned"], 0)
         sub.illustrative_ids |= set(res.get("illustrative_ids", ()))
         sub.illustrative_left_out = len(sub.illustrative_ids)
@@ -1142,6 +1168,16 @@ def status_notes(candidates: list[dict], also_stored: list[dict], sent: set) -> 
 
 
 LEFT_OUT_LINE_REPORTS = 4
+
+
+def older_data_clause(subs: list[Sub]) -> str:
+    """The one short clause for rows the recency window left out: "Older data (before 2025) left out: 31 figures."
+    No per-report list. "" when the window left nothing out (or history was asked, which turns it off)."""
+    n = sum(s.window_left_out for s in subs)
+    starts = [s.window_from for s in subs if s.window_from]
+    if not n or not starts:
+        return ""
+    return f"Older data (before {min(starts)}) left out: {n} figure{'s' if n != 1 else ''}."
 
 
 def left_out_by_report(candidates: list[dict], also_stored: list[dict], sent: set) -> dict[str, int]:
@@ -1558,6 +1594,10 @@ def plan_turn(lib, question: str, *, tier: str, settings: dict, model: str,
             plan.append(f"Not covered by a lookup: {ps.rest_of_question}")
         plan.append("Answer every part, then the rest of the question.")
     closing = left_out_line([ps.left_out_detail]) if ps.left_out_detail else ""
+    older = older_data_clause(todo)
+    if older:
+        plan.append("Older-data clause (one short sentence, copy it as written, once, at the very end after any closing line; "
+                    "do not list the older reports and do not mention it anywhere else):\n" + older)
     if closing:
         plan.append("Closing line for the end of the answer (never inside a table; copy it as written, once, after the last "
                     "table or paragraph, and add nothing about left-out rows anywhere else):\n" + closing)
