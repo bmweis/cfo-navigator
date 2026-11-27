@@ -52,7 +52,7 @@ def lib(tmp_path):
         for m in ("Sales and marketing", "Research and development", "General and administrative")])
     # A row whose basis cannot be told.
     load_report(db, "ex-2024", [
-        frow(report="Example Guide 2024", year="2024", basis="ARR", band="$20M-$30M", metric="S&M expense",
+        frow(report="Example Guide 2024", year="2024", data_period="CY-24", basis="ARR", band="$20M-$30M", metric="S&M expense",
              denominator="", value="35", unit="percent", n="")])
     # Decoys: same words, different measure.
     load_report(db, "decoy-2025", [
