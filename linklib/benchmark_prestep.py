@@ -832,6 +832,21 @@ def _line_floor(rows: list[dict], chosen: list[int], newest_ed: dict, band: str)
     return [i for _, i in add[:LINE_FLOOR_MAX]]
 
 
+def _report_round_robin(rows: list[dict]) -> list[int]:
+    """Indices of rows already sorted best first, taken by report in turns: the best row of each report (reports in the
+    order of their best row), then the next best of each, until all are listed. Inside a report the rank order is kept,
+    so a report never takes a second slot until every other report has had its first. A one-report list comes back in
+    its own order (the same as range(len(rows)))."""
+    per: dict = {}
+    for i, r in enumerate(rows):
+        per.setdefault(r.get("report_slug") or r.get("report"), []).append(i)
+    lists = list(per.values())
+    out: list[int] = []
+    for rnd in range(max((len(v) for v in lists), default=0)):
+        out += [v[rnd] for v in lists if rnd < len(v)]
+    return out
+
+
 def pick_rows(rows: list[dict], cap: int, band: str = "") -> list[dict]:
     """At most `cap` rows from rows already sorted best first (basis group, match, band,
     sample, newest year). Before the rest is filled, the best row of every publisher and of
@@ -886,17 +901,19 @@ def pick_rows(rows: list[dict], cap: int, band: str = "") -> list[dict]:
     chosen += floor[:max(cap - len(chosen), 0)]
     # The expense-line floor: inside the same cap, never past it. Newer editions and the closest band first.
     chosen += [i for i in _line_floor(rows, chosen, newest_ed, band) if i not in chosen][:max(cap - len(chosen), 0)]
+    order = _report_round_robin(rows)
     per_basis: dict[str, int] = {}
     for i in chosen:
         b = rows[i].get("basis_group") or ""
         per_basis[b] = per_basis.get(b, 0) + 1
-    for i, r in enumerate(rows):
+    for i in order:
+        r = rows[i]
         b = r.get("basis_group") or ""
         if b and i not in chosen and per_basis.get(b, 0) < BASIS_RESERVE:
             chosen.append(i)
             per_basis[b] = per_basis.get(b, 0) + 1
     chosen = chosen[:cap]
-    for i in range(len(rows)):
+    for i in order:
         if len(chosen) >= cap:
             break
         if i not in chosen:
@@ -1055,12 +1072,12 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
     segment = fg.usable_segment(lib, sub.segment)
     if sub.segment and not segment:
         sub.segment_dropped = sub.segment
+    all_ed = sub.year == "all" or over_time or bool(sub.history)
     for m in names:
         seg_m = metric_segment(lib, m, sub, segment, include_illustrative)
         if sub.segment and not seg_m:
             sub.segment_dropped = sub.segment
             sub.notes.append(f"Segment not used by the data: {sub.segment}. The figures below are not narrowed to it.")
-        all_ed = sub.year == "all" or over_time or bool(sub.history)
         res = fg.find_figures(lib, m, band=sub.band or None, segment=seg_m or None,
                               year=(sub.year if sub.year not in ("", "all") else None),
                               all_editions=all_ed, limit=FIGURE_FETCH_LIMIT,
@@ -1087,14 +1104,32 @@ def gather(lib, sub: Sub, *, over_time: bool = False, include_illustrative: bool
                 seen_keys.add(key)
                 r["segment_asked"] = bool(seg_m)      # read by table_render: with a segment asked, no row ranks by segment
                 rows.append(r)
+    # One window for the whole part: each metric's call windows on its OWN newest year, so a metric printed only by old
+    # reports ("Annual Net Dollar Retention": KeyBanc 2021, OpenView 2022) kept its old rows (ask_questions id 109).
+    if rows and not all_ed and not sub.year:
+        rows, pw = fg.apply_period_window(rows)
+        if pw:
+            sub.window_left_out += pw["left_out"]
+            sub.window_from = pw["kept_from"]
+            sub.window_widened = sub.window_widened or pw["widened"]
+    # No segment asked and not a top-performer question: performance-tier rows (Pacesetters, Others) are not the typical
+    # company. They go to also_stored (counted in the left-out line) unless nothing else would remain.
+    if not any(r.get("segment_asked") for r in rows) and not fg.asks_for_tiers(sub.text):
+        tier = [r for r in rows if fg.segment_is_tier(r.get("segment"))]
+        if tier and len(tier) < len(rows):
+            sub.also_stored += tier
+            rows = [r for r in rows if not fg.segment_is_tier(r.get("segment"))]
+            sub.notes.append(f"{len(tier)} performance-tier figure(s) (for example Pacesetters, Others) were left out: "
+                             "the question asked for the typical company, not a tier. Ask for top performers to see them.")
     # Closest match first, then newest edition first across ALL the sub-query's metrics. Always
     # newest first, change over time included: oldest first let a long run of old editions use up
     # the cap and the character budget before the newest ones (the 2025 rows never reached the model).
     wants = fg.statistic_wants(sub.text)
     fg.mark_period_gap(rows)
     rows.sort(key=lambda r: (r.get("basis_rank", 0), fg._MATCH_RANK[r["match"]], r.get("band_context", False),
-                             fg._has_sample_size(r), r.get("period_gap", 0), fg.statistic_rank(r["statistic"], wants),
-                             -fg._year_num(r.get("data_period")), -fg._year_num(r.get("report_year")), r["source"]))
+                             r.get("period_gap", 0), fg.statistic_rank(r["statistic"], wants),
+                             -fg._year_num(r.get("data_period")), fg._has_sample_size(r),
+                             -fg._year_num(r.get("report_year")), r["source"]))
     # Noise rule: exact and adjacent-band rows are always sent. Less-close rows (another
     # segment, statistic, basis or a related metric) are sent only when nothing closer
     # exists, at most RELATED_CAP, and the notes say so.
@@ -1171,13 +1206,13 @@ LEFT_OUT_LINE_REPORTS = 4
 
 
 def older_data_clause(subs: list[Sub]) -> str:
-    """The one short clause for rows the recency window left out: "Older data (before 2025) left out: 31 figures."
+    """The one short clause for rows the recency window left out, for the first windowed part only: "Older data (before 2025) left out: 31 figures."
     No per-report list. "" when the window left nothing out (or history was asked, which turns it off)."""
-    n = sum(s.window_left_out for s in subs)
-    starts = [s.window_from for s in subs if s.window_from]
-    if not n or not starts:
+    main = next((s for s in subs if s.window_from and s.window_left_out), None)   # the first part that was windowed
+    if main is None:
         return ""
-    return f"Older data (before {min(starts)}) left out: {n} figure{'s' if n != 1 else ''}."
+    n = main.window_left_out
+    return f"Older data (before {main.window_from}) left out: {n} figure{'s' if n != 1 else ''}."
 
 
 def left_out_by_report(candidates: list[dict], also_stored: list[dict], sent: set) -> dict[str, int]:
