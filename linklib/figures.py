@@ -786,6 +786,23 @@ def segment_is_all(segment) -> bool:
     return _lc(segment) in _ALL_SEGMENTS
 
 
+# Performance-tier segments: a publisher splits one population into a top tier and the rest ("Pacesetters" and "Others",
+# ICONIQ State of Scaling 2026, read from the stored rows). A tier median is not the typical company, so a plain question
+# leaves tier rows out when no segment was asked. Stored text is never changed; add a name only when a stored report prints it.
+PERFORMANCE_TIER_SEGMENTS = frozenset({"pacesetters", "others"})
+_TOP_PERFORMER_CUE = re.compile(r"top[\s-]*performer|best[\s-]*in[\s-]*class|high[\s-]*perform|pacesetter|leaders?\b|top[\s-]*quartile|top\s+decile", re.I)
+
+
+def segment_is_tier(segment) -> bool:
+    """True for a performance-tier segment (Pacesetters, Others). Next to segment_is_all; one helper for the leave-out rule."""
+    return _lc(segment) in PERFORMANCE_TIER_SEGMENTS
+
+
+def asks_for_tiers(text) -> bool:
+    """True when the question is about top performers or best in class: tier rows are what was asked."""
+    return bool(_TOP_PERFORMER_CUE.search(str(text or "")))
+
+
 # --- editions ------------------------------------------------------------------
 
 _YEAR_IN_NAME = re.compile(r"\b(?:19|20)\d{2}\b")
@@ -2607,10 +2624,10 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
     wants = statistic_wants(f"{metric} {basis_hint}")
     mark_period_gap(rows)
     rows.sort(key=lambda r: (r["basis_rank"], _MATCH_RANK[r["match"]], r["band_context"],
-                             _has_sample_size(r),   # a survey that states its sample before a guide that does not
                              r["period_gap"],       # within a report, the newest data period first (FY2025 before FY2024)
                              statistic_rank(r["statistic"], wants),   # median first, extremes last (a cap cuts the last)
                              -_year_num(r["data_period"]),            # newest data period first across reports
+                             _has_sample_size(r),   # then a survey that states its sample before a guide that does not
                              -_year_num(r["report_year"]),
                              r["source"], r["report"], r["band_basis"],
                              (parse_band(r["band"]) or {"lo": 0})["lo"], r["statistic"]))
