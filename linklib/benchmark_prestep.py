@@ -833,17 +833,30 @@ def _line_floor(rows: list[dict], chosen: list[int], newest_ed: dict, band: str)
 
 
 def _report_round_robin(rows: list[dict]) -> list[int]:
-    """Indices of rows already sorted best first, taken by report in turns: the best row of each report (reports in the
-    order of their best row), then the next best of each, until all are listed. Inside a report the rank order is kept,
-    so a report never takes a second slot until every other report has had its first. A one-report list comes back in
-    its own order (the same as range(len(rows)))."""
-    per: dict = {}
-    for i, r in enumerate(rows):
-        per.setdefault(r.get("report_slug") or r.get("report"), []).append(i)
-    lists = list(per.values())
+    """Indices of rows already sorted best first, taken by report in turns INSIDE each tier: a tier is a run of rows
+    with the same basis rank, match and band context (the first three parts of the sort key, so a tier is always
+    contiguous). Inside a tier the best row of each report goes first (reports in the order of their best row), then
+    the next best of each, until the tier is listed; only then does the next tier start. So an exact-band row is never
+    displaced by an adjacent or far-band row because its report has had a turn, and a one-report tier, or a one-report
+    list, comes back in its own order."""
     out: list[int] = []
-    for rnd in range(max((len(v) for v in lists), default=0)):
-        out += [v[rnd] for v in lists if rnd < len(v)]
+    start = 0
+    n = len(rows)
+
+    def tier(r: dict) -> tuple:
+        return (r.get("basis_rank", 0), r.get("match"), bool(r.get("band_context", False)))
+
+    while start < n:
+        end = start + 1
+        while end < n and tier(rows[end]) == tier(rows[start]):
+            end += 1
+        per: dict = {}
+        for i in range(start, end):
+            per.setdefault(rows[i].get("report_slug") or rows[i].get("report"), []).append(i)
+        lists = list(per.values())
+        for rnd in range(max(len(v) for v in lists)):
+            out += [v[rnd] for v in lists if rnd < len(v)]
+        start = end
     return out
 
 

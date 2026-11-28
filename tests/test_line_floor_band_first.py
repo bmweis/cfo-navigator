@@ -53,9 +53,8 @@ def test_near_band_older_row_beats_far_band_newer_row_for_the_last_slot():
     assert len(picked) == cap
     near = {29805, 29801, 29806, 29807} & ks
     assert near, "a Sapphire band that touches the ask is sent"
-    # Phase 2b: the fill is round-robin by report, so the far-band reports (each its own report) now take turns with
-    # the 17 exact rows of one report; the old assertion that not every far row gets in no longer describes the fill.
-    # What matters here, that the near-band Sapphire row is not displaced, is asserted above.
+    # the one far-band row cannot displace every near-band one
+    assert {200, 201, 202, 203, 204, 205, 206, 207} & ks != {200, 201, 202, 203, 204, 205, 206, 207}
 
 
 def test_no_near_band_rows_leaves_the_order_unchanged():

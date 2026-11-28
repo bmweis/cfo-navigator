@@ -141,3 +141,36 @@ def test_older_data_clause_names_the_main_part_only():
     assert bp.older_data_clause([clause_sub(214, 2025), clause_sub(55, 2024)]) == "Older data (before 2025) left out: 214 figures."
     assert bp.older_data_clause([clause_sub(0, 0), clause_sub(3, 2024)]) == "Older data (before 2024) left out: 3 figures."
     assert bp.older_data_clause([clause_sub(0, 0)]) == ""
+
+
+# --- round-robin runs inside a match tier, never across tiers --------------------------------------------------
+
+def _tier_row(key, report, match, band, yr="2025"):
+    return {"figure_key": key, "report_slug": report, "report": report, "source": "Example Pub", "report_year": yr,
+            "data_period": yr, "band": band, "metric": "S&M % of Revenue", "denominator": "% of revenue", "unit": "%",
+            "statistic": "median", "value": "30", "value_num": 30.0, "match": match, "gaps": [], "basis_group": "revenue",
+            "segment": "", "cited_source": "", "series": report, "band_context": match != "exact"}
+
+
+def test_an_exact_band_row_is_not_displaced_by_a_far_band_report_taking_its_turn():
+    """Report A has six exact rows, report B two exact rows, report C only far-band rows. Sorted best first (exact
+    before adjacent_band). Cap 9: every exact row (8) fits, so only ONE of C's rows may go in, and none of the
+    exact rows may be dropped to give C or B a 'turn'."""
+    a = [_tier_row(10 + i, "rep-a", "exact", "$20M-$50M") for i in range(6)]
+    b = [_tier_row(20 + i, "rep-b", "exact", "$20M-$50M") for i in range(2)]
+    c = [_tier_row(30 + i, "rep-c", "adjacent_band", "$100M-$200M") for i in range(4)]
+    rows = a + b + c                                   # already best first: exact tier, then the far tier
+    picked = bp.pick_rows(rows, 9, "$20M-$50M")
+    ks = {r["figure_key"] for r in picked}
+    assert {r["figure_key"] for r in a + b} <= ks, "every exact-band row is kept"
+    assert len(ks & {30, 31, 32, 33}) == 1
+
+
+def test_far_band_report_takes_no_slot_while_a_second_exact_row_waits():
+    """Cap 4: report A has three exact rows, report B has one exact row, report C only a far-band row. The four
+    slots go to the four exact rows; C gets none, even though C's report has not had a turn."""
+    a = [_tier_row(10 + i, "rep-a", "exact", "$20M-$50M") for i in range(3)]
+    b = [_tier_row(20, "rep-b", "exact", "$20M-$50M")]
+    c = [_tier_row(30, "rep-c", "adjacent_band", "$100M-$200M")]
+    picked = bp.pick_rows(a + b + c, 4, "$20M-$50M")
+    assert {r["figure_key"] for r in picked} == {10, 11, 12, 20}
