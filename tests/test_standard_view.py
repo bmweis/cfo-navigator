@@ -230,7 +230,7 @@ def test_metric_and_resolved_by_for_each_way_a_name_resolves(lib):
 
 def test_the_stamped_fields_are_exactly_these_and_nothing_for_sv2(lib):
     sv = standard_view(fx.frow(), _idx(lib))
-    assert set(sv) == {"metric", "resolved_by", "variant", "form", "statistic", "cohort", "conflict"}
+    assert set(sv) == {"metric", "resolved_by", "variant", "form", "statistic", "statistic_note", "cohort", "conflict"}
 
 
 def test_variant_form_and_cohort_come_from_the_name_map_row_only(lib):
@@ -261,8 +261,8 @@ def test_a_real_stored_statistic_is_kept_and_a_contradiction_is_recorded(lib):
 
 @pytest.mark.parametrize("stored,expect", [
     ("median", "median"), ("P50", "median"), ("Mean", "mean"), ("average", "mean"),
-    ("top quartile", "top_quartile"), ("Top_Quartile", "top_quartile"), ("p75", "top_quartile"),
-    ("bottom quartile", "bottom_quartile"), ("p25", "bottom_quartile"), ("p90", "p90"), ("top decile", "p90"),
+    ("top quartile", "top_quartile"), ("Top_Quartile", "top_quartile"), ("p75", "p75"), ("q3", "top_quartile"),
+    ("bottom quartile", "bottom_quartile"), ("p25", "p25"), ("25th percentile", "p25"), ("p90", "p90"), ("top decile", "p90"),
     ("p10", "p10"), ("p95", "other_percentile"), ("80th percentile", "other_percentile"),
     ("target", "target"), ("Best-in-class target", "target"),
     ("other", "other"), ("min", "min"), ("", ""),
@@ -356,8 +356,8 @@ def test_audit_writes_standard_view_csv_and_a_summary_total(tmp_path):
     assert aud.main(["--db", path, "--out-dir", str(out)]) == 0
     with open(out / "standard_view.csv", newline="", encoding="utf-8") as f:
         rd = csv.DictReader(f)
-        assert rd.fieldnames == ["report_slug", "rows", "stamped", "residue", "conflicts", "pct_stamped",
-                                 "residue_samples", "conflict_samples"]
+        assert rd.fieldnames == ["report_slug", "rows", "stamped", "residue", "conflicts", "percentile_kept",
+                                 "pct_stamped", "residue_samples", "conflict_samples"]
         rows = {r["report_slug"]: r for r in rd}
     eb = rows["eb-2099"]
     assert (eb["rows"], eb["stamped"], eb["residue"], eb["conflicts"]) == ("6", "3", "3", "1")
@@ -368,3 +368,117 @@ def test_audit_writes_standard_view_csv_and_a_summary_total(tmp_path):
     summary = (out / "summary.txt").read_text()
     assert "Standard view: stamped 4, residue 3, conflicts 1 (of 7 rows)" in summary
     assert "editions, standard_view (.csv)" in summary
+
+
+# --- p75 / p25 context rule (Brian's decision, 2026-11-28) -------------------------------------------------
+
+def _ctx_idx(lib, rows_by_slug):
+    """A real index from a real database holding the given reports' rows (find_figures' own path)."""
+    for slug, rows in rows_by_slug.items():
+        fx.load_report(lib, slug, rows)
+    return fg._load_metric_index(lib)
+
+
+def _std(lib, slug, **kw):
+    return standard_view({**fx.frow(**kw), "report_slug": slug}, fg._load_metric_index(lib))
+
+
+def test_p75_with_no_p90_or_p10_reads_top_quartile_by_default(lib):
+    fx.load_report(lib, "r1", [fx.frow(statistic="p75"), fx.frow(statistic="median")])
+    sv = _std(lib, "r1", statistic="p75")
+    assert (sv["statistic"], sv["statistic_note"]) == ("top_quartile", "quartile_by_default")
+
+
+def test_p75_with_a_p90_in_the_same_report_and_metric_stays_p75(lib):
+    fx.load_report(lib, "r1", [fx.frow(statistic="p75"), fx.frow(statistic="p90")])
+    sv = _std(lib, "r1", statistic="p75")
+    assert (sv["statistic"], sv["statistic_note"]) == ("p75", "percentile_kept")
+
+
+def test_p25_mirrors_both_cases_using_p10(lib):
+    fx.load_report(lib, "plain", [fx.frow(statistic="p25")])
+    fx.load_report(lib, "wide", [fx.frow(statistic="p25"), fx.frow(statistic="p10")])
+    a = _std(lib, "plain", statistic="p25")
+    b = _std(lib, "wide", statistic="p25")
+    assert (a["statistic"], a["statistic_note"]) == ("bottom_quartile", "quartile_by_default")
+    assert (b["statistic"], b["statistic_note"]) == ("p25", "percentile_kept")
+
+
+def test_a_p90_in_a_different_metric_or_report_does_not_trigger_the_rule(lib):
+    fx.load_report(lib, "r1", [fx.frow(statistic="p75"), fx.frow(metric="Burn multiple", statistic="p90")])
+    fx.load_report(lib, "r2", [fx.frow(statistic="p90")])
+    sv = _std(lib, "r1", statistic="p75")
+    assert (sv["statistic"], sv["statistic_note"]) == ("top_quartile", "quartile_by_default")
+
+
+def test_explicit_quartile_words_and_other_statistics_carry_no_note(lib):
+    fx.load_report(lib, "r1", [fx.frow(statistic="top quartile"), fx.frow(statistic="p90")])
+    assert _std(lib, "r1", statistic="top quartile")["statistic_note"] == ""
+    assert _std(lib, "r1", statistic="median")["statistic_note"] == ""
+
+
+def test_a_name_map_override_is_unchanged_by_the_rule(lib):
+    fx.load_report(lib, "r1", [fx.frow(metric="best nrr", statistic="other"), fx.frow(metric="best nrr", statistic="p90")])
+    lib.apply_name_map([("best nrr", "Net revenue retention", "safe", "", "", "top_quartile", "")])
+    sv = _std(lib, "r1", metric="best nrr", statistic="other")
+    assert (sv["statistic"], sv["statistic_note"], sv["conflict"]) == ("top_quartile", "", "")
+
+
+def test_p75_and_p25_are_allowed_name_map_values(lib):
+    rows, errors = _parse(H7 + "best nrr\tNet revenue retention\tsafe\t\t\tp75\t\n")
+    assert not errors and rows[0]["extras"]["statistic_std"] == "p75"
+
+
+def test_audit_and_find_figures_give_the_same_answer_for_the_same_row(tmp_path):
+    path = str(tmp_path / "a.db")
+    lb = Library(path)
+    fx.seed_registry(lb)
+    fx.load_report(lb, "wide-2099", [fx.frow(statistic="p75"), fx.frow(statistic="p90"),
+                                     fx.frow(statistic="p25"), fx.frow(statistic="median")])
+    fx.load_report(lb, "plain-2099", [fx.frow(statistic="p75"), fx.frow(statistic="median")])
+    found = fg.find_figures(lb, "NRR", band="$10M-$20M", all_editions=True)["rows"]
+    lb.close()
+    by_key = {r["figure_key"]: (r["std"]["statistic"], r["std"]["statistic_note"]) for r in found}
+    import sqlite3
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    idx = fg._load_metric_index(aud._Shim(conn))
+    for r in conn.execute("SELECT * FROM benchmark_figures"):
+        d = dict(r)
+        sv = standard_view(d, idx)
+        if d["id"] in by_key:
+            assert (sv["statistic"], sv["statistic_note"]) == by_key[d["id"]], d["id"]
+    conn.close()
+    assert sum(1 for v in by_key.values() if v[1] == "percentile_kept") == 2
+    assert sum(1 for v in by_key.values() if v[1] == "quartile_by_default") == 1
+
+
+def test_audit_counts_percentile_kept_rows_per_report(tmp_path):
+    path = str(tmp_path / "a.db")
+    lb = Library(path)
+    fx.seed_registry(lb)
+    fx.load_report(lb, "wide-2099", [fx.frow(statistic="p75"), fx.frow(statistic="p90"), fx.frow(statistic="p25")])
+    fx.load_report(lb, "plain-2099", [fx.frow(statistic="p75")])
+    lb.close()
+    out = tmp_path / "out"
+    assert aud.main(["--db", path, "--out-dir", str(out)]) == 0
+    with open(out / "standard_view.csv", newline="", encoding="utf-8") as f:
+        rows = {r["report_slug"]: r for r in csv.DictReader(f)}
+    assert (rows["wide-2099"]["percentile_kept"], rows["plain-2099"]["percentile_kept"]) == ("2", "0")
+    assert "kept as percentiles (report also prints p90 or p10): 2 rows" in (out / "summary.txt").read_text()
+
+
+# --- item 7: a registry row with an empty card_url -------------------------------------------------------
+
+def test_a_registry_row_with_an_empty_card_url_loads_and_resolves_without_a_card(tmp_path):
+    lb = Library(str(tmp_path / "r.db"))
+    rows, errors = fg.parse_registry_tsv(
+        "canonical_metric\tcard_url\taliases\n"
+        "Revenue growth\t\tContains: revenue growth, revenue growth rate. sources: Example\n")
+    assert not errors and rows[0].card_url == "" and rows[0].aliases == ["revenue growth", "revenue growth rate"]
+    lb.seed_metric_registry(rows)
+    idx = fg._load_metric_index(lb)
+    assert idx["card"].get("Revenue growth", "") == ""
+    d = fg.metric_definition(lb, "revenue growth rate")
+    assert d["found"] and d["metrics"][0]["card_url"] == "" and d["metrics"][0]["card"] is None
+    lb.close()

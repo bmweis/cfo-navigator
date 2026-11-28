@@ -401,7 +401,7 @@ NAME_MAP_STATUSES = ("safe", "keep_separate", "decision")
 SV_COLUMNS = ("variant", "form", "statistic_std", "cohort")
 SV_ALLOWED = {
     "form": ("retention", "churn"),
-    "statistic_std": ("median", "mean", "top_quartile", "bottom_quartile", "p90", "p10",
+    "statistic_std": ("median", "mean", "top_quartile", "bottom_quartile", "p75", "p25", "p90", "p10",
                       "other_percentile", "target"),
     "cohort": ("all", "s1_ipo", "public", "performance_tier"),
 }
@@ -669,6 +669,14 @@ def _load_metric_index(lib) -> dict:
         keys = r.keys()
         map_rows[raw] = {"canonical": r["canonical_metric"], **{c: (r[c] or "") if c in keys else "" for c in SV_COLUMNS}}
     idx = {"canon": canon, "card": card, "claims": claims, "mapped": mapped, "map_rows": map_rows}
+    # (report_slug, lower-cased stored metric name) pairs where that report prints a p90 or p10 for the
+    # metric. standard_view reads p75/p25 as quartiles only outside these. One small read-only query.
+    from .standard_view import normalize_statistic
+    ctx: set[tuple[str, str]] = set()
+    for r in lib.conn.execute("SELECT DISTINCT report_slug, metric, statistic FROM benchmark_figures"):
+        if normalize_statistic(r["statistic"]) in ("p90", "p10"):
+            ctx.add((r["report_slug"] or "", " ".join(str(r["metric"] or "").split()).casefold()))
+    idx["pct_ctx"] = ctx
     idx["fam"] = family_index(idx)      # name_key -> canonicals; built once with the index (standard_view reads it)
     return idx
 

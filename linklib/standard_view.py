@@ -14,8 +14,12 @@ Rules:
   safe name-map row, then the name-key family rule `figures.classify_metric_name` uses). Empty when
   unresolved or ambiguous; `resolved_by` says how it went.
 - variant, form and cohort come only from the name-map row for that exact raw name.
-- `statistic` is the stored statistic normalized onto the standard list where that is unambiguous
-  (p75 reads top_quartile, p25 bottom_quartile). A name-map `statistic_std` fills it only when the
+- `statistic` is the stored statistic normalized onto the standard list where that is unambiguous.
+  A percentile-form p75 (or p25) reads top_quartile (bottom_quartile) ONLY when the same report prints
+  no p90 and no p10 for the same metric (idx["pct_ctx"], built once per lookup); otherwise it stays
+  p75 (p25), because with a 90th percentile in the report "top" could mean the 90th. `statistic_note`
+  says which reading applied (quartile_by_default, percentile_kept, or empty). Explicit quartile words
+  ("top quartile", "q3") are always top_quartile. A name-map `statistic_std` fills it only when the
   stored one is empty or uninformative (other, value, reported); when the stored one is a real
   statistic that disagrees, the stored one is kept and `conflict` says so. Never chosen quietly.
 - No value is converted: a form (retention or churn) is a label, never an inverted number.
@@ -32,10 +36,10 @@ _EXACT = {
     "median": "median", "p50": "median", "50th": "median", "50th percentile": "median",
     "mean": "mean", "average": "mean", "avg": "mean",
     "top quartile": "top_quartile", "top_quartile": "top_quartile", "upper quartile": "top_quartile",
-    "q3": "top_quartile", "75th": "top_quartile", "75th percentile": "top_quartile",
+    "q3": "top_quartile", "75th": "p75", "75th percentile": "p75",
     "bottom quartile": "bottom_quartile", "bottom_quartile": "bottom_quartile",
     "lower quartile": "bottom_quartile", "q1": "bottom_quartile",
-    "25th": "bottom_quartile", "25th percentile": "bottom_quartile",
+    "25th": "p25", "25th percentile": "p25",
     "top decile": "p90", "bottom decile": "p10",
 }
 
@@ -61,9 +65,9 @@ def normalize_statistic(stored) -> str:
         if n == 50:
             return "median"
         if n == 75:
-            return "top_quartile"
+            return "p75"
         if n == 25:
-            return "bottom_quartile"
+            return "p25"
         if n == 90:
             return "p90"
         if n == 10:
@@ -73,7 +77,7 @@ def normalize_statistic(stored) -> str:
 
 
 def standard_view(row: dict, idx: dict) -> dict:
-    """{metric, resolved_by, variant, form, statistic, cohort, conflict} for one stored figure row."""
+    """{metric, resolved_by, variant, form, statistic, statistic_note, cohort, conflict} for one stored figure row."""
     # Local import: figures stamps rows through this module, and this module reads figures' resolver.
     from . import figures as fg
 
@@ -87,6 +91,13 @@ def standard_view(row: dict, idx: dict) -> dict:
     variant, form, cohort = over.get("variant", ""), over.get("form", ""), over.get("cohort", "")
 
     stored_stat = normalize_statistic(row.get("statistic"))
+    note = ""
+    if stored_stat in ("p75", "p25"):
+        if (row.get("report_slug") or "", _lc(stored_name)) in (idx.get("pct_ctx") or ()):
+            note = "percentile_kept"
+        else:
+            stored_stat = "top_quartile" if stored_stat == "p75" else "bottom_quartile"
+            note = "quartile_by_default"
     std_stat = over.get("statistic_std", "")
     statistic, conflict = stored_stat, ""
     if std_stat:
@@ -96,4 +107,4 @@ def standard_view(row: dict, idx: dict) -> dict:
             conflict = (f"name map says {std_stat}, row prints {' '.join(str(row.get('statistic') or '').split())}; "
                         "the printed statistic is kept")
     return {"metric": metric, "resolved_by": via, "variant": variant, "form": form,
-            "statistic": statistic, "cohort": cohort, "conflict": conflict}
+            "statistic": statistic, "statistic_note": note, "cohort": cohort, "conflict": conflict}
