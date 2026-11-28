@@ -101,8 +101,8 @@ def test_load_is_idempotent(lib):
 def test_reader_ignores_keep_separate_and_decision(lib):
     lib.apply_name_map([("keepme", "", "keep_separate"), ("decideme", "", "decision")])
     # Rows written by hand with a canonical but a non-safe status must not map either.
-    lib.conn.execute("INSERT INTO metric_name_map VALUES ('sneaky', 'Burn multiple', 'decision')")
-    lib.conn.execute("INSERT INTO metric_name_map VALUES ('legacy', 'Burn multiple', '')")
+    lib.conn.execute("INSERT INTO metric_name_map (raw_name_lower, canonical_metric, status) VALUES ('sneaky', 'Burn multiple', 'decision')")
+    lib.conn.execute("INSERT INTO metric_name_map (raw_name_lower, canonical_metric, status) VALUES ('legacy', 'Burn multiple', '')")
     lib.conn.commit()
     for raw in ("keepme", "decideme", "sneaky", "legacy"):
         assert fg.resolve_metric(lib, raw) == []
@@ -183,7 +183,7 @@ def _client(appmod, login=True):
 def _rows(appmod):
     lb = appmod._lib()
     try:
-        return [tuple(r) for r in lb.conn.execute("SELECT * FROM metric_name_map ORDER BY raw_name_lower")]
+        return [tuple(r) for r in lb.conn.execute("SELECT raw_name_lower, canonical_metric, status FROM metric_name_map ORDER BY raw_name_lower")]
     finally:
         lb.close()
 

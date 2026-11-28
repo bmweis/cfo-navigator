@@ -2014,6 +2014,13 @@ class Library:
             "ALTER TABLE benchmark_reports ADD COLUMN report_override TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE benchmark_reports ADD COLUMN year_override TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE benchmark_reports ADD COLUMN series_override TEXT NOT NULL DEFAULT ''",
+            # Standard view (SV1, 2026-11): optional per-name overrides read by linklib.standard_view.
+            # Nullable; allowed values live in linklib.figures.SV_ALLOWED. A raw name's override never
+            # rewrites a stored figure; it only fills the row's read-time standard view.
+            "ALTER TABLE metric_name_map ADD COLUMN variant TEXT",
+            "ALTER TABLE metric_name_map ADD COLUMN form TEXT",
+            "ALTER TABLE metric_name_map ADD COLUMN statistic_std TEXT",
+            "ALTER TABLE metric_name_map ADD COLUMN cohort TEXT",
             "ALTER TABLE metric_registry ADD COLUMN shift_threshold REAL",
             "ALTER TABLE metric_registry ADD COLUMN shift_kind TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE tools ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
@@ -8510,17 +8517,29 @@ class Library:
         return out
 
     def apply_name_map(self, writes) -> int:
-        """Upsert planned metric_name_map rows (figures.plan_name_map's `writes`:
-        (raw_name_lower, canonical_metric, status)), one transaction. Idempotent.
-        Returns the number of rows written."""
+        """Upsert planned metric_name_map rows (figures.plan_name_map's `writes`), one transaction.
+        Idempotent. A write is (raw_name_lower, canonical_metric, status), which leaves the four
+        standard-view columns alone, or that plus (variant, form, statistic_std, cohort), which
+        sets all four (empty text is stored as NULL). Returns the number of rows written."""
         if self.conn.in_transaction:
             self.conn.commit()
         try:
-            for raw_lower, canonical, status in writes:
-                self.conn.execute(
-                    "INSERT INTO metric_name_map (raw_name_lower, canonical_metric, status) VALUES (?, ?, ?) "
-                    "ON CONFLICT(raw_name_lower) DO UPDATE SET canonical_metric = excluded.canonical_metric, "
-                    "status = excluded.status", (raw_lower, canonical or None, status))
+            for w in writes:
+                raw_lower, canonical, status = w[0], w[1], w[2]
+                if len(w) == 3:
+                    self.conn.execute(
+                        "INSERT INTO metric_name_map (raw_name_lower, canonical_metric, status) VALUES (?, ?, ?) "
+                        "ON CONFLICT(raw_name_lower) DO UPDATE SET canonical_metric = excluded.canonical_metric, "
+                        "status = excluded.status", (raw_lower, canonical or None, status))
+                else:
+                    variant, form, stat, cohort = (x or None for x in w[3:7])
+                    self.conn.execute(
+                        "INSERT INTO metric_name_map (raw_name_lower, canonical_metric, status, variant, form, "
+                        "statistic_std, cohort) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(raw_name_lower) DO UPDATE SET canonical_metric = excluded.canonical_metric, "
+                        "status = excluded.status, variant = excluded.variant, form = excluded.form, "
+                        "statistic_std = excluded.statistic_std, cohort = excluded.cohort",
+                        (raw_lower, canonical or None, status, variant, form, stat, cohort))
             self.conn.commit()
         except Exception:
             self.conn.rollback()

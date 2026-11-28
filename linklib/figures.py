@@ -23,6 +23,7 @@ import io
 import json
 import os
 import re
+import sqlite3
 import zipfile
 from dataclasses import dataclass, field
 
@@ -395,12 +396,27 @@ def parse_registry_tsv(text: str) -> tuple[list[RegistryRow], list[str]]:
 
 NAME_MAP_STATUSES = ("safe", "keep_separate", "decision")
 
+# Standard view (SV1): the four optional name-map columns and their allowed values. One constant, so SV2
+# can extend a list in one place. `variant` is free text (at most SV_VARIANT_MAX characters, displayed later).
+SV_COLUMNS = ("variant", "form", "statistic_std", "cohort")
+SV_ALLOWED = {
+    "form": ("retention", "churn"),
+    "statistic_std": ("median", "mean", "top_quartile", "bottom_quartile", "p75", "p25", "p90", "p10",
+                      "other_percentile", "target"),
+    "cohort": ("all", "s1_ipo", "public", "performance_tier"),
+}
+SV_VARIANT_MAX = 40
+NAME_MAP_HEADER = ("raw_name", "canonical_metric", "status")
+
 
 def parse_name_map_tsv(text: str) -> tuple[list[dict], list[str]]:
     """(rows, errors) for a metric-name map file: header `raw_name<TAB>canonical_metric<TAB>status`
-    (required), one row per line. Format errors only; the checks that need the database are in
-    plan_name_map. The same raw name twice with different values is an error; an identical
-    repeat is dropped."""
+    (required) then, optionally and in any order, `variant`, `form`, `statistic_std`, `cohort`. One
+    row per line. Format errors only; the checks that need the database are in plan_name_map. The
+    same raw name twice with different values is an error; an identical repeat is dropped. Each row
+    has an `extras` dict holding exactly the optional columns the header names (so a three-column
+    file leaves the stored extras alone). A value off its allowed list, a variant over 40 characters,
+    or any extra set on a keep_separate or decision row is refused."""
     rows: list[dict] = []
     errors: list[str] = []
     seen: dict[str, tuple] = {}
@@ -408,14 +424,21 @@ def parse_name_map_tsv(text: str) -> tuple[list[dict], list[str]]:
     if not lines:
         return [], ["The file has no rows."]
     head = [c.strip().lower() for c in lines[0][1].split("\t")]
-    if head != ["raw_name", "canonical_metric", "status"]:
-        return [], ["The first line must be the header: raw_name, canonical_metric, status (tab-separated)."]
+    extra_cols = head[3:]
+    if (head[:3] != list(NAME_MAP_HEADER) or any(c not in SV_COLUMNS for c in extra_cols)
+            or len(set(extra_cols)) != len(extra_cols)):
+        return [], ["The first line must be the header: raw_name, canonical_metric, status (tab-separated), "
+                    "then optionally variant, form, statistic_std, cohort."]
+    expected = len(head)
     for i, ln in lines[1:]:
         cells = ln.split("\t")
-        if len(cells) != 3:
-            errors.append(f"Line {i} has {len(cells)} fields, not 3.")
+        if extra_cols and len(cells) < expected:
+            cells += [""] * (expected - len(cells))     # an editor may strip trailing empty cells
+        if len(cells) != expected:
+            errors.append(f"Line {i} has {len(cells)} fields, not {expected}.")
             continue
-        raw, canon, status = (c.strip() for c in cells)
+        raw, canon, status = (c.strip() for c in cells[:3])
+        extras = {c: " ".join(v.split()) for c, v in zip(extra_cols, cells[3:])}
         key = _lc(raw)
         if not key:
             errors.append(f"Line {i} has no raw_name.")
@@ -430,13 +453,32 @@ def parse_name_map_tsv(text: str) -> tuple[list[dict], list[str]]:
         if status != "safe" and canon:
             errors.append(f"Line {i}: {raw!r} is {status}, so canonical_metric must be empty.")
             continue
-        val = (canon.casefold(), status)
+        bad = False
+        for col, v in extras.items():
+            if col != "variant":
+                v = extras[col] = v.lower()
+            if not v:
+                continue
+            if status != "safe":
+                errors.append(f"Line {i}: {raw!r} is {status}, so {col} must be empty.")
+                bad = True
+            elif col == "variant":
+                if len(v) > SV_VARIANT_MAX:
+                    errors.append(f"Line {i}: variant for {raw!r} is {len(v)} characters; the limit is {SV_VARIANT_MAX}.")
+                    bad = True
+            elif v not in SV_ALLOWED[col]:
+                errors.append(f"Line {i}: {col} {v!r} is not one of {', '.join(SV_ALLOWED[col])}.")
+                bad = True
+        if bad:
+            continue
+        val = (canon.casefold(), status, tuple(sorted(extras.items())))
         if key in seen:
             if seen[key] != val:
                 errors.append(f"Line {i}: {raw!r} appears twice with different values.")
             continue
         seen[key] = val
-        rows.append({"line": i, "raw": raw, "raw_lower": key, "canonical": canon, "status": status})
+        rows.append({"line": i, "raw": raw, "raw_lower": key, "canonical": canon, "status": status,
+                     "extras": extras})
     if not rows and not errors:
         errors.append("The file has no rows.")
     return rows, errors
@@ -444,15 +486,21 @@ def parse_name_map_tsv(text: str) -> tuple[list[dict], list[str]]:
 
 def plan_name_map(lib, rows: list[dict]) -> dict:
     """What loading these rows would do, with every refusal reason. Reads only.
-    {"errors": [...], "writes": [(raw_lower, canonical, status)], "new": n, "changed": n,
-    "unchanged": n}. A safe row must name a registry canonical (matched ignoring case, stored
-    in the registry's spelling); a short alias is refused, and so is a raw name that is already
-    an alias or canonical of a different metric. Any error means nothing should be written."""
+    {"errors": [...], "writes": [...], "new": n, "changed": n, "unchanged": n}. A safe row must
+    name a registry canonical (matched ignoring case, stored in the registry's spelling); a short
+    alias is refused, and so is a raw name that is already an alias or canonical of a different
+    metric. Any error means nothing should be written. A write is (raw_lower, canonical, status)
+    for a row from a file with no standard-view columns (those columns stay as stored), else
+    (raw_lower, canonical, status, variant, form, statistic_std, cohort); a row whose only
+    difference is a standard-view column counts as changed."""
     idx = _load_metric_index(lib)
-    existing = {r["raw_name_lower"]: (r["canonical_metric"] or "", r["status"])
-                for r in lib.conn.execute("SELECT raw_name_lower, canonical_metric, status FROM metric_name_map")}
+    existing = {}
+    for r in lib.conn.execute("SELECT * FROM metric_name_map"):
+        d = dict(r)
+        existing[d["raw_name_lower"]] = (d["canonical_metric"] or "", d["status"],
+                                         *(d.get(c) or "" for c in SV_COLUMNS))
     errors: list[str] = []
-    writes: list[tuple[str, str, str]] = []
+    writes: list[tuple] = []
     counts = {"new": 0, "changed": 0, "unchanged": 0}
     for r in rows:
         canonical = ""
@@ -474,8 +522,12 @@ def plan_name_map(lib, rows: list[dict]) -> dict:
                 errors.append(f"Line {r['line']}: {r['raw']!r} is already an alias of "
                               + ", ".join(repr(o) for o in sorted(owners)) + f", not {canonical!r}; the alias is not overwritten.")
                 continue
-        new = (canonical, r["status"])
         old = existing.get(r["raw_lower"])
+        extras = r.get("extras") or {}
+        # Columns the file does not carry keep what is stored; columns it carries replace it.
+        merged = tuple(extras[c] if c in extras else (old[2 + k] if old else "")
+                       for k, c in enumerate(SV_COLUMNS))
+        new = (canonical, r["status"], *merged)
         if old is None:
             counts["new"] += 1
         elif old == new:
@@ -483,8 +535,23 @@ def plan_name_map(lib, rows: list[dict]) -> dict:
             continue
         else:
             counts["changed"] += 1
-        writes.append((r["raw_lower"], canonical, r["status"]))
+        if extras:
+            writes.append((r["raw_lower"], canonical, r["status"], *merged))
+        else:
+            writes.append((r["raw_lower"], canonical, r["status"]))
     return {"errors": errors, "writes": writes, **counts}
+
+
+def export_name_map_tsv(lib) -> str:
+    """Every metric_name_map row, all columns, in the upload format, so the file loads back unchanged
+    (0 new, 0 changed). Always carries the four standard-view columns."""
+    cols = ["raw_name_lower", "canonical_metric", "status", *SV_COLUMNS]
+    clean = lambda v: " ".join(str(v or "").split())
+    out = ["\t".join(NAME_MAP_HEADER + SV_COLUMNS)]
+    for r in lib.conn.execute("SELECT * FROM metric_name_map ORDER BY raw_name_lower"):
+        d = dict(r)
+        out.append("\t".join(clean(d.get(c)) for c in cols))
+    return "\n".join(out) + "\n"
 
 
 # =============================================================================
@@ -589,11 +656,29 @@ def _load_metric_index(lib) -> dict:
         else:
             claims.setdefault(a, set()).add(r["canonical_metric"])
     mapped: dict[str, set[str]] = {}
-    for r in lib.conn.execute(
-            "SELECT raw_name_lower, canonical_metric FROM metric_name_map "
-            "WHERE status = 'safe' AND canonical_metric IS NOT NULL AND canonical_metric <> ''"):
-        mapped.setdefault(r["canonical_metric"], set()).add(r["raw_name_lower"].casefold())
-    return {"canon": canon, "card": card, "claims": claims, "mapped": mapped}
+    map_rows: dict[str, dict] = {}      # raw name (lowercase) -> its standard-view overrides (safe rows only)
+    where = "WHERE status = 'safe' AND canonical_metric IS NOT NULL AND canonical_metric <> ''"
+    try:
+        found = list(lib.conn.execute(
+            f"SELECT raw_name_lower, canonical_metric, {', '.join(SV_COLUMNS)} FROM metric_name_map {where}"))
+    except sqlite3.OperationalError:    # a read-only database not yet migrated to SV1: no overrides
+        found = list(lib.conn.execute(f"SELECT raw_name_lower, canonical_metric FROM metric_name_map {where}"))
+    for r in found:
+        raw = r["raw_name_lower"].casefold()
+        mapped.setdefault(r["canonical_metric"], set()).add(raw)
+        keys = r.keys()
+        map_rows[raw] = {"canonical": r["canonical_metric"], **{c: (r[c] or "") if c in keys else "" for c in SV_COLUMNS}}
+    idx = {"canon": canon, "card": card, "claims": claims, "mapped": mapped, "map_rows": map_rows}
+    # (report_slug, lower-cased stored metric name) pairs where that report prints a p90 or p10 for the
+    # metric. standard_view reads p75/p25 as quartiles only outside these. One small read-only query.
+    from .standard_view import normalize_statistic
+    ctx: set[tuple[str, str]] = set()
+    for r in lib.conn.execute("SELECT DISTINCT report_slug, metric, statistic FROM benchmark_figures"):
+        if normalize_statistic(r["statistic"]) in ("p90", "p10"):
+            ctx.add((r["report_slug"] or "", " ".join(str(r["metric"] or "").split()).casefold()))
+    idx["pct_ctx"] = ctx
+    idx["fam"] = family_index(idx)      # name_key -> canonicals; built once with the index (standard_view reads it)
+    return idx
 
 
 def resolve_metric(lib, text: str, _index: dict | None = None) -> list[dict]:
@@ -1977,9 +2062,9 @@ def _fts_metric_rows(lib, text: str, cap: int = 400) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _row_out(r: dict, landings: dict, canonical: str) -> dict:
+def _row_out(r: dict, landings: dict, canonical: str, idx: dict | None = None) -> dict:
     land = landings.get(r["report_slug"], {"url": "", "how": "none"})
-    return {
+    out = {
         "series_override": r.get("series_override", ""),  # internal: read by _family, removed before find_figures returns
         "figure_key": r["id"], "report_slug": r["report_slug"], "source": r["source"], "report": r["report"],
         "report_year": r["report_year"], "data_period": r["data_period"],
@@ -1995,6 +2080,12 @@ def _row_out(r: dict, landings: dict, canonical: str) -> dict:
         # whose identical cell was folded into this row.
         "cited_source": "", "series": r["source"], "also_printed_in": [],
     }
+    if idx is not None:
+        # Standard view (SV1): a read-time stamp, additive. Nothing reads it yet; the stored row's own
+        # fields above are never changed by it.
+        from .standard_view import standard_view
+        out["std"] = standard_view(r, idx)
+    return out
 
 
 def _flag(row: dict, match: str, gap: str) -> None:
@@ -2412,7 +2503,7 @@ def find_figures(lib, metric: str, band=None, segment=None, statistic=None, year
         if illustrative_left_out:
             notes.append(f"{illustrative_left_out} illustrative rows left out (a worked example company, not survey data).")
 
-    rows = [_row_out(r, landings, canon) for r, canon in cand]
+    rows = [_row_out(r, landings, canon, idx) for r, canon in cand]
     rows, dup_removed, dup_conflicts = dedupe_cells(rows)
     if dup_removed:
         notes.append(f"{dup_removed} duplicate row(s) inside a report (the same figure stored twice) were collapsed to one.")

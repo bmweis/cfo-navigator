@@ -25,7 +25,8 @@ Files written: metrics.csv (raw, raw_lower, name_key, resolved_by, canonical, ro
 denominator_top, three samples), canonical.csv, denominators.csv, statistics.csv,
 read_from.csv, units.csv, band_basis.csv, bands.csv, duplicates.csv, conflicts.csv (one row
 per conflicting cell: the cell key, then the figure ids, values, pages and read_from of the rows
-that disagree), editions.csv, summary.txt (the same text is printed to stdout).
+that disagree), editions.csv, standard_view.csv (per report: rows, stamped, residue, conflicts, percentile_kept, pct_stamped, up to 5 residue
+and 3 conflict samples), summary.txt (the same text is printed to stdout).
 """
 from __future__ import annotations
 
@@ -40,6 +41,7 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from linklib import figures as fg  # noqa: E402
+from linklib.standard_view import standard_view  # noqa: E402
 
 TABLES = ("benchmark_reports", "benchmark_figures", "metric_registry", "metric_aliases", "metric_name_map")
 TOP_DENOMINATOR_METRICS = 40
@@ -221,6 +223,39 @@ def build(conn: sqlite3.Connection, out_dir: str) -> str:
     _write_csv(out_dir, "editions.csv",
                ["report_slug", "source", "report", "report_year", "family", "rows", "loaded_at"], ed_out)
 
+    # --- standard_view.csv: per report, how many rows the standard view stamps with a registry metric
+    # (std.metric non-empty), how many are residue (no single metric: none or ambiguous), and how many
+    # carry a name-map statistic conflict. The same function find_figures stamps rows with.
+    sv_out = []
+    sv_tot = {"rows": 0, "stamped": 0, "residue": 0, "conflicts": 0, "kept": 0}
+    for slug in sorted(by_report):
+        rs = by_report[slug]
+        res_names: Counter = Counter()
+        conf_rows: list[tuple[str, str]] = []
+        stamped = conflicts = kept = 0
+        for r in rs:
+            sv = standard_view(r, idx)
+            if sv["statistic_note"] == "percentile_kept":
+                kept += 1
+            if sv["metric"]:
+                stamped += 1
+            else:
+                res_names[r["metric"]] += 1
+            if sv["conflict"]:
+                conflicts += 1
+                conf_rows.append((r["metric"], sv["conflict"]))
+        residue = len(rs) - stamped
+        top_res = [f"{m} ({n})" for m, n in sorted(res_names.items(), key=lambda kv: (-kv[1], kv[0]))[:5]]
+        top_conf = [f"{m} | {c}" for m, c in conf_rows[:3]]
+        sv_out.append((slug, len(rs), stamped, residue, conflicts, kept,
+                       f"{100.0 * stamped / len(rs):.1f}" if rs else "0.0", ";".join(top_res), ";".join(top_conf)))
+        for k, v in (("rows", len(rs)), ("stamped", stamped), ("residue", residue), ("conflicts", conflicts), ("kept", kept)):
+            sv_tot[k] += v
+    sv_out.sort(key=lambda t: (-t[3], t[0]))
+    _write_csv(out_dir, "standard_view.csv",
+               ["report_slug", "rows", "stamped", "residue", "conflicts", "percentile_kept", "pct_stamped",
+                "residue_samples", "conflict_samples"], sv_out)
+
     # --- summary.txt ------------------------------------------------------------------------
     L = ["Benchmark alignment audit (read-only)"]
     L.append("Table rows: " + ", ".join(
@@ -243,13 +278,16 @@ def build(conn: sqlite3.Connection, out_dir: str) -> str:
     L.append(f"Bands: {len(band_out)}; unplaced: {len(unplaced)} ({sum(t[1] for t in unplaced)} rows)")
     L.append(f"Reports: {len(ed_out)}; duplicate rows: {sum(t[2] for t in dup_out)}; "
              f"conflicting cells: {sum(t[3] for t in dup_out)}")
+    L.append(f"Standard view: stamped {sv_tot['stamped']}, residue {sv_tot['residue']}, conflicts {sv_tot['conflicts']} "
+             f"(of {sv_tot['rows']} rows)")
+    L.append(f"Standard view p75/p25 kept as percentiles (report also prints p90 or p10): {sv_tot['kept']} rows")
     L.append("Ten largest unresolved metric strings (rows):")
     for t in unresolved[:10]:
         L.append(f"  {t[5]:>6}  {t[0]}")
     if not unresolved:
         L.append("  none")
     L.append("Files: metrics, canonical, denominators, statistics, read_from, units, band_basis, bands, "
-             "duplicates, conflicts, editions (.csv)")
+             "duplicates, conflicts, editions, standard_view (.csv)")
     L.append(f"Output folder: {os.path.abspath(out_dir)}")
     L.append("Reminder: /tmp output is lost at the next deploy; copy the files off the container before then.")
     text = "\n".join(L) + "\n"
