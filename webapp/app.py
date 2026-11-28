@@ -27384,7 +27384,9 @@ _SCRIPT_REGISTRY = [
      "metrics with zero rows, denominators, statistics, units, read_from values, bands the parser "
      "cannot place, duplicate and conflicting cells per report, and editions per report family. "
      "denominators.csv also shows the group each raw denominator pairs under and its tier. "
-     "Writes eleven CSV files (conflicts.csv lists each conflicting cell with its figure ids, values and pages) and summary.txt to a new or empty output folder. Uses the app's own "
+     "Writes twelve CSV files (conflicts.csv lists each conflicting cell with its figure ids, values and pages; "
+     "standard_view.csv counts, per report, the rows the standard view stamps with a registry metric, the "
+     "residue and the name-map statistic conflicts, with samples) and summary.txt to a new or empty output folder. Uses the app's own "
      "functions; leaves worked-example rows out of the counts and reports how many there are. "
      "Opens the database with mode=ro (never the Library class); reads only benchmark_ and metric_ "
      "tables.",
@@ -39217,10 +39219,11 @@ applySortFilter('figures');
   <input type="file" id="name-map-tsv" name="tsv" accept=".tsv,.txt,text/tab-separated-values,text/plain" style="max-width:100%;margin:0 0 14px;">
   <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
     <button type="submit" class="btn" style="font-size:14px;padding:9px 20px;">Preview</button>
+    <a class="btn btn-ghost" href="/admin/reader/figures/name-map-export" style="font-size:14px;padding:9px 20px;">Export map as TSV</a>
     <span style="font-size:12.5px;color:var(--muted);">Preview writes nothing.</span>
   </div>
 </form>
-<p style="font-size:13px;color:var(--muted);margin:0 0 8px;max-width:900px;">Header line required: <code>raw_name</code>, <code>canonical_metric</code>, <code>status</code>, tab-separated. Status is <code>safe</code> (needs a canonical metric from the registry), <code>keep_separate</code> or <code>decision</code> (canonical left empty). Only <code>safe</code> rows change how a name resolves; the other two are kept for review. A change takes effect on the next lookup. The map lives in the database, so a restore to an older backup drops newer rows; load the approved file again.</p>
+<p style="font-size:13px;color:var(--muted);margin:0 0 8px;max-width:900px;">Header line required: <code>raw_name</code>, <code>canonical_metric</code>, <code>status</code>, tab-separated. Status is <code>safe</code> (needs a canonical metric from the registry), <code>keep_separate</code> or <code>decision</code> (canonical left empty). Only <code>safe</code> rows change how a name resolves; the other two are kept for review. A change takes effect on the next lookup. Optional columns after those three, in any order: <code>variant</code> (short text, 40 characters at most), <code>form</code> (<code>retention</code> or <code>churn</code>), <code>statistic_std</code> (<code>median</code>, <code>mean</code>, <code>top_quartile</code>, <code>bottom_quartile</code>, <code>p90</code>, <code>p10</code>, <code>other_percentile</code>, <code>target</code>) and <code>cohort</code> (<code>all</code>, <code>s1_ipo</code>, <code>public</code>, <code>performance_tier</code>); only on <code>safe</code> rows. A file without them leaves the stored values alone. The map lives in the database, so a restore to an older backup drops newer rows. Export before restoring an older backup; load it again after.</p>
 
 <h2 style="font-size:16px;margin:32px 0 10px;">Zip format</h2>
 <ul style="max-width:900px;font-size:13.5px;color:var(--ink-soft);line-height:1.65;padding-left:20px;margin:0 0 14px;">
@@ -39839,6 +39842,24 @@ def _name_map_preview_page(plan: dict, rows: list[dict], tsv_text: str) -> HTMLR
 </div>"""
     return HTMLResponse(_page("Preview metric name map—Admin", "Admin", body, authed=True),
                         status_code=400 if plan["errors"] else 200)
+
+
+@app.get("/admin/reader/figures/name-map-export")
+def admin_figures_name_map_export(request: Request):
+    """Downloads every metric_name_map row, all columns, in the upload format (loads back unchanged).
+    Admin session only: the save token gets 401, a signed-out visitor goes to login."""
+    gate = _digest_gate(request, post=False)
+    if gate is not None:
+        return gate
+    from linklib import figures as _fg
+    lib = _lib()
+    try:
+        text = _fg.export_name_map_tsv(lib)
+    finally:
+        lib.close()
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return Response(text, media_type="text/tab-separated-values; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="metric-name-map-{day}.tsv"'})
 
 
 @app.post("/admin/reader/figures/name-map-preview", response_class=HTMLResponse)

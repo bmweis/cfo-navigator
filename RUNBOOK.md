@@ -176,7 +176,9 @@ python -m scripts.restore_from_drive --db /data/library.db --yes-replace-live
       (`metric_name_map`) lives inside `library.db`, so a restore to an older
       snapshot drops mappings loaded since. Keep the approved TSV files outside
       the database and upload them again there (preview, then load; a reload is
-      idempotent and takes effect on the next lookup).
+      idempotent and takes effect on the next lookup). **Export the map before
+      you restore an older snapshot** (`Export map as TSV` on the same page, all
+      columns, loads back unchanged) and load that file again after.
 - [ ] If you restored an older snapshot: diff against the step-1 download
       for member saves / contacts / ask history created since the snapshot,
       and re-add anything worth keeping (article re-saves are idempotent —
